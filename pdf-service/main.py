@@ -5,6 +5,10 @@ import os
 
 app = Flask(__name__)
 
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({ 'status': 'ok', 'service': 'pdf-parser' })
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({ 'status': 'ok' })
@@ -16,6 +20,8 @@ def parse_pdf():
     try:
         pdf_buffer = io.BytesIO(request.data)
         text = extract_text(pdf_buffer)
+        if not text or len(text.strip()) < 10:
+            return jsonify({ 'error': 'Could not extract text from PDF' }), 422
         return jsonify({ 'text': text })
     except Exception as e:
         return jsonify({ 'error': str(e) }), 500
