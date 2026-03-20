@@ -7,24 +7,14 @@ const MONTHS_LIST = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December",
 ];
-
 const DAYS_LIST = Array.from({ length: 31 }, (_, i) => String(i + 1));
-
 const YEARS_LIST = ["2024", "2025", "2026", "2027"];
-
 const OVERTIME_OPTIONS = Array.from({ length: 21 }, (_, i) =>
   (i * 0.5).toFixed(i === 0 ? 0 : 1)
 );
-
 const BADGE_COLORS = [
-  "bg-blue-50",
-  "bg-emerald-50",
-  "bg-amber-50",
-  "bg-rose-50",
-  "bg-violet-50",
-  "bg-cyan-50",
-  "bg-orange-50",
-  "bg-pink-50",
+  "bg-blue-50","bg-emerald-50","bg-amber-50","bg-rose-50",
+  "bg-violet-50","bg-cyan-50","bg-orange-50","bg-pink-50",
 ];
 
 interface BookingRow {
@@ -54,18 +44,42 @@ interface BookingRow {
   year: string | null;
 }
 
+interface PreviewBooking {
+  travelDate: string;
+  day: string;
+  month: string;
+  year: string;
+  invoiceNo: string;
+  clientDetails: string;
+  details: string;
+  fromLocation: string;
+  toLocation: string;
+  numberOfVehicles: number;
+  amount: number;
+}
+
 export default function DailyJobsPage() {
   const today = new Date();
   const [day, setDay] = useState(String(today.getDate()));
   const [month, setMonth] = useState(MONTHS_LIST[today.getMonth()]);
   const [year, setYear] = useState(String(today.getFullYear()));
+
   const [rows, setRows] = useState<BookingRow[]>([]);
   const [draftRow, setDraftRow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [creatingDraft, setCreatingDraft] = useState(false);
   const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [uploading, setUploading] = useState(false);
+
+  // Upload zone
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [previewRows, setPreviewRows] = useState<PreviewBooking[] | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchRows = useCallback(async () => {
@@ -113,7 +127,6 @@ export default function DailyJobsPage() {
     setRows((prev) => prev.filter((r) => r.id !== id));
   }
 
-  // Materialise the phantom draft row: POST to DB, then open the clicked field for edit
   async function materializeDraft(field: string) {
     if (creatingDraft) return;
     setCreatingDraft(true);
@@ -134,43 +147,89 @@ export default function DailyJobsPage() {
     }
   }
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
-      if (res.ok) {
-        const { count } = await res.json();
-        // Find the earliest date among the just-inserted rows
-        const navRes = await fetch(`/api/bookings?recentCount=${count}`);
-        if (navRes.ok) {
-          const recent: BookingRow[] = await navRes.json();
-          if (recent.length > 0) {
-            const first = recent
-              .filter((r) => r.day && r.month && r.year)
-              .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""))[0];
-            if (first?.day && first?.month && first?.year) {
-              setDay(first.day);
-              setMonth(first.month);
-              setYear(first.year);
-              // useEffect will re-fetch with new day/month/year
-            }
-          }
-        }
-      } else {
-        const err = await res.json().catch(() => ({ error: "Upload failed" }));
-        alert(`Upload failed: ${err.error ?? "Unknown error"}`);
-      }
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+  async function handleAddRow() {
+    const res = await fetch("/api/bookings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ day, month, year }),
+    });
+    if (res.ok) {
+      const newRow: BookingRow = await res.json();
+      setRows((prev) => [...prev, newRow]);
+      setDraftRow(false);
     }
   }
 
-  // Summary bar calculations
+  async function handleFileSelected(file: File) {
+    setUploadFile(file);
+    setPreviewRows(null);
+    setUploadError(null);
+    setParsing(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/preview", { method: "POST", body: formData });
+      if (res.ok) {
+        const { bookings } = await res.json();
+        setPreviewRows(bookings);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setUploadError(err.error ?? "Failed to parse PDF");
+      }
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  async function handleConfirmUpload() {
+    if (!uploadFile) return;
+    setConfirming(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", uploadFile);
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (res.ok) {
+        const { count } = await res.json();
+        setUploadOpen(false);
+        setUploadFile(null);
+        setPreviewRows(null);
+        setUploadError(null);
+        const navRes = await fetch(`/api/bookings?recentCount=${count}`);
+        if (navRes.ok) {
+          const recent: BookingRow[] = await navRes.json();
+          const first = recent
+            .filter((r) => r.day && r.month && r.year)
+            .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""))[0];
+          if (first?.day && first?.month && first?.year) {
+            setDay(first.day);
+            setMonth(first.month);
+            setYear(first.year);
+          }
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setUploadError(err.error ?? "Upload failed");
+      }
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  function handleCancelUpload() {
+    setUploadFile(null);
+    setPreviewRows(null);
+    setUploadError(null);
+    setUploadOpen(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function openUploadZone() {
+    setUploadOpen(true);
+    setUploadFile(null);
+    setPreviewRows(null);
+    setUploadError(null);
+  }
+
   const totalAmount = rows.reduce((sum, r) => sum + parseFloat(r.amount ?? "0"), 0);
   const paidCount = rows.filter((r) => r.paidStatus === "P").length;
   const unpaidCount = rows.filter((r) => r.paidStatus !== "P").length;
@@ -188,7 +247,7 @@ export default function DailyJobsPage() {
       return (
         <input
           autoFocus
-          className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs bg-white"
+          className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs bg-white text-zinc-900"
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={commitEdit}
@@ -201,7 +260,7 @@ export default function DailyJobsPage() {
     }
     return (
       <span
-        className="cursor-pointer hover:bg-blue-50 rounded px-1 min-w-[40px] inline-block text-xs"
+        className="cursor-pointer hover:bg-blue-50 rounded px-1 min-w-[40px] inline-block text-xs text-zinc-900"
         onClick={() => startEdit(id, field, value ?? "")}
       >
         {value || <span className="text-zinc-300">—</span>}
@@ -209,12 +268,10 @@ export default function DailyJobsPage() {
     );
   }
 
-  function EditableSelect({
-    id, field, value, options,
-  }: { id: number; field: string; value: string | null; options: string[] }) {
+  function EditableSelect({ id, field, value, options }: { id: number; field: string; value: string | null; options: string[] }) {
     return (
       <select
-        className="text-xs border border-zinc-300 rounded px-1 py-0.5 w-full bg-white"
+        className="text-xs border border-zinc-300 rounded px-1 py-0.5 w-full bg-white text-zinc-900"
         value={value ?? options[0]}
         onChange={async (e) => { await patchRow(id, field, e.target.value); }}
       >
@@ -240,6 +297,7 @@ export default function DailyJobsPage() {
         }
       `}</style>
 
+      {/* Header */}
       <header className="bg-white border-b border-zinc-200 px-6 py-4 no-print">
         <div className="max-w-full mx-auto flex items-center justify-between">
           <h1 className="text-xl font-semibold text-zinc-900">Daily Jobs Record</h1>
@@ -251,13 +309,14 @@ export default function DailyJobsPage() {
         </div>
       </header>
 
-      <main className="px-4 py-6">
-        {/* Controls */}
-        <div className="flex gap-3 items-end mb-4 no-print flex-wrap">
+      <main className="px-4 py-6 space-y-4">
+
+        {/* Section 1 — Top bar */}
+        <div className="flex gap-3 items-end flex-wrap no-print">
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Day</label>
             <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
               value={day}
               onChange={(e) => setDay(e.target.value)}
             >
@@ -267,7 +326,7 @@ export default function DailyJobsPage() {
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Month</label>
             <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
               value={month}
               onChange={(e) => setMonth(e.target.value)}
             >
@@ -277,28 +336,25 @@ export default function DailyJobsPage() {
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Year</label>
             <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
               value={year}
               onChange={(e) => setYear(e.target.value)}
             >
               {YEARS_LIST.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
-
           <div className="flex gap-2 ml-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              className="hidden"
-              onChange={handleUpload}
-            />
             <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 transition-colors"
+              onClick={openUploadZone}
+              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
             >
-              {uploading ? "Uploading…" : "Upload PDF"}
+              Upload Invoice PDF
+            </button>
+            <button
+              onClick={handleAddRow}
+              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
+            >
+              + Add Row
             </button>
             <button
               onClick={() => window.print()}
@@ -310,13 +366,130 @@ export default function DailyJobsPage() {
         </div>
 
         {/* Print heading */}
-        <div className="mb-4 text-sm font-semibold text-zinc-600 hidden print:block">
-          Daily Jobs — {day} {month} {year}
+        <div className="text-sm font-semibold text-zinc-900 hidden print:block">
+          Daily Jobs Record — {day} {month} {year}
         </div>
 
-        {/* Summary bar */}
+        {/* Section 2 — Upload zone (collapsible) */}
+        {uploadOpen && (
+          <div className="no-print bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-zinc-900">Upload Invoice PDF</h2>
+              <button
+                onClick={handleCancelUpload}
+                className="text-zinc-400 hover:text-zinc-700 text-lg leading-none font-bold"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Drop zone */}
+            {!uploadFile && (
+              <div
+                className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors ${
+                  dragOver ? "border-zinc-500 bg-zinc-50" : "border-zinc-300 hover:border-zinc-400"
+                }`}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  const file = e.dataTransfer.files[0];
+                  if (file?.type === "application/pdf") handleFileSelected(file);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFileSelected(file);
+                  }}
+                />
+                <p className="text-sm text-zinc-500">Drop a PDF here, or click to select</p>
+                <p className="text-xs text-zinc-400 mt-1">Invoice PDFs only</p>
+              </div>
+            )}
+
+            {/* Parsing spinner */}
+            {parsing && (
+              <div className="flex items-center gap-3 py-6 justify-center text-zinc-500 text-sm">
+                <svg className="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                Parsing PDF…
+              </div>
+            )}
+
+            {/* Error */}
+            {uploadError && (
+              <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800 mt-3">
+                {uploadError}
+              </div>
+            )}
+
+            {/* Preview table */}
+            {previewRows && previewRows.length > 0 && (
+              <div className="mt-4">
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                  Preview — {previewRows.length} booking{previewRows.length !== 1 ? "s" : ""} found in {uploadFile?.name}
+                </p>
+                <div className="overflow-auto rounded-lg border border-zinc-200">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-zinc-50 border-b border-zinc-200">
+                        {["Date", "Invoice #", "Client", "Details", "Pax", "Amount (MYR)"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left font-semibold text-zinc-600 whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewRows.map((r, i) => (
+                        <tr key={i} className="border-b border-zinc-100">
+                          <td className="px-3 py-1.5 text-zinc-900 whitespace-nowrap">{r.day} {r.month} {r.year}</td>
+                          <td className="px-3 py-1.5 text-zinc-500 font-mono whitespace-nowrap">{r.invoiceNo}</td>
+                          <td className="px-3 py-1.5 text-zinc-900">{r.clientDetails}</td>
+                          <td className="px-3 py-1.5 text-zinc-900">{r.details}</td>
+                          <td className="px-3 py-1.5 text-zinc-900 text-center">{r.numberOfVehicles}</td>
+                          <td className="px-3 py-1.5 text-zinc-900 font-mono">{Number(r.amount).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={handleConfirmUpload}
+                    disabled={confirming}
+                    className="h-9 px-5 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                  >
+                    {confirming ? "Inserting…" : `Confirm — Insert ${previewRows.length} row${previewRows.length !== 1 ? "s" : ""}`}
+                  </button>
+                  <button
+                    onClick={handleCancelUpload}
+                    className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {previewRows && previewRows.length === 0 && !parsing && (
+              <div className="mt-3 text-sm text-zinc-500">
+                No bookings found in this PDF. Check the file format.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Section 3 — Summary bar */}
         {!loading && (
-          <div className="no-print flex gap-6 mb-4 text-sm text-zinc-600 bg-white rounded-lg border border-zinc-200 px-4 py-2 w-fit">
+          <div className="no-print flex gap-6 text-sm text-zinc-900 bg-white rounded-lg border border-zinc-200 px-4 py-2 w-fit">
             <span>Rows: <strong>{rows.length}</strong></span>
             <span>Total: <strong>MYR {totalAmount.toFixed(2)}</strong></span>
             <span>Paid: <strong className="text-green-600">{paidCount}</strong></span>
@@ -324,6 +497,7 @@ export default function DailyJobsPage() {
           </div>
         )}
 
+        {/* Section 4 — Daily jobs table */}
         {loading ? (
           <div className="text-center py-20 text-zinc-400 text-sm">Loading…</div>
         ) : (
@@ -334,7 +508,7 @@ export default function DailyJobsPage() {
                   {colHeaders.map((col, i) => (
                     <th
                       key={i}
-                      className={`px-2 py-2.5 text-left font-semibold text-zinc-600 whitespace-nowrap${i === colHeaders.length - 1 ? " no-print" : ""}`}
+                      className={`px-2 py-2.5 text-left font-semibold text-zinc-900 whitespace-nowrap${i === colHeaders.length - 1 ? " no-print" : ""}`}
                     >
                       {col}
                     </th>
@@ -352,7 +526,7 @@ export default function DailyJobsPage() {
                         <EditableSelect id={row.id} field="day" value={row.day} options={DAYS_LIST} />
                       </td>
                       <td className="px-2 py-1.5 w-14">
-                        <EditableSelect id={row.id} field="inHouseOrOutsourced" value={row.inHouseOrOutsourced} options={["I", "O"]} />
+                        <EditableSelect id={row.id} field="inHouseOrOutsourced" value={row.inHouseOrOutsourced} options={["I","O"]} />
                       </td>
                       <td className="px-2 py-1.5 min-w-[100px]">
                         <EditableText id={row.id} field="outsourcedCompany" value={row.outsourcedCompany} />
@@ -363,7 +537,7 @@ export default function DailyJobsPage() {
                       <td className="px-2 py-1.5 min-w-[80px]">
                         <EditableText id={row.id} field="driverName" value={row.driverName} />
                       </td>
-                      <td className="px-2 py-1.5 font-mono whitespace-nowrap text-zinc-500 text-xs">
+                      <td className="px-2 py-1.5 font-mono whitespace-nowrap text-zinc-900 text-xs">
                         {isFirstInvoice ? (row.invoiceNo ?? "") : ""}
                       </td>
                       <td className="px-2 py-1.5 min-w-[130px]">
@@ -385,7 +559,7 @@ export default function DailyJobsPage() {
                         <EditableText id={row.id} field="introducer" value={row.introducer} />
                       </td>
                       <td className="px-2 py-1.5 w-14">
-                        <EditableSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["P", "U"]} />
+                        <EditableSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["P","U"]} />
                       </td>
                       <td className="px-2 py-1.5 no-print">
                         <button
@@ -400,50 +574,32 @@ export default function DailyJobsPage() {
                   );
                 })}
 
-                {/* Phantom draft row — shown when no rows exist for selected date */}
+                {/* Phantom draft row */}
                 {draftRow && (
                   <tr className="border-b border-zinc-100 bg-zinc-50 opacity-70">
                     <td className="px-2 py-1.5 w-14">
-                      <span className="text-xs text-zinc-400 px-1">{day}</span>
+                      <span className="text-xs text-zinc-900 px-1">{day}</span>
                     </td>
                     <td className="px-2 py-1.5 w-14">
-                      <span
-                        className="cursor-pointer text-xs text-zinc-400 hover:text-zinc-600 px-1"
-                        onClick={() => materializeDraft("inHouseOrOutsourced")}
-                      >I</span>
+                      <span className="cursor-pointer text-xs text-zinc-400 hover:text-zinc-600 px-1" onClick={() => materializeDraft("inHouseOrOutsourced")}>I</span>
                     </td>
                     {(["outsourcedCompany","vehiclePlate","driverName"] as const).map((f) => (
                       <td key={f} className="px-2 py-1.5 min-w-[80px]">
-                        <span
-                          className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block"
-                          onClick={() => materializeDraft(f)}
-                        >—</span>
+                        <span className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block" onClick={() => materializeDraft(f)}>—</span>
                       </td>
                     ))}
                     <td className="px-2 py-1.5 text-xs text-zinc-300">—</td>
                     {(["clientDetails","amount","passengerCount","details"] as const).map((f) => (
                       <td key={f} className="px-2 py-1.5 min-w-[80px]">
-                        <span
-                          className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block"
-                          onClick={() => materializeDraft(f)}
-                        >—</span>
+                        <span className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block" onClick={() => materializeDraft(f)}>—</span>
                       </td>
                     ))}
-                    <td className="px-2 py-1.5 w-20">
-                      <span className="text-xs text-zinc-300 px-1">0</span>
-                    </td>
+                    <td className="px-2 py-1.5 w-20"><span className="text-xs text-zinc-300 px-1">0</span></td>
                     <td className="px-2 py-1.5 min-w-[80px]">
-                      <span
-                        className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block"
-                        onClick={() => materializeDraft("introducer")}
-                      >—</span>
+                      <span className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block" onClick={() => materializeDraft("introducer")}>—</span>
                     </td>
-                    <td className="px-2 py-1.5 w-14">
-                      <span className="text-xs text-zinc-400 px-1">U</span>
-                    </td>
-                    <td className="px-2 py-1.5 no-print">
-                      <span className="text-zinc-200 font-bold text-base px-1">×</span>
-                    </td>
+                    <td className="px-2 py-1.5 w-14"><span className="text-xs text-zinc-400 px-1">U</span></td>
+                    <td className="px-2 py-1.5 no-print"><span className="text-zinc-200 font-bold text-base px-1">×</span></td>
                   </tr>
                 )}
               </tbody>

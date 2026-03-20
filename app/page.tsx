@@ -1,19 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-
-interface BookingRow {
-  id: number;
-  travelDate: string;
-  fromLocation: string;
-  toLocation: string;
-  isRoundTrip: number;
-  details: string | null;
-  vanId: number | null;
-  vanNumber: string | null;
-  manualChange: number;
-}
 
 interface Van {
   id: number;
@@ -33,33 +21,14 @@ const BADGE_COLORS = [
   "bg-pink-100 text-pink-800 border-pink-200",
 ];
 
-function VanBadge({ vanNumber, index }: { vanNumber: string | null; index?: number }) {
-  const colors =
-    vanNumber != null && index != null
-      ? BADGE_COLORS[index % BADGE_COLORS.length]
-      : "bg-zinc-100 text-zinc-600 border-zinc-200";
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${colors}`}
-    >
-      {vanNumber ?? "Unassigned"}
-    </span>
-  );
-}
-
 export default function DashboardPage() {
-  const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [vans, setVans] = useState<Van[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [uploadLoading, setUploadLoading] = useState(false);
-  const [clearLoading, setClearLoading] = useState(false);
   const [vanLoading, setVanLoading] = useState(false);
   const [newPlate, setNewPlate] = useState("");
   const [newDriverName, setNewDriverName] = useState("");
   const [newDriverContact, setNewDriverContact] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchVans = useCallback(async () => {
     try {
@@ -68,71 +37,7 @@ export default function DashboardPage() {
     } catch {}
   }, []);
 
-  const fetchBookings = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/bookings");
-      if (!res.ok) throw new Error(await res.text());
-      setBookings(await res.json());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchBookings();
-    fetchVans();
-  }, [fetchBookings, fetchVans]);
-
-  async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const file = fileInputRef.current?.files?.[0];
-    if (!file) {
-      setError("Please select a PDF file.");
-      return;
-    }
-
-    setUploadLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    const form = new FormData();
-    form.append("file", file);
-
-    try {
-      const res = await fetch("/api/upload", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Upload failed");
-      setSuccess(data.message);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      await fetchBookings();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setUploadLoading(false);
-    }
-  }
-
-  async function handleClear() {
-    if (!confirm("Delete all bookings? This cannot be undone.")) return;
-    setClearLoading(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const res = await fetch("/api/clear", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Clear failed");
-      setSuccess(data.message);
-      await fetchBookings();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setClearLoading(false);
-    }
-  }
+  useEffect(() => { fetchVans(); }, [fetchVans]);
 
   async function handleAddVan(e: React.FormEvent) {
     e.preventDefault();
@@ -177,49 +82,35 @@ export default function DashboardPage() {
       if (!res.ok) throw new Error(data.error ?? "Failed to delete van");
       setSuccess(`Van ${plate} removed`);
       await fetchVans();
-      await fetchBookings();
     } catch (e) {
       setError(String(e));
     }
   }
 
-  // Group bookings by date for visual separation
-  const dates = [...new Set(bookings.map((b) => b.travelDate))];
-  const vanIndexMap = Object.fromEntries(vans.map((v, i) => [v.vanNumber, i]));
-
   return (
     <div className="min-h-screen bg-zinc-50 font-sans">
-      {/* Header */}
       <header className="bg-white border-b border-zinc-200 px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
+        <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold text-zinc-900">Van Scheduler</h1>
-            <p className="text-sm text-zinc-500 mt-0.5">
-              {loading
-                ? "Loading…"
-                : `${bookings.length} booking${bookings.length !== 1 ? "s" : ""}`}
-            </p>
+            <p className="text-sm text-zinc-500 mt-0.5">Manage vans and drivers</p>
           </div>
           <nav className="flex gap-4 text-sm font-medium">
             <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">Dashboard</span>
-            <Link
-              href="/database"
-              className="text-zinc-500 hover:text-zinc-900 transition-colors"
-            >
-              Raw Database
-            </Link>
-            <Link
-              href="/daily-jobs"
-              className="text-zinc-500 hover:text-zinc-900 transition-colors"
-            >
-              Daily Jobs
-            </Link>
+            <Link href="/database" className="text-zinc-500 hover:text-zinc-900 transition-colors">Raw Database</Link>
+            <Link href="/daily-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">Daily Jobs</Link>
           </nav>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
-        {/* Van Management */}
+      <main className="max-w-3xl mx-auto px-6 py-8 space-y-4">
+        {error && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">{error}</div>
+        )}
+        {success && (
+          <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">{success}</div>
+        )}
+
         <div className="bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-zinc-700 mb-4">Van / Plate Management</h2>
           <form onSubmit={handleAddVan} className="flex flex-wrap gap-2 mb-4 items-end">
@@ -229,7 +120,7 @@ export default function DashboardPage() {
               onChange={(e) => setNewPlate(e.target.value)}
               placeholder="e.g. VKB 8468"
               required
-              className="h-9 w-36 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 uppercase"
+              className="h-9 w-36 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400 uppercase"
             />
             <input
               type="text"
@@ -237,14 +128,14 @@ export default function DashboardPage() {
               onChange={(e) => setNewDriverName(e.target.value)}
               placeholder="e.g. Lee Yoke Khuan"
               required
-              className="h-9 flex-1 min-w-[160px] px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="h-9 flex-1 min-w-[160px] px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
             <input
               type="text"
               value={newDriverContact}
               onChange={(e) => setNewDriverContact(e.target.value)}
               placeholder="e.g. +60 12-xxx xxxx"
-              className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
             <button
               type="submit"
@@ -254,6 +145,7 @@ export default function DashboardPage() {
               {vanLoading ? "Adding…" : "Add Van"}
             </button>
           </form>
+
           {vans.length === 0 ? (
             <p className="text-xs text-zinc-400">No vans added yet.</p>
           ) : (
@@ -268,6 +160,9 @@ export default function DashboardPage() {
                     {van.driverName && (
                       <span className="font-normal opacity-70">Driver: {van.driverName}</span>
                     )}
+                    {van.driverContact && (
+                      <span className="font-normal opacity-60">{van.driverContact}</span>
+                    )}
                   </div>
                   <button
                     onClick={() => handleDeleteVan(van.id, van.vanNumber)}
@@ -281,140 +176,6 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-        {/* Toolbar */}
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end justify-between">
-          <form onSubmit={handleUpload} className="flex gap-3 items-end flex-wrap">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-                Upload Invoice PDF
-              </label>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf"
-                required
-                className="text-sm text-zinc-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-zinc-900 file:text-white hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={uploadLoading}
-              className="h-9 px-4 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-            >
-              {uploadLoading ? "Uploading…" : "Upload"}
-            </button>
-          </form>
-
-          <button
-            onClick={handleClear}
-            disabled={clearLoading || bookings.length === 0}
-            className="h-9 px-4 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-          >
-            {clearLoading ? "Clearing…" : "Clear All Bookings"}
-          </button>
-        </div>
-
-        {/* Banners */}
-        {error && (
-          <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
-            {error}
-          </div>
-        )}
-        {success && (
-          <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-            {success}
-          </div>
-        )}
-
-        {/* Table */}
-        {loading ? (
-          <div className="flex items-center justify-center py-20 text-zinc-400 text-sm">
-            Loading bookings…
-          </div>
-        ) : bookings.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-zinc-400 gap-2">
-            <p className="text-4xl">📋</p>
-            <p className="text-sm">No bookings yet. Upload a PDF invoice to get started.</p>
-          </div>
-        ) : (
-          <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-zinc-50 border-b border-zinc-200">
-                  <th className="px-4 py-3 text-left font-semibold text-zinc-600 whitespace-nowrap">
-                    Date
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-zinc-600">From</th>
-                  <th className="px-4 py-3 text-left font-semibold text-zinc-600">To</th>
-                  <th className="px-4 py-3 text-left font-semibold text-zinc-600 whitespace-nowrap">
-                    Round Trip
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-zinc-600">Van</th>
-                  <th className="px-4 py-3 text-left font-semibold text-zinc-600">Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dates.map((date, di) => {
-                  const group = bookings.filter((b) => b.travelDate === date);
-                  return group.map((booking, bi) => (
-                    <tr
-                      key={booking.id}
-                      className={`border-b border-zinc-100 hover:bg-zinc-50 transition-colors ${
-                        di % 2 === 0 ? "" : "bg-zinc-50/40"
-                      }`}
-                    >
-                      <td className="px-4 py-3 font-mono text-xs text-zinc-600 whitespace-nowrap">
-                        {bi === 0 ? booking.travelDate : ""}
-                      </td>
-                      <td className="px-4 py-3 text-zinc-800 font-medium">
-                        {booking.fromLocation}
-                      </td>
-                      <td className="px-4 py-3 text-zinc-800 font-medium">
-                        {booking.toLocation}
-                      </td>
-                      <td className="px-4 py-3">
-                        {booking.isRoundTrip === 1 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700 border border-violet-200">
-                            Yes
-                          </span>
-                        ) : (
-                          <span className="text-zinc-400 text-xs">One-way</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <VanBadge
-                          vanNumber={booking.vanNumber}
-                          index={booking.vanNumber != null ? vanIndexMap[booking.vanNumber] : undefined}
-                        />
-                      </td>
-                      <td
-                        className="px-4 py-3 text-zinc-500 text-xs max-w-xs truncate"
-                        title={booking.details ?? ""}
-                      >
-                        {booking.details ?? "—"}
-                      </td>
-                    </tr>
-                  ));
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Van legend */}
-        {vans.length > 0 && (
-          <div className="flex flex-wrap gap-2 items-center text-xs text-zinc-500">
-            <span className="font-medium">Legend:</span>
-            {vans.map((van, i) => (
-              <span
-                key={van.id}
-                className={`px-2 py-0.5 rounded-full border font-medium ${BADGE_COLORS[i % BADGE_COLORS.length]}`}
-              >
-                {van.vanNumber}
-              </span>
-            ))}
-          </div>
-        )}
       </main>
     </div>
   );
