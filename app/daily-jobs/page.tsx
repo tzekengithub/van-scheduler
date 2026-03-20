@@ -83,11 +83,6 @@ export default function DailyJobsPage() {
 
   const [serviceStatus, setServiceStatus] = useState<'unknown' | 'cold' | 'starting' | 'ready' | 'error'>('unknown');
   const [countdown, setCountdown] = useState(0);
-  const [duplicateWarning, setDuplicateWarning] = useState<{
-    duplicates: any[];
-    pendingBookings: any[];
-    fileName: string;
-  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -260,14 +255,6 @@ export default function DailyJobsPage() {
           return;
         }
         const data = await res.json();
-        if (data.hasDuplicates) {
-          setDuplicateWarning({
-            duplicates: data.duplicates,
-            pendingBookings: data.pendingBookings,
-            fileName: file.name,
-          });
-          return;
-        }
         totalCount += data.inserted ?? 0;
       }
       setUploadOpen(false);
@@ -290,22 +277,6 @@ export default function DailyJobsPage() {
       setConfirming(false);
     }
   }
-
-  const handleForceInsert = async (pendingBookings: any[]) => {
-    setDuplicateWarning(null);
-    const res = await fetch('/api/upload/force', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bookings: pendingBookings }),
-    });
-    if (res.ok) {
-      await fetchRows();
-      setUploadOpen(false);
-      setUploadFiles([]);
-      setPreviewRows(null);
-      setUploadError(null);
-    }
-  };
 
   function handleCancelUpload() {
     setUploadFiles([]);
@@ -862,66 +833,6 @@ export default function DailyJobsPage() {
         )}
       </main>
 
-      {/* Duplicate warning modal
-          NOTE: This popup is the safeguard against double-uploads (e.g. INV2025120078
-          was inserted twice before this guard existed). If a duplicate ever slips
-          through again, clean it up with:
-            DELETE FROM bookings WHERE id IN (
-              SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (
-                  PARTITION BY invoice_no, travel_date, amount ORDER BY id ASC
-                ) AS rn FROM bookings
-              ) ranked WHERE rn > 1
-            );
-      */}
-      {duplicateWarning && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4">
-            <h2 className="text-lg font-semibold text-gray-900 mb-1">Duplicate bookings found</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              These rows already exist in the database. Do you want to add them again?
-            </p>
-            <div className="border border-gray-200 rounded-lg overflow-hidden mb-4">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="p-2 text-left text-gray-500">Date</th>
-                    <th className="p-2 text-left text-gray-500">Invoice</th>
-                    <th className="p-2 text-left text-gray-500">Client</th>
-                    <th className="p-2 text-left text-gray-500">Route</th>
-                    <th className="p-2 text-left text-gray-500">MYR</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {duplicateWarning.duplicates.map((d, i) => (
-                    <tr key={i} className="border-t border-gray-100">
-                      <td className="p-2">{d.travelDate}</td>
-                      <td className="p-2">{d.invoiceNo}</td>
-                      <td className="p-2">{d.clientDetails?.split('\n')[0]}</td>
-                      <td className="p-2">{d.details}</td>
-                      <td className="p-2">{d.amount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setDuplicateWarning(null)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
-              >
-                Cancel — don&apos;t add
-              </button>
-              <button
-                onClick={() => handleForceInsert(duplicateWarning.pendingBookings)}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-              >
-                Yes, add anyway
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

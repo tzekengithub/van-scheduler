@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { extractTravelBookings } from "@/lib/pdf-parser";
 import { smartAssignVan } from "@/lib/van-assignment";
 
@@ -34,47 +34,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for duplicates before inserting anything
-    const duplicatesFound: {
-      invoiceNo: string;
-      travelDate: string;
-      amount: number;
-      clientDetails: string;
-      details: string;
-    }[] = [];
-
-    for (const booking of allParsed) {
-      const existing = await db
-        .select()
-        .from(bookings)
-        .where(
-          and(
-            eq(bookings.invoiceNo, booking.invoiceNo),
-            eq(bookings.travelDate, booking.travelDate),
-            eq(bookings.amount, String(booking.amount))
-          )
-        );
-
-      if (existing.length > 0) {
-        duplicatesFound.push({
-          invoiceNo: booking.invoiceNo,
-          travelDate: booking.travelDate,
-          amount: booking.amount,
-          clientDetails: booking.clientDetails,
-          details: booking.details,
-        });
-      }
-    }
-
-    if (duplicatesFound.length > 0) {
-      return NextResponse.json({
-        hasDuplicates: true,
-        duplicates: duplicatesFound,
-        pendingBookings: allParsed,
-      }, { status: 200 });
-    }
-
-    // No duplicates — insert all with van assignment
+    // Insert all with van assignment
     let totalInserted = 0;
 
     for (const booking of allParsed) {
@@ -118,10 +78,7 @@ export async function POST(request: NextRequest) {
       totalInserted++;
     }
 
-    return NextResponse.json({
-      hasDuplicates: false,
-      inserted: totalInserted,
-    });
+    return NextResponse.json({ inserted: totalInserted });
   } catch (error: any) {
     console.error("Upload error:", error);
     console.error("Error stack:", error.stack);
