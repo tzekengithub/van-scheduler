@@ -47,13 +47,13 @@ def extract_text_by_position(pdf_bytes):
     # Sort by Y position (top to bottom), then X (left to right)
     text_elements.sort(key=lambda e: (e['y'], e['x']))
 
-    # Group elements on same line (within 5 units of Y)
+    # Group elements on same line (within 2 units of Y)
     lines = []
     current_line = []
     current_y = None
 
     for elem in text_elements:
-        if current_y is None or abs(elem['y'] - current_y) <= 5:
+        if current_y is None or abs(elem['y'] - current_y) <= 2:
             current_line.append(elem['text'])
             current_y = elem['y']
         else:

@@ -144,8 +144,13 @@ export function parseRawText(text: string): ParsedBooking[] {
     const line = lines[i];
     if (!line) continue;
 
-    // Track running date from non-numbered lines
-    if (!/^\d+\./.test(line)) {
+    // Format A: "1. KL - KLIA 13 February, 2026 1 230.00"
+    const isFormatA = /^\d+\./.test(line);
+    // Format B: "KL - KLIA / Chinese 1. 13 February, 2026 1 230.00 230.00"
+    const isFormatB = !isFormatA && /^.+?\s+\d+\.\s+\d{1,2}\s+[A-Za-z]+/.test(line);
+
+    // Non-booking line: track running date and move on
+    if (!isFormatA && !isFormatB) {
       const parts = extractDateParts(line);
       const iso = parts ? parseDateString(line) : null;
       if (iso && parts) {
@@ -157,9 +162,14 @@ export function parseRawText(text: string): ParsedBooking[] {
       continue;
     }
 
-    // Numbered booking line
-    const inlineParts = extractDateParts(line);
-    const inlineIso = inlineParts ? parseDateString(line) : null;
+    // Normalise to "route date prices" by stripping the row number.
+    // Format A: strip leading "1. ", Format B: strip inline " 1. "
+    const remainder = isFormatA
+      ? line.replace(/^\d+\.\s*/, "").trim()
+      : line.replace(/\s+\d+\.\s+/, " ").trim();
+
+    const inlineParts = extractDateParts(remainder);
+    const inlineIso = inlineParts ? parseDateString(remainder) : null;
 
     const travelDate = inlineIso ?? currentDateStr;
     if (!travelDate) continue;
@@ -174,9 +184,6 @@ export function parseRawText(text: string): ParsedBooking[] {
       currentMonth = inlineParts.month;
       currentYear = inlineParts.year;
     }
-
-    // Strip number prefix
-    const remainder = line.replace(/^\d+\.\s*/, "").trim();
 
     // Isolate booking description: everything before the date
     const dateMatch = remainder.match(/\b\d{1,2}\s+[A-Za-z]+,?\s+\d{4}\b/);
