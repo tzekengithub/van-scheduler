@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
+    const dayParam = searchParams.get("day");
     const monthParam = searchParams.get("month");
     const yearParam = searchParams.get("year");
+    const latestFirst = searchParams.get("latestFirst") === "1";
+    const recentCountParam = searchParams.get("recentCount");
 
     const conditions = [];
+    if (dayParam) conditions.push(eq(bookings.day, dayParam));
     if (monthParam) conditions.push(eq(bookings.month, monthParam));
     if (yearParam) conditions.push(eq(bookings.year, yearParam));
 
-    const rows = await db
+    const base = db
       .select({
         id: bookings.id,
         travelDate: bookings.travelDate,
@@ -42,8 +46,17 @@ export async function GET(request: NextRequest) {
       })
       .from(bookings)
       .leftJoin(vans, eq(bookings.vanId, vans.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(bookings.travelDate, bookings.id);
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+    let rows;
+    if (latestFirst) {
+      rows = await base.orderBy(desc(bookings.id)).limit(1);
+    } else if (recentCountParam) {
+      const n = Math.max(1, parseInt(recentCountParam, 10) || 1);
+      rows = await base.orderBy(desc(bookings.id)).limit(n);
+    } else {
+      rows = await base.orderBy(asc(bookings.invoiceNo), asc(bookings.amount));
+    }
 
     return NextResponse.json(rows);
   } catch (error) {
@@ -55,16 +68,16 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { month, year } = body;
+    const { day, month, year } = body;
 
-    // Derive travelDate from year+month
     const monthNames: Record<string, string> = {
       January: "01", February: "02", March: "03", April: "04",
       May: "05", June: "06", July: "07", August: "08",
       September: "09", October: "10", November: "11", December: "12",
     };
     const monthNum = monthNames[month] ?? "01";
-    const travelDate = `${year}-${monthNum}-01`;
+    const dayPadded = day ? String(day).padStart(2, "0") : "01";
+    const travelDate = `${year}-${monthNum}-${dayPadded}`;
 
     const [inserted] = await db
       .insert(bookings)
@@ -74,9 +87,9 @@ export async function POST(request: NextRequest) {
         toLocation: "",
         isRoundTrip: 0,
         manualChange: 0,
+        day: day ? String(day) : "",
         month: month ?? "",
         year: year ?? "",
-        day: "",
         paidStatus: "U",
         inHouseOrOutsourced: "I",
       })

@@ -17,7 +17,7 @@ export async function PATCH(
     const body = await request.json();
 
     const allowed = [
-      "vehiclePlate", "driverName", "paidStatus", "inHouseOrOutsourced",
+      "day", "vehiclePlate", "driverName", "paidStatus", "inHouseOrOutsourced",
       "outsourcedCompany", "overtime", "introducer", "amount",
       "clientDetails", "invoiceNo", "details", "passengerCount",
       "myrPerVehicle", "vanId", "manualChange",
