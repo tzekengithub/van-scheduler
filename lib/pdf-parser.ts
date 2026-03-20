@@ -91,195 +91,158 @@ function cleanBookingDetails(raw: string): string {
 
 /**
  * Parse raw text extracted from an invoice PDF.
+ * Designed for PyMuPDF block output where each table cell is its own line.
  * Pure function — no PDF dependency, fully testable.
  */
 export function parseRawText(text: string): ParsedBooking[] {
-  const lines = text.split("\n").map((l) => l.trim());
-
-  // Strip square-bracket ride-type lines before booking parsing
-  // e.g. "[Maximum 10 hrs, charged if more than 10 hrs]" or "[One-Way Ride]"
-  const cleanLines = lines.filter((l) => {
-    if (l.startsWith("[")) return false;
-    if (/^charged if more than/i.test(l)) return false;
-    if (/Hourly Rate/i.test(l)) return false;
-    return true;
-  });
-
+  // Drop blank lines — PyMuPDF gives one block per non-empty cell
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const results: ParsedBooking[] = [];
 
-  // --- Header extraction ---
-  // Match invoice number from full text (handles same-line and two-line formats)
-  const invoiceMatch =
-    text.match(/Invoice\s*Number\s*\n?\s*(INV\d+)/i) ??
-    text.match(/(INV\d{10,})/i);
-  let invoiceNo = invoiceMatch ? invoiceMatch[1] : "";
+  // ── Invoice Number ──────────────────────────────────────────────────────────
+  // PyMuPDF: INV number is on its own line.  Regex fallback for older format.
+  let invoiceNo = "";
+  for (const line of lines) {
+    if (/^INV\d+$/.test(line)) { invoiceNo = line; break; }
+  }
+  if (!invoiceNo) {
+    const m =
+      text.match(/Invoice\s*Number\s*\n?\s*(INV\d+)/i) ??
+      text.match(/(INV\d{10,})/i);
+    invoiceNo = m?.[1] ?? "";
+  }
 
+  // ── Client Details ──────────────────────────────────────────────────────────
+  // PyMuPDF: "BOOK<n>" on its own line, then client name, then (optionally a
+  // contact-person name like "Winnice"), then phone number.
+  // Phone regex covers both Malaysian (+60) and Singapore (+65) numbers.
+  const PHONE_RE = /^\+6[05][\d\s-]{7,}$/;
   let clientName = "";
   let clientContact = "";
-
-  // Labels that indicate the company's own contact line, not the client's.
-  // Use word boundaries so "Hotel" does not match \btel\b.
-  const SKIP_LABELS = /\bcompany\s+contact\b|\bcontact\s*no\b|\btel(?:ephone)?\b|\bfax\b|\bhotline\b/i;
-
+  let bookIdx = -1;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-
-    // Client info — phone number and name
-    if (!clientContact) {
-      const phoneMatch = line.match(/(\+60[\d\s-]{8,})/);
-      if (phoneMatch) {
-        const beforePhone = line.slice(0, line.indexOf(phoneMatch[0])).trim();
-        // Skip lines like "Company Contact No : +60 ..." — that's the company's own number
-        if (SKIP_LABELS.test(beforePhone)) continue;
-        clientContact = phoneMatch[1].trim();
-        if (beforePhone) {
-          clientName = beforePhone;
-        } else if (i > 0 && lines[i - 1] && !/^\d+\./.test(lines[i - 1])) {
-          const prevLine = lines[i - 1].trim();
-          if (!SKIP_LABELS.test(prevLine)) {
-            clientName = prevLine;
-          }
-        }
-        // Strip any BOOK number prefix (e.g. "BOOK2026020004 Arenaa Star Hotel" → "Arenaa Star Hotel")
-        clientName = clientName.replace(/^BOOK\d+\s*/i, "").trim();
+    if (/^BOOK\d+$/.test(lines[i])) { bookIdx = i; break; }
+  }
+  if (bookIdx >= 0) {
+    for (let i = bookIdx + 1; i < Math.min(bookIdx + 6, lines.length); i++) {
+      const l = lines[i];
+      if (PHONE_RE.test(l)) {
+        clientContact = l;
+        break;
+      } else if (!clientName) {
+        clientName = l; // first non-phone line = company / client name
       }
+      // Any further non-phone lines (e.g. "Winnice") are contact persons — skip
     }
   }
 
-  // Format as "Name\nPhone" — strip any stray BOOK prefix as safety
   const clientDetails = [clientName, clientContact]
     .filter(Boolean)
     .join("\n")
-    .replace(/BOOK\d+\s*/gi, "")
     .trim();
 
-  // --- Booking line parsing ---
-  const STOP_PHRASES = [
-    "COMPANY POLICY",
-    "All cheques should be",
-    "Payment by CASH",
-    "Please send the payment",
-    "For Tour",
-    "For Ride",
-    "TOTAL amount",
-    "For Pick Up",
-    "For cancellation",
-    "Balance must",
-    "Balance paid",
-    "All fees in",
-    "Company is not responsible",
-    "For customers travelling",
-    "This is computer generated",
-  ];
+  // ── Booking Row Parsing ─────────────────────────────────────────────────────
+  // PyMuPDF splits the table into individual cells, one per line.
+  // Each booking row starts with a standalone row number line: "1.", "2.", …
+  // Followed by:
+  //   route line(s)          — English / Chinese, stop at date
+  //   date line              — "12 February, 2026"
+  //   vehicle count          — "1", "2"  (integer)
+  //   MYR/vehicle amount     — "230.00", "1,200.00"
+  //   total amount           — "230.00", "1,200.00"
+  //   optional annotation    — "(One-Way Ride Only)", "[Maximum …]"
 
-  let currentDateStr: string | null = null;
-  let currentDay = "";
-  let currentMonth = "";
-  let currentYear = "";
+  const STOP_PHRASES = ["COMPANY POLICY", "COMPANY POLICIES"];
+  const isStop      = (l: string) => STOP_PHRASES.some((p) => l.includes(p));
+  const isRowNum    = (l: string) => /^\d+\.$/.test(l);
+  // Lines to skip when collecting route or numbers
+  const isSkippable = (l: string) =>
+    l.startsWith("[") ||
+    l.startsWith("(") ||
+    /^charged if more than/i.test(l) ||
+    /^Hourly Rate/i.test(l);
 
-  for (let i = 0; i < cleanLines.length; i++) {
-    const line = cleanLines[i];
-    if (!line) continue;
+  const parseAmt = (s: string) => parseFloat(s.replace(/,/g, "")) || 0;
 
-    if (STOP_PHRASES.some((phrase) => line.includes(phrase))) break;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (isStop(line)) break;
+    if (!isRowNum(line)) continue;
 
-    // Format A: "1. KL - KLIA 13 February, 2026 1 230.00"
-    const isFormatA = /^\d+\./.test(line);
-    // Format B: "KL - KLIA / Chinese 1. 13 February, 2026 1 230.00 230.00"
-    const isFormatB = !isFormatA && /^.+?\s+\d+\.\s+\d{1,2}\s+[A-Za-z]+/.test(line);
+    // ── Collect route lines until we find a date ──
+    const routeLines: string[] = [];
+    let travelDate: string | null = null;
+    let dateParts: { day: string; month: string; year: string } | null = null;
+    let j = i + 1;
 
-    // Non-booking line: track running date and move on
-    if (!isFormatA && !isFormatB) {
-      const parts = extractDateParts(line);
-      const iso = parts ? parseDateString(line) : null;
-      if (iso && parts) {
-        currentDateStr = iso;
-        currentDay = parts.day;
-        currentMonth = parts.month;
-        currentYear = parts.year;
+    while (j < lines.length && j <= i + 10) {
+      const next = lines[j];
+      if (isStop(next) || isRowNum(next)) break;
+      if (isSkippable(next)) { j++; continue; }
+      const dp = extractDateParts(next);
+      const iso = dp ? parseDateString(next) : null;
+      if (iso && dp) {
+        travelDate = iso;
+        dateParts = dp;
+        j++;
+        break;
       }
-      continue;
+      routeLines.push(next);
+      j++;
     }
 
-    // Normalise to "route date prices" by stripping the row number.
-    // Format A: strip leading "1. ", Format B: strip inline " 1. "
-    const remainder = isFormatA
-      ? line.replace(/^\d+\.\s*/, "").trim()
-      : line.replace(/\s+\d+\.\s+/, " ").trim();
+    if (!travelDate || !dateParts || routeLines.length === 0) continue;
 
-    const inlineParts = extractDateParts(remainder);
-    const inlineIso = inlineParts ? parseDateString(remainder) : null;
-
-    const travelDate = inlineIso ?? currentDateStr;
-    if (!travelDate) continue;
-
-    const usedDay = inlineParts?.day ?? currentDay;
-    const usedMonth = inlineParts?.month ?? currentMonth;
-    const usedYear = inlineParts?.year ?? currentYear;
-
-    if (inlineIso && inlineParts) {
-      currentDateStr = inlineIso;
-      currentDay = inlineParts.day;
-      currentMonth = inlineParts.month;
-      currentYear = inlineParts.year;
+    // ── Collect up to 3 numeric tokens: count, MYR/veh, amount ──
+    const numTokens: string[] = [];
+    while (j < lines.length && numTokens.length < 3) {
+      const next = lines[j];
+      if (isStop(next) || isRowNum(next)) break;
+      if (isSkippable(next)) { j++; continue; }
+      if (/^[\d,]+\.?\d*$/.test(next)) {
+        numTokens.push(next);
+        j++;
+      } else {
+        break; // non-numeric, non-skippable → done
+      }
     }
-
-    // Isolate booking description: everything before the date
-    const dateMatch = remainder.match(/\b\d{1,2}\s+[A-Za-z]+,?\s+\d{4}\b/);
-    const rawDetails = dateMatch
-      ? remainder.slice(0, remainder.indexOf(dateMatch[0])).trim()
-      : remainder;
-
-    const bookingDetails = cleanBookingDetails(rawDetails)
-      .replace(/\[[^\]]*\]/g, "")
-      .replace(/Maximum \d+\s*hrs.*/i, "")
-      .trim();
-
-    // Parse vehicle count and prices from the portion after the date
-    const afterDate = dateMatch
-      ? remainder.slice(remainder.indexOf(dateMatch[0]) + dateMatch[0].length).trim()
-      : "";
-
-    const numTokens = afterDate.match(/[\d,]+\.?\d*/g) ?? [];
-    // Normalize comma-thousands separators
-    const nums = numTokens.map((t) => parseFloat(t.replace(/,/g, "")));
 
     let numberOfVehicles = 1;
     let myrPerVehicle = 0;
     let amount = 0;
 
-    if (nums.length >= 1) {
-      const first = numTokens[0] ?? "";
-      // Is first token an integer vehicle count (no decimal, value <= 20)?
-      if (!first.includes(".") && nums[0] <= 20) {
-        numberOfVehicles = nums[0];
-        if (nums.length >= 2) {
-          myrPerVehicle = nums[1];
-          amount = nums.length >= 3 ? nums[nums.length - 1] : numberOfVehicles * myrPerVehicle;
-        }
+    if (numTokens.length >= 3) {
+      const n0 = parseAmt(numTokens[0]);
+      if (!numTokens[0].includes(".") && n0 <= 20) {
+        // count  myr/veh  total
+        numberOfVehicles = n0;
+        myrPerVehicle    = parseAmt(numTokens[1]);
+        amount           = parseAmt(numTokens[2]);
       } else {
-        // Only prices, no explicit count
-        myrPerVehicle = nums[0];
-        amount = nums.length >= 2 ? nums[nums.length - 1] : nums[0];
+        myrPerVehicle = n0;
+        amount        = parseAmt(numTokens[numTokens.length - 1]);
       }
+    } else if (numTokens.length === 2) {
+      const n0 = parseAmt(numTokens[0]);
+      if (!numTokens[0].includes(".") && n0 <= 20) {
+        numberOfVehicles = n0;
+        amount           = parseAmt(numTokens[1]);
+        myrPerVehicle    = amount / numberOfVehicles;
+      } else {
+        myrPerVehicle = n0;
+        amount        = parseAmt(numTokens[1]);
+      }
+    } else if (numTokens.length === 1) {
+      amount        = parseAmt(numTokens[0]);
+      myrPerVehicle = amount;
     }
 
-    // Look at next non-empty line for ride type annotation
-    let rideTypeAnnotation = "";
-    for (let j = i + 1; j < cleanLines.length && j <= i + 3; j++) {
-      const next = cleanLines[j].trim();
-      if (!next) continue;
-      const rideMatch = next.match(/\(?(One-Way Ride Only|Maximum \d+\s*hrs[^)]*)\)?/i);
-      if (rideMatch) {
-        rideTypeAnnotation = rideMatch[1].trim();
-      }
-      break;
-    }
-
-    const finalDetails = rideTypeAnnotation
-      ? `${bookingDetails} (${rideTypeAnnotation})`
-      : bookingDetails;
+    // ── Clean booking description ──
+    const rawRoute = routeLines.join(" ");
+    const bookingDetails = cleanBookingDetails(rawRoute)
+      .replace(/\[[^\]]*\]/g, "")      // strip any [bracket] that leaked in
+      .replace(/Maximum \d+\s*hrs.*/i, "")
+      .trim();
 
     if (!bookingDetails) continue;
 
@@ -291,12 +254,12 @@ export function parseRawText(text: string): ParsedBooking[] {
       fromLocation,
       toLocation,
       isRoundTrip,
-      details: finalDetails,
+      details: bookingDetails,
       invoiceNo,
       clientDetails,
-      day: usedDay,
-      month: usedMonth,
-      year: usedYear,
+      day:   dateParts.day,
+      month: dateParts.month,
+      year:  dateParts.year,
       numberOfVehicles,
       myrPerVehicle,
       amount,
@@ -315,7 +278,7 @@ export function parseRawText(text: string): ParsedBooking[] {
 
 /**
  * Extracts travel bookings from a PDF buffer.
- * Calls a Python pdfminer microservice for reliable text extraction,
+ * Calls a Python PyMuPDF microservice for reliable text extraction,
  * then passes the text through parseRawText() unchanged.
  */
 export async function extractTravelBookings(
@@ -323,7 +286,7 @@ export async function extractTravelBookings(
 ): Promise<ParsedBooking[]> {
   const pythonServiceUrl = process.env.PDF_SERVICE_URL;
   if (!pythonServiceUrl) {
-    throw new Error("PDF_SERVICE_URL environment variable not set");
+    throw new Error("PDF_SERVICE_URL environment variable is not set");
   }
 
   const response = await fetch(`${pythonServiceUrl}/parse`, {

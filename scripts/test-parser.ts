@@ -1,181 +1,169 @@
-import { parseRawText } from "../lib/pdf-parser";
+import fs from "fs";
+import path from "path";
+import { extractTravelBookings } from "../lib/pdf-parser";
 
-let passed = 0;
-let failed = 0;
+interface TestCase {
+  file: string;
+  invoiceNo: string;
+  clientName: string;
+  clientPhone: string;
+  rowCount: number;
+  firstAmount: number;
+  lastAmount?: number;
+  vehicles?: number;
+  firstDetails?: string;
+  lastDetails?: string;
+  isRoundTrip0?: number;
+}
 
-function assert(condition: boolean, message: string) {
-  if (condition) {
-    console.log(`  ✓ ${message}`);
-    passed++;
-  } else {
-    console.error(`  ✗ FAIL: ${message}`);
-    failed++;
+const TEST_CASES: TestCase[] = [
+  {
+    file: "INV2025120078.pdf",
+    invoiceNo: "INV2025120078",
+    clientName: "Steven",
+    clientPhone: "+60 16-565 1979",
+    rowCount: 5,
+    firstAmount: 230,
+    lastAmount: 1000,
+    firstDetails: "KLIA - KL",
+    lastDetails: "Johor Bahru",
+  },
+  {
+    file: "INV2026010094.pdf",
+    invoiceNo: "INV2026010094",
+    clientName: "Jessie Oh",
+    clientPhone: "+60 16-533 9999",
+    rowCount: 2,
+    firstAmount: 280,
+    vehicles: 2,
+    firstDetails: "KL - KLIA",
+  },
+  {
+    file: "INV2026020004.pdf",
+    invoiceNo: "INV2026020004",
+    clientName: "Arenaa Star Hotel",
+    clientPhone: "+60 12-226 7224",
+    rowCount: 2,
+    firstAmount: 230,
+    firstDetails: "KL - KLIA",
+  },
+  {
+    file: "INV2026020007.pdf",
+    invoiceNo: "INV2026020007",
+    clientName: "Alvin Teo",
+    clientPhone: "+65 9146 4791",
+    rowCount: 1,
+    firstAmount: 1050,
+    firstDetails: "Malacca",
+    isRoundTrip0: 1,
+  },
+  {
+    file: "INV2026030039.pdf",
+    invoiceNo: "INV2026030039",
+    clientName: "DKL Tours and Travel",
+    clientPhone: "+60 18-977 2720",
+    rowCount: 4,
+    firstAmount: 1200,
+    lastAmount: 320,
+    firstDetails: "KLIA - KL",
+    lastDetails: "KL - KLIA",
+  },
+  {
+    file: "INV2026030045.pdf",
+    invoiceNo: "INV2026030045",
+    clientName: "E Like Travel & Tours Sdn Bhd",
+    clientPhone: "+60 16-923 8826",
+    rowCount: 2,
+    firstAmount: 850,
+    firstDetails: "Kuantan",
+  },
+];
+
+async function runTests() {
+  let passed = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const tc of TEST_CASES) {
+    const filePath = path.join(__dirname, "../test-pdfs", tc.file);
+
+    if (!fs.existsSync(filePath)) {
+      console.log(`  SKIP  ${tc.file} — not found in test-pdfs/`);
+      continue;
+    }
+
+    const buffer = fs.readFileSync(filePath);
+
+    try {
+      const bookings = await extractTravelBookings(buffer);
+      const b0 = bookings[0];
+      const bLast = bookings[bookings.length - 1];
+      const fileErrors: string[] = [];
+
+      const check = (name: string, pass: boolean, got: unknown, want: string) => {
+        if (!pass) fileErrors.push(`    ${name}: got ${JSON.stringify(got)} — want ${want}`);
+      };
+
+      check("invoiceNo",       b0?.invoiceNo === tc.invoiceNo,
+        b0?.invoiceNo, tc.invoiceNo);
+
+      check("clientName",      !!b0?.clientDetails?.includes(tc.clientName),
+        b0?.clientDetails, `includes "${tc.clientName}"`);
+
+      check("clientPhone",     !!b0?.clientDetails?.includes(tc.clientPhone),
+        b0?.clientDetails, `includes "${tc.clientPhone}"`);
+
+      check("no company phone", !b0?.clientDetails?.includes("606 1728"),
+        b0?.clientDetails, `NOT include "606 1728"`);
+
+      check("rowCount",        bookings.length === tc.rowCount,
+        bookings.length, String(tc.rowCount));
+
+      check("firstAmount",     Number(b0?.amount) === tc.firstAmount,
+        b0?.amount, String(tc.firstAmount));
+
+      if (tc.lastAmount !== undefined)
+        check("lastAmount",    Number(bLast?.amount) === tc.lastAmount,
+          bLast?.amount, String(tc.lastAmount));
+
+      if (tc.vehicles !== undefined)
+        check("vehicles",      b0?.numberOfVehicles === tc.vehicles,
+          b0?.numberOfVehicles, String(tc.vehicles));
+
+      if (tc.firstDetails !== undefined)
+        check("firstDetails",  !!b0?.details?.includes(tc.firstDetails),
+          b0?.details, `includes "${tc.firstDetails}"`);
+
+      if (tc.lastDetails !== undefined)
+        check("lastDetails",   !!bLast?.details?.includes(tc.lastDetails),
+          bLast?.details, `includes "${tc.lastDetails}"`);
+
+      if (tc.isRoundTrip0 !== undefined)
+        check("isRoundTrip[0]", b0?.isRoundTrip === tc.isRoundTrip0,
+          b0?.isRoundTrip, String(tc.isRoundTrip0));
+
+      if (fileErrors.length === 0) {
+        console.log(`  PASS  ${tc.file}`);
+        passed++;
+      } else {
+        console.log(`  FAIL  ${tc.file}`);
+        fileErrors.forEach((e) => { console.log(e); errors.push(`${tc.file} ${e}`); });
+        failed++;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`  ERROR ${tc.file} — ${msg}`);
+      errors.push(`${tc.file} — crashed: ${msg}`);
+      failed++;
+    }
+  }
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  if (failed > 0) {
+    console.log("\nFailed assertions:");
+    errors.forEach((e) => console.log(e));
+    process.exit(1);
   }
 }
 
-// ── Invoice number extraction tests ─────────────────────────────────────────
-
-function testInvoiceExtraction() {
-  console.log("\nTest: Invoice number extraction");
-
-  // Format 1: two-line ("Invoice Number\nINV…")
-  const text1 = [
-    "Invoice Number",
-    "INV2025120078",
-    "1. KL - KLIA 15 January, 2025 1 230.00",
-  ].join("\n");
-  const r1 = parseRawText(text1);
-  assert(
-    r1.length > 0 && r1[0].invoiceNo === "INV2025120078",
-    `INV2025120078 — two-line format (got: "${r1[0]?.invoiceNo}")`
-  );
-
-  // Format 2: same-line ("Invoice Number INV…")
-  const text2 = [
-    "Invoice Number INV2026010094",
-    "1. KL - KLIA 15 January, 2026 1 230.00",
-  ].join("\n");
-  const r2 = parseRawText(text2);
-  assert(
-    r2.length > 0 && r2[0].invoiceNo === "INV2026010094",
-    `INV2026010094 — same-line format (got: "${r2[0]?.invoiceNo}")`
-  );
-
-  // Format 3: fallback — standalone INV number in text
-  const text3 = [
-    "Some header text INV2026020004 extra info",
-    "1. KL - KLIA 15 February, 2026 1 230.00",
-  ].join("\n");
-  const r3 = parseRawText(text3);
-  assert(
-    r3.length > 0 && r3[0].invoiceNo === "INV2026020004",
-    `INV2026020004 — fallback format (got: "${r3[0]?.invoiceNo}")`
-  );
-}
-
-// ── Location parsing sanity tests ────────────────────────────────────────────
-
-function testLocationParsing() {
-  console.log("\nTest: Location & booking parsing");
-
-  const text = [
-    "Invoice Number INV2025120078",
-    "1. KL - KLIA 15 January, 2025 1 230.00",
-    "2. Malacca - KL - Malacca 20 January, 2025 2 300.00",
-  ].join("\n");
-
-  const rows = parseRawText(text);
-
-  assert(rows.length === 2, `Parsed 2 bookings (got: ${rows.length})`);
-  assert(
-    rows[0].fromLocation === "KL" && rows[0].toLocation === "KLIA",
-    `Row 0: KL → KLIA (got: ${rows[0].fromLocation} → ${rows[0].toLocation})`
-  );
-  assert(rows[0].isRoundTrip === 0, `Row 0: one-way`);
-  assert(rows[1].isRoundTrip === 1, `Row 1: round-trip`);
-  assert(rows[0].amount === 230, `Row 0: amount 230 (got: ${rows[0].amount})`);
-}
-
-// ── Client details extraction tests ──────────────────────────────────────────
-
-function testClientDetails() {
-  console.log("\nTest: Client details extraction");
-
-  // INV2025120078 — Steven: phone on same line as name
-  const text1 = [
-    "SOME TRANSPORT SDN BHD",
-    "Company Contact No : +60 12-606 1728",
-    "",
-    "Invoice Number",
-    "INV2025120078",
-    "",
-    "Steven +60 16-565 1979",
-    "",
-    "1. KL - KLIA 15 December, 2025 1 230.00",
-    "COMPANY POLICY",
-  ].join("\n");
-  const r1 = parseRawText(text1);
-  assert(
-    r1.length > 0 && r1[0].clientDetails === "Steven\n+60 16-565 1979",
-    `INV2025120078 — clientDetails "Steven\\n+60 16-565 1979" (got: "${r1[0]?.clientDetails}")`
-  );
-
-  // INV2026010094 — Jessie Oh: phone on same line as name
-  const text2 = [
-    "SOME TRANSPORT SDN BHD",
-    "Company Contact No : +60 12-606 1728",
-    "",
-    "Invoice Number INV2026010094",
-    "",
-    "Jessie Oh +60 16-533 9999",
-    "",
-    "1. KL - KLIA 15 January, 2026 1 230.00",
-    "COMPANY POLICY",
-  ].join("\n");
-  const r2 = parseRawText(text2);
-  assert(
-    r2.length > 0 && r2[0].clientDetails === "Jessie Oh\n+60 16-533 9999",
-    `INV2026010094 — clientDetails "Jessie Oh\\n+60 16-533 9999" (got: "${r2[0]?.clientDetails}")`
-  );
-
-  // INV2026020004 — Arenaa Star Hotel: name on line above, phone on next line
-  const text3 = [
-    "SOME TRANSPORT SDN BHD",
-    "Company Contact No : +60 12-606 1728",
-    "",
-    "Invoice Number INV2026020004",
-    "",
-    "Arenaa Star Hotel",
-    "+60 12-226 7224",
-    "",
-    "1. KL - KLIA 15 February, 2026 1 230.00",
-    "COMPANY POLICY",
-  ].join("\n");
-  const r3 = parseRawText(text3);
-  assert(
-    r3.length > 0 && r3[0].clientDetails === "Arenaa Star Hotel\n+60 12-226 7224",
-    `INV2026020004 — clientDetails "Arenaa Star Hotel\\n+60 12-226 7224" (got: "${r3[0]?.clientDetails}")`
-  );
-
-  // BOOK prefix: PDF line "BOOK2026020004 Arenaa Star Hotel" must be stripped
-  const text4b = [
-    "SOME TRANSPORT SDN BHD",
-    "Company Contact No : +60 12-606 1728",
-    "",
-    "Invoice Number INV2026020004",
-    "",
-    "BOOK2026020004 Arenaa Star Hotel",
-    "+60 12-226 7224",
-    "",
-    "1. KL - KLIA 15 February, 2026 1 230.00",
-    "COMPANY POLICY",
-  ].join("\n");
-  const r4b = parseRawText(text4b);
-  assert(
-    r4b.length > 0 && r4b[0].clientDetails === "Arenaa Star Hotel\n+60 12-226 7224",
-    `BOOK prefix stripped — clientDetails "Arenaa Star Hotel\\n+60 12-226 7224" (got: "${r4b[0]?.clientDetails}")`
-  );
-
-  // Guard: company contact line must NOT leak into clientDetails
-  const text4 = [
-    "Company Contact No : +60 12-606 1728",
-    "Invoice Number INV2026020004",
-    "Arenaa Star Hotel +60 12-226 7224",
-    "1. KL - KLIA 15 February, 2026 1 230.00",
-    "COMPANY POLICY",
-  ].join("\n");
-  const r4 = parseRawText(text4);
-  assert(
-    r4.length > 0 && !r4[0].clientDetails.includes("Company Contact"),
-    `Company Contact No must not leak into clientDetails (got: "${r4[0]?.clientDetails}")`
-  );
-}
-
-// ── Run all ──────────────────────────────────────────────────────────────────
-
-testInvoiceExtraction();
-testLocationParsing();
-testClientDetails();
-
-console.log(`\n${passed} passed, ${failed} failed\n`);
-if (failed > 0) process.exit(1);
+runTests();
