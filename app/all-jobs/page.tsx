@@ -80,6 +80,9 @@ export default function AllJobsPage() {
   const [confirming, setConfirming] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  const [serviceStatus, setServiceStatus] = useState<'unknown' | 'cold' | 'starting' | 'ready' | 'error'>('unknown');
+  const [countdown, setCountdown] = useState(0);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchRows = useCallback(async () => {
@@ -96,6 +99,25 @@ export default function AllJobsPage() {
   }, []);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  useEffect(() => {
+    const checkIfWarm = async () => {
+      try {
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_PDF_SERVICE_URL}/health`,
+          { signal: AbortSignal.timeout(3000) }
+        );
+        if (res.ok) {
+          setServiceStatus('ready');
+        } else {
+          setServiceStatus('cold');
+        }
+      } catch {
+        setServiceStatus('cold');
+      }
+    };
+    checkIfWarm();
+  }, []);
 
   const displayRows = useMemo(() => {
     let filtered = rows;
@@ -263,6 +285,43 @@ export default function AllJobsPage() {
     setUploadError(null);
   }
 
+  const startService = async () => {
+    setServiceStatus('starting');
+    setCountdown(60);
+
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) { clearInterval(timer); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+
+    const maxAttempts = 20;
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_PDF_SERVICE_URL}/health`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (res.ok) {
+          clearInterval(timer);
+          setCountdown(0);
+          setServiceStatus('ready');
+          return;
+        }
+      } catch {
+        // Not ready yet, keep polling
+      }
+      attempts++;
+    }
+
+    clearInterval(timer);
+    setServiceStatus('error');
+  };
+
   const totalAmount = rows.reduce((sum, r) => sum + parseFloat(r.amount ?? "0"), 0);
   const paidCount = rows.filter((r) => r.paidStatus === "P").length;
   const unpaidCount = rows.filter((r) => r.paidStatus !== "P").length;
@@ -363,7 +422,13 @@ export default function AllJobsPage() {
           <div className="flex gap-2 ml-2">
             <button
               onClick={openUploadZone}
-              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
+              disabled={serviceStatus !== 'ready'}
+              title={serviceStatus !== 'ready' ? 'Click Start PDF Service first' : ''}
+              className={`h-9 px-4 rounded-lg text-sm font-medium transition-colors ${
+                serviceStatus === 'ready'
+                  ? 'border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              }`}
             >
               Upload Invoice PDF
             </button>
@@ -385,6 +450,53 @@ export default function AllJobsPage() {
         {/* Print heading */}
         <div className="text-sm font-semibold text-zinc-900 hidden print:block">
           All Jobs Record
+        </div>
+
+        {/* PDF Service status bar */}
+        <div className="no-print">
+          {serviceStatus === 'unknown' && (
+            <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg mb-4">
+              <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+              <span className="text-sm text-gray-500">Checking PDF service...</span>
+            </div>
+          )}
+          {serviceStatus === 'cold' && (
+            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
+              <div className="w-2 h-2 rounded-full bg-amber-400"></div>
+              <span className="text-sm text-amber-700">PDF service is sleeping</span>
+              <button
+                onClick={startService}
+                className="ml-auto px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+              >
+                Start PDF Service
+              </button>
+            </div>
+          )}
+          {serviceStatus === 'starting' && (
+            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
+              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
+              <span className="text-sm text-amber-700">Starting PDF service...</span>
+              <span className="ml-auto text-sm font-mono text-amber-600">{countdown}s</span>
+            </div>
+          )}
+          {serviceStatus === 'ready' && (
+            <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg mb-4">
+              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              <span className="text-sm text-green-700">PDF service ready — you can upload invoices</span>
+            </div>
+          )}
+          {serviceStatus === 'error' && (
+            <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg mb-4">
+              <div className="w-2 h-2 rounded-full bg-red-500"></div>
+              <span className="text-sm text-red-700">PDF service failed to start — try again</span>
+              <button
+                onClick={startService}
+                className="ml-auto px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
+              >
+                Retry
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Section 2 — Upload zone (collapsible) */}
