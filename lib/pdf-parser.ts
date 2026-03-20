@@ -95,6 +95,16 @@ function cleanBookingDetails(raw: string): string {
  */
 export function parseRawText(text: string): ParsedBooking[] {
   const lines = text.split("\n").map((l) => l.trim());
+
+  // Strip square-bracket ride-type lines before booking parsing
+  // e.g. "[Maximum 10 hrs, charged if more than 10 hrs]" or "[One-Way Ride]"
+  const cleanLines = lines.filter((l) => {
+    if (l.startsWith("[")) return false;
+    if (/^charged if more than/i.test(l)) return false;
+    if (/Hourly Rate/i.test(l)) return false;
+    return true;
+  });
+
   const results: ParsedBooking[] = [];
 
   // --- Header extraction ---
@@ -168,8 +178,8 @@ export function parseRawText(text: string): ParsedBooking[] {
   let currentMonth = "";
   let currentYear = "";
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (let i = 0; i < cleanLines.length; i++) {
+    const line = cleanLines[i];
     if (!line) continue;
 
     if (STOP_PHRASES.some((phrase) => line.includes(phrase))) break;
@@ -221,7 +231,10 @@ export function parseRawText(text: string): ParsedBooking[] {
       ? remainder.slice(0, remainder.indexOf(dateMatch[0])).trim()
       : remainder;
 
-    const bookingDetails = cleanBookingDetails(rawDetails);
+    const bookingDetails = cleanBookingDetails(rawDetails)
+      .replace(/\[[^\]]*\]/g, "")
+      .replace(/Maximum \d+\s*hrs.*/i, "")
+      .trim();
 
     // Parse vehicle count and prices from the portion after the date
     const afterDate = dateMatch
@@ -254,8 +267,8 @@ export function parseRawText(text: string): ParsedBooking[] {
 
     // Look at next non-empty line for ride type annotation
     let rideTypeAnnotation = "";
-    for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
-      const next = lines[j].trim();
+    for (let j = i + 1; j < cleanLines.length && j <= i + 3; j++) {
+      const next = cleanLines[j].trim();
       if (!next) continue;
       const rideMatch = next.match(/\(?(One-Way Ride Only|Maximum \d+\s*hrs[^)]*)\)?/i);
       if (rideMatch) {
