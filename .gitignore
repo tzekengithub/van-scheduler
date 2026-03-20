@@ -36,6 +36,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# test PDFs — real invoices, do not commit
+/test-pdfs/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel

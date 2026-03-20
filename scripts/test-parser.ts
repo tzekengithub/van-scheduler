@@ -1,5 +1,7 @@
 // Run with: npx tsx scripts/test-parser.ts
-import { parseRawText } from "../lib/pdf-parser";
+import fs from "fs";
+import path from "path";
+import { parseRawText, extractTravelBookings } from "../lib/pdf-parser";
 
 // ---- INV2025120078 — Steven, 5 bookings ----
 const inv1 = `
@@ -74,4 +76,50 @@ assert(r3.length === 2, `INV2026020004: expected 2 rows, got ${r3.length}`);
 assert(r3[0].clientDetails.includes("Arenaa Star Hotel"), `clientDetails includes Arenaa Star Hotel`);
 assert(r3[1].toLocation === "KL", `row 1: toLocation = KL (Chinese stripped)`);
 
-console.log("\nDone.");
+// --- Part 2: real PDF buffer tests ---
+async function runPDFTests() {
+  console.log("\n=== Part 2: Real PDF buffer test ===");
+
+  const testPDFs = [
+    "INV2025120078.pdf",
+    "INV2026010094.pdf",
+    "INV2026020004.pdf",
+  ];
+
+  let anyFound = false;
+
+  for (const filename of testPDFs) {
+    const filePath = path.join(__dirname, "../test-pdfs", filename);
+    if (!fs.existsSync(filePath)) {
+      console.warn(`SKIP — ${filename} not found in test-pdfs/`);
+      continue;
+    }
+
+    anyFound = true;
+    const buffer = fs.readFileSync(filePath);
+    const bookings = await extractTravelBookings(buffer);
+
+    console.log(`\n${filename}: ${bookings.length} bookings found`);
+    if (bookings.length === 0) {
+      console.error(`FAIL — ${filename} returned 0 bookings`);
+      process.exitCode = 1;
+      continue;
+    }
+
+    bookings.forEach((b, i) => {
+      console.log(`  Row ${i + 1}: ${b.travelDate} | ${b.details} | MYR ${b.amount}`);
+    });
+    console.log(`PASS — ${filename}`);
+  }
+
+  if (!anyFound) {
+    console.log("No PDFs found in test-pdfs/ — skipping Part 2.");
+  }
+
+  console.log("\n=== All tests passed ===");
+}
+
+runPDFTests().catch((err) => {
+  console.error("Test failed:", err);
+  process.exit(1);
+});

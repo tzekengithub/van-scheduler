@@ -265,18 +265,28 @@ export function parseRawText(text: string): ParsedBooking[] {
 
 /**
  * Extracts travel bookings from a PDF buffer.
- * Uses dynamic import of pdf-parse to avoid Vercel filesystem issues at module load time.
+ * Uses pdf2json which works reliably in Vercel serverless (no fs.readFileSync at load time).
  */
-export async function extractTravelBookings(
-  pdfBuffer: Buffer
-): Promise<ParsedBooking[]> {
+export function extractTravelBookings(pdfBuffer: Buffer): Promise<ParsedBooking[]> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require("pdf-parse/lib/pdf-parse");
-  const data = await pdfParse(pdfBuffer);
-  try {
-    return parseRawText(data.text);
-  } catch (err) {
-    console.error("Parser error:", err);
-    return [];
-  }
+  const PDFParser = require("pdf2json");
+  return new Promise((resolve, reject) => {
+    const pdfParser = new (PDFParser as any)(null, 1);
+
+    pdfParser.on("pdfParser_dataError", (err: any) => {
+      reject(err.parserError);
+    });
+
+    pdfParser.on("pdfParser_dataReady", () => {
+      try {
+        const rawText: string = pdfParser.getRawTextContent();
+        resolve(parseRawText(rawText));
+      } catch (err) {
+        console.error("Parser error:", err);
+        resolve([]);
+      }
+    });
+
+    pdfParser.parseBuffer(pdfBuffer);
+  });
 }
