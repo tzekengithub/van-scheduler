@@ -99,6 +99,8 @@ export default function DashboardPage() {
             <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">Dashboard</span>
             <Link href="/database" className="text-zinc-500 hover:text-zinc-900 transition-colors">Raw Database</Link>
             <Link href="/daily-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">Daily Jobs</Link>
+            <Link href="/all-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">All Jobs</Link>
+            <Link href="/van-schedule" className="text-zinc-500 hover:text-zinc-900 transition-colors">Van Schedule</Link>
           </nav>
         </div>
       </header>
