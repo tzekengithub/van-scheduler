@@ -98,7 +98,12 @@ export function parseRawText(text: string): ParsedBooking[] {
   const results: ParsedBooking[] = [];
 
   // --- Header extraction ---
-  let invoiceNo = "";
+  // Match invoice number from full text (handles same-line and two-line formats)
+  const invoiceMatch =
+    text.match(/Invoice\s*Number\s*\n?\s*(INV\d+)/i) ??
+    text.match(/(INV\d{10,})/i);
+  let invoiceNo = invoiceMatch ? invoiceMatch[1] : "";
+
   let clientName = "";
   let clientContact = "";
 
@@ -106,18 +111,7 @@ export function parseRawText(text: string): ParsedBooking[] {
     const line = lines[i];
     if (!line) continue;
 
-    // Invoice number — same line: "Invoice Number    INV2026010094"
-    if (!invoiceNo) {
-      const invSameLine = line.match(/Invoice\s*(?:Number|No\.?)[:\s]*(INV\d+)/i);
-      if (invSameLine) {
-        invoiceNo = invSameLine[1];
-      } else if (/^INV\d+$/i.test(line) && i > 0 && /invoice/i.test(lines[i - 1])) {
-        // Two-line case: previous line was "Invoice Number", this line is "INV..."
-        invoiceNo = line.trim();
-      }
-    }
-
-    // Phone number — grab what's near it as client info
+    // Client info — phone number and name
     if (!clientContact) {
       const phoneMatch = line.match(/(\+60[\d\s-]{8,})/);
       if (phoneMatch) {

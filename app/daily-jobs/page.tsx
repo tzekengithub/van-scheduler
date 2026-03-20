@@ -526,10 +526,36 @@ export default function DailyJobsPage() {
                         <EditableSelect id={row.id} field="day" value={row.day} options={DAYS_LIST} />
                       </td>
                       <td className="px-2 py-1.5 w-14">
-                        <EditableSelect id={row.id} field="inHouseOrOutsourced" value={row.inHouseOrOutsourced} options={["I","O"]} />
+                        <select
+                          className="text-xs border border-zinc-300 rounded px-1 py-0.5 w-full bg-white text-zinc-900"
+                          value={row.inHouseOrOutsourced ?? "I"}
+                          onChange={async (e) => {
+                            const val = e.target.value;
+                            if (val === "I") {
+                              await patchRow(row.id, "inHouseOrOutsourced", "I");
+                              await patchRow(row.id, "outsourcedCompany", "");
+                            } else {
+                              await patchRow(row.id, "inHouseOrOutsourced", val);
+                            }
+                          }}
+                        >
+                          <option value="I">I</option>
+                          <option value="O">O</option>
+                        </select>
                       </td>
                       <td className="px-2 py-1.5 min-w-[100px]">
-                        <EditableText id={row.id} field="outsourcedCompany" value={row.outsourcedCompany} />
+                        {row.inHouseOrOutsourced === "O" ? (
+                          <input
+                            autoFocus
+                            className="w-full border border-zinc-300 rounded px-1 py-0.5 text-xs text-zinc-900 bg-white"
+                            defaultValue={row.outsourcedCompany ?? ""}
+                            placeholder="Company name"
+                            key={`oc-${row.id}`}
+                            onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
+                          />
+                        ) : (
+                          <span className="text-xs text-zinc-400 px-1 block bg-zinc-100 rounded cursor-not-allowed">—</span>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 min-w-[80px]">
                         <EditableText id={row.id} field="vehiclePlate" value={row.vehiclePlate} />
@@ -547,7 +573,14 @@ export default function DailyJobsPage() {
                         <EditableText id={row.id} field="amount" value={row.amount} />
                       </td>
                       <td className="px-2 py-1.5 w-14">
-                        <EditableText id={row.id} field="passengerCount" value={row.passengerCount != null ? String(row.passengerCount) : ""} />
+                        <input
+                          type="number"
+                          min="0"
+                          className="w-full border border-zinc-300 rounded px-1 py-0.5 text-xs text-zinc-900 bg-white"
+                          key={`pax-${row.id}`}
+                          defaultValue={row.passengerCount ?? ""}
+                          onBlur={(e) => patchRow(row.id, "passengerCount", e.target.value !== "" ? parseInt(e.target.value) : null)}
+                        />
                       </td>
                       <td className="px-2 py-1.5 min-w-[160px]">
                         <EditableText id={row.id} field="details" value={row.details} />
