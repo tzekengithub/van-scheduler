@@ -113,33 +113,30 @@ export function parseRawText(text: string): ParsedBooking[] {
   }
 
   // ── Client Details ──────────────────────────────────────────────────────────
-  // PyMuPDF: "BOOK<n>" on its own line, then client name, then (optionally a
-  // contact-person name like "Winnice"), then phone number.
-  // Phone regex covers both Malaysian (+60) and Singapore (+65) numbers.
-  const PHONE_RE = /^\+6[05][\d\s-]{7,}$/;
-  let clientName = "";
-  let clientContact = "";
+  // Collect ALL lines after the BOOK anchor until we hit a numbered booking
+  // line, a stop phrase, or reach the 4-line maximum.
+  const COMPANY_PHONE = "+60 12-606 1728";
   let bookIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     if (/^BOOK\d+$/.test(lines[i])) { bookIdx = i; break; }
   }
+
+  const clientDetailLines: string[] = [];
   if (bookIdx >= 0) {
-    for (let i = bookIdx + 1; i < Math.min(bookIdx + 6, lines.length); i++) {
+    for (let i = bookIdx + 1; i < lines.length && clientDetailLines.length < 4; i++) {
       const l = lines[i];
-      if (PHONE_RE.test(l)) {
-        clientContact = l;
-        break;
-      } else if (!clientName) {
-        clientName = l; // first non-phone line = company / client name
-      }
-      // Any further non-phone lines (e.g. "Winnice") are contact persons — skip
+      if (/^\d+\./.test(l)) break;
+      if (
+        l.includes("COMPANY POLICY") ||
+        l.includes("No Booking Details") ||
+        l.includes("Booking Details")
+      ) break;
+      if (l === COMPANY_PHONE) continue; // never include company's own phone
+      clientDetailLines.push(l);
     }
   }
 
-  const clientDetails = [clientName, clientContact]
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+  const clientDetails = clientDetailLines.join("\n").trim();
 
   // ── Booking Row Parsing ─────────────────────────────────────────────────────
   // PyMuPDF splits the table into individual cells, one per line.
