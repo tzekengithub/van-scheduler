@@ -131,11 +131,18 @@ export function parseRawText(text: string): ParsedBooking[] {
             clientName = prevLine;
           }
         }
+        // Strip any BOOK number prefix (e.g. "BOOK2026020004 Arenaa Star Hotel" → "Arenaa Star Hotel")
+        clientName = clientName.replace(/^BOOK\d+\s*/i, "").trim();
       }
     }
   }
 
-  const clientDetails = [clientName, clientContact].filter(Boolean).join(" ").trim();
+  // Format as "Name\nPhone" — strip any stray BOOK prefix as safety
+  const clientDetails = [clientName, clientContact]
+    .filter(Boolean)
+    .join("\n")
+    .replace(/BOOK\d+\s*/gi, "")
+    .trim();
 
   // --- Booking line parsing ---
   const STOP_PHRASES = [

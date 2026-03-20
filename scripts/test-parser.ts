@@ -96,8 +96,8 @@ function testClientDetails() {
   ].join("\n");
   const r1 = parseRawText(text1);
   assert(
-    r1.length > 0 && r1[0].clientDetails === "Steven +60 16-565 1979",
-    `INV2025120078 — clientDetails "Steven +60 16-565 1979" (got: "${r1[0]?.clientDetails}")`
+    r1.length > 0 && r1[0].clientDetails === "Steven\n+60 16-565 1979",
+    `INV2025120078 — clientDetails "Steven\\n+60 16-565 1979" (got: "${r1[0]?.clientDetails}")`
   );
 
   // INV2026010094 — Jessie Oh: phone on same line as name
@@ -114,8 +114,8 @@ function testClientDetails() {
   ].join("\n");
   const r2 = parseRawText(text2);
   assert(
-    r2.length > 0 && r2[0].clientDetails === "Jessie Oh +60 16-533 9999",
-    `INV2026010094 — clientDetails "Jessie Oh +60 16-533 9999" (got: "${r2[0]?.clientDetails}")`
+    r2.length > 0 && r2[0].clientDetails === "Jessie Oh\n+60 16-533 9999",
+    `INV2026010094 — clientDetails "Jessie Oh\\n+60 16-533 9999" (got: "${r2[0]?.clientDetails}")`
   );
 
   // INV2026020004 — Arenaa Star Hotel: name on line above, phone on next line
@@ -133,8 +133,27 @@ function testClientDetails() {
   ].join("\n");
   const r3 = parseRawText(text3);
   assert(
-    r3.length > 0 && r3[0].clientDetails === "Arenaa Star Hotel +60 12-226 7224",
-    `INV2026020004 — clientDetails "Arenaa Star Hotel +60 12-226 7224" (got: "${r3[0]?.clientDetails}")`
+    r3.length > 0 && r3[0].clientDetails === "Arenaa Star Hotel\n+60 12-226 7224",
+    `INV2026020004 — clientDetails "Arenaa Star Hotel\\n+60 12-226 7224" (got: "${r3[0]?.clientDetails}")`
+  );
+
+  // BOOK prefix: PDF line "BOOK2026020004 Arenaa Star Hotel" must be stripped
+  const text4b = [
+    "SOME TRANSPORT SDN BHD",
+    "Company Contact No : +60 12-606 1728",
+    "",
+    "Invoice Number INV2026020004",
+    "",
+    "BOOK2026020004 Arenaa Star Hotel",
+    "+60 12-226 7224",
+    "",
+    "1. KL - KLIA 15 February, 2026 1 230.00",
+    "COMPANY POLICY",
+  ].join("\n");
+  const r4b = parseRawText(text4b);
+  assert(
+    r4b.length > 0 && r4b[0].clientDetails === "Arenaa Star Hotel\n+60 12-226 7224",
+    `BOOK prefix stripped — clientDetails "Arenaa Star Hotel\\n+60 12-226 7224" (got: "${r4b[0]?.clientDetails}")`
   );
 
   // Guard: company contact line must NOT leak into clientDetails
