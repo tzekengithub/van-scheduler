@@ -107,6 +107,10 @@ export function parseRawText(text: string): ParsedBooking[] {
   let clientName = "";
   let clientContact = "";
 
+  // Labels that indicate the company's own contact line, not the client's.
+  // Use word boundaries so "Hotel" does not match \btel\b.
+  const SKIP_LABELS = /\bcompany\s+contact\b|\bcontact\s*no\b|\btel(?:ephone)?\b|\bfax\b|\bhotline\b/i;
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
@@ -115,12 +119,17 @@ export function parseRawText(text: string): ParsedBooking[] {
     if (!clientContact) {
       const phoneMatch = line.match(/(\+60[\d\s-]{8,})/);
       if (phoneMatch) {
-        clientContact = phoneMatch[1].trim();
         const beforePhone = line.slice(0, line.indexOf(phoneMatch[0])).trim();
+        // Skip lines like "Company Contact No : +60 ..." — that's the company's own number
+        if (SKIP_LABELS.test(beforePhone)) continue;
+        clientContact = phoneMatch[1].trim();
         if (beforePhone) {
           clientName = beforePhone;
         } else if (i > 0 && lines[i - 1] && !/^\d+\./.test(lines[i - 1])) {
-          clientName = lines[i - 1].trim();
+          const prevLine = lines[i - 1].trim();
+          if (!SKIP_LABELS.test(prevLine)) {
+            clientName = prevLine;
+          }
         }
       }
     }
