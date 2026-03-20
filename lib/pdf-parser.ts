@@ -132,6 +132,7 @@ export function parseRawText(text: string): ParsedBooking[] {
         l.includes("Booking Details")
       ) break;
       if (l === COMPANY_PHONE) continue; // never include company's own phone
+      if (l === "No") continue;           // skip stray "No" column header from PDF table
       clientDetailLines.push(l);
     }
   }
