@@ -15,35 +15,54 @@ interface BookingRow {
   manualChange: number;
 }
 
-const VAN_COLORS: Record<string, string> = {
-  "1": "bg-blue-100 text-blue-800 border-blue-200",
-  "2": "bg-emerald-100 text-emerald-800 border-emerald-200",
-  "3": "bg-amber-100 text-amber-800 border-amber-200",
-  "4": "bg-rose-100 text-rose-800 border-rose-200",
-};
+interface Van {
+  id: number;
+  vanNumber: string;
+}
 
-function VanBadge({ vanNumber }: { vanNumber: string | null }) {
+const BADGE_COLORS = [
+  "bg-blue-100 text-blue-800 border-blue-200",
+  "bg-emerald-100 text-emerald-800 border-emerald-200",
+  "bg-amber-100 text-amber-800 border-amber-200",
+  "bg-rose-100 text-rose-800 border-rose-200",
+  "bg-violet-100 text-violet-800 border-violet-200",
+  "bg-cyan-100 text-cyan-800 border-cyan-200",
+  "bg-orange-100 text-orange-800 border-orange-200",
+  "bg-pink-100 text-pink-800 border-pink-200",
+];
+
+function VanBadge({ vanNumber, index }: { vanNumber: string | null; index?: number }) {
   const colors =
-    vanNumber && VAN_COLORS[vanNumber]
-      ? VAN_COLORS[vanNumber]
+    vanNumber != null && index != null
+      ? BADGE_COLORS[index % BADGE_COLORS.length]
       : "bg-zinc-100 text-zinc-600 border-zinc-200";
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${colors}`}
     >
-      {vanNumber ? `Van ${vanNumber}` : "Unassigned"}
+      {vanNumber ?? "Unassigned"}
     </span>
   );
 }
 
 export default function DashboardPage() {
   const [bookings, setBookings] = useState<BookingRow[]>([]);
+  const [vans, setVans] = useState<Van[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
+  const [vanLoading, setVanLoading] = useState(false);
+  const [newPlate, setNewPlate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchVans = useCallback(async () => {
+    try {
+      const res = await fetch("/api/vans");
+      if (res.ok) setVans(await res.json());
+    } catch {}
+  }, []);
 
   const fetchBookings = useCallback(async () => {
     setLoading(true);
@@ -61,7 +80,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchBookings();
-  }, [fetchBookings]);
+    fetchVans();
+  }, [fetchBookings, fetchVans]);
 
   async function handleUpload(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -110,8 +130,52 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleAddVan(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newPlate.trim()) return;
+    setVanLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/vans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vanNumber: newPlate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to add van");
+      setSuccess(`Van ${data.vanNumber} added`);
+      setNewPlate("");
+      await fetchVans();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setVanLoading(false);
+    }
+  }
+
+  async function handleDeleteVan(id: number, plate: string) {
+    if (!confirm(`Remove van ${plate}? It will be unassigned from any bookings.`)) return;
+    setError(null);
+    try {
+      const res = await fetch("/api/vans", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete van");
+      setSuccess(`Van ${plate} removed`);
+      await fetchVans();
+      await fetchBookings();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   // Group bookings by date for visual separation
   const dates = [...new Set(bookings.map((b) => b.travelDate))];
+  const vanIndexMap = Object.fromEntries(vans.map((v, i) => [v.vanNumber, i]));
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans">
@@ -139,6 +203,47 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+        {/* Van Management */}
+        <div className="bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-zinc-700 mb-4">Van / Plate Management</h2>
+          <form onSubmit={handleAddVan} className="flex gap-2 mb-4">
+            <input
+              type="text"
+              value={newPlate}
+              onChange={(e) => setNewPlate(e.target.value)}
+              placeholder="Enter plate number e.g. WXX 1234"
+              className="flex-1 h-9 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 uppercase"
+            />
+            <button
+              type="submit"
+              disabled={vanLoading || !newPlate.trim()}
+              className="h-9 px-4 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+            >
+              {vanLoading ? "Adding…" : "Add Van"}
+            </button>
+          </form>
+          {vans.length === 0 ? (
+            <p className="text-xs text-zinc-400">No vans added yet.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {vans.map((van, i) => (
+                <div
+                  key={van.id}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold ${BADGE_COLORS[i % BADGE_COLORS.length]}`}
+                >
+                  {van.vanNumber}
+                  <button
+                    onClick={() => handleDeleteVan(van.id, van.vanNumber)}
+                    className="ml-1 opacity-50 hover:opacity-100 transition-opacity font-bold"
+                    title="Remove van"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {/* Toolbar */}
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end justify-between">
           <form onSubmit={handleUpload} className="flex gap-3 items-end flex-wrap">
@@ -240,7 +345,10 @@ export default function DashboardPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <VanBadge vanNumber={booking.vanNumber} />
+                        <VanBadge
+                          vanNumber={booking.vanNumber}
+                          index={booking.vanNumber != null ? vanIndexMap[booking.vanNumber] : undefined}
+                        />
                       </td>
                       <td
                         className="px-4 py-3 text-zinc-500 text-xs max-w-xs truncate"
@@ -257,15 +365,15 @@ export default function DashboardPage() {
         )}
 
         {/* Van legend */}
-        {bookings.length > 0 && (
+        {vans.length > 0 && (
           <div className="flex flex-wrap gap-2 items-center text-xs text-zinc-500">
             <span className="font-medium">Legend:</span>
-            {Object.entries(VAN_COLORS).map(([num, cls]) => (
+            {vans.map((van, i) => (
               <span
-                key={num}
-                className={`px-2 py-0.5 rounded-full border font-medium ${cls}`}
+                key={van.id}
+                className={`px-2 py-0.5 rounded-full border font-medium ${BADGE_COLORS[i % BADGE_COLORS.length]}`}
               >
-                Van {num}
+                {van.vanNumber}
               </span>
             ))}
           </div>
