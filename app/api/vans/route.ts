@@ -14,7 +14,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { vanNumber } = await request.json();
+    const { vanNumber, driverName, driverContact } = await request.json();
     if (!vanNumber || !vanNumber.trim()) {
       return NextResponse.json({ error: "Plate number is required" }, { status: 400 });
     }
@@ -26,7 +26,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Plate number already exists" }, { status: 409 });
     }
 
-    const [created] = await db.insert(vans).values({ vanNumber: plate }).returning();
+    const [created] = await db
+      .insert(vans)
+      .values({
+        vanNumber: plate,
+        driverName: driverName?.trim() ?? "",
+        driverContact: driverContact?.trim() ?? "",
+      })
+      .returning();
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

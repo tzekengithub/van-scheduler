@@ -18,6 +18,8 @@ interface BookingRow {
 interface Van {
   id: number;
   vanNumber: string;
+  driverName: string | null;
+  driverContact: string | null;
 }
 
 const BADGE_COLORS = [
@@ -53,6 +55,8 @@ export default function DashboardPage() {
   const [clearLoading, setClearLoading] = useState(false);
   const [vanLoading, setVanLoading] = useState(false);
   const [newPlate, setNewPlate] = useState("");
+  const [newDriverName, setNewDriverName] = useState("");
+  const [newDriverContact, setNewDriverContact] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -132,7 +136,7 @@ export default function DashboardPage() {
 
   async function handleAddVan(e: React.FormEvent) {
     e.preventDefault();
-    if (!newPlate.trim()) return;
+    if (!newPlate.trim() || !newDriverName.trim()) return;
     setVanLoading(true);
     setError(null);
     setSuccess(null);
@@ -140,12 +144,18 @@ export default function DashboardPage() {
       const res = await fetch("/api/vans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vanNumber: newPlate }),
+        body: JSON.stringify({
+          vanNumber: newPlate,
+          driverName: newDriverName,
+          driverContact: newDriverContact,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to add van");
       setSuccess(`Van ${data.vanNumber} added`);
       setNewPlate("");
+      setNewDriverName("");
+      setNewDriverContact("");
       await fetchVans();
     } catch (e) {
       setError(String(e));
@@ -198,6 +208,12 @@ export default function DashboardPage() {
             >
               Raw Database
             </Link>
+            <Link
+              href="/daily-jobs"
+              className="text-zinc-500 hover:text-zinc-900 transition-colors"
+            >
+              Daily Jobs
+            </Link>
           </nav>
         </div>
       </header>
@@ -206,17 +222,33 @@ export default function DashboardPage() {
         {/* Van Management */}
         <div className="bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
           <h2 className="text-sm font-semibold text-zinc-700 mb-4">Van / Plate Management</h2>
-          <form onSubmit={handleAddVan} className="flex gap-2 mb-4">
+          <form onSubmit={handleAddVan} className="flex flex-wrap gap-2 mb-4 items-end">
             <input
               type="text"
               value={newPlate}
               onChange={(e) => setNewPlate(e.target.value)}
-              placeholder="Enter plate number e.g. WXX 1234"
-              className="flex-1 h-9 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 uppercase"
+              placeholder="e.g. VKB 8468"
+              required
+              className="h-9 w-36 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 uppercase"
+            />
+            <input
+              type="text"
+              value={newDriverName}
+              onChange={(e) => setNewDriverName(e.target.value)}
+              placeholder="e.g. Lee Yoke Khuan"
+              required
+              className="h-9 flex-1 min-w-[160px] px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+            />
+            <input
+              type="text"
+              value={newDriverContact}
+              onChange={(e) => setNewDriverContact(e.target.value)}
+              placeholder="e.g. +60 12-xxx xxxx"
+              className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
             <button
               type="submit"
-              disabled={vanLoading || !newPlate.trim()}
+              disabled={vanLoading || !newPlate.trim() || !newDriverName.trim()}
               className="h-9 px-4 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
             >
               {vanLoading ? "Adding…" : "Add Van"}
@@ -229,12 +261,17 @@ export default function DashboardPage() {
               {vans.map((van, i) => (
                 <div
                   key={van.id}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold ${BADGE_COLORS[i % BADGE_COLORS.length]}`}
+                  className={`flex items-start gap-2 px-3 py-2 rounded-xl border text-xs font-semibold ${BADGE_COLORS[i % BADGE_COLORS.length]}`}
                 >
-                  {van.vanNumber}
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span>{van.vanNumber}</span>
+                    {van.driverName && (
+                      <span className="font-normal opacity-70">Driver: {van.driverName}</span>
+                    )}
+                  </div>
                   <button
                     onClick={() => handleDeleteVan(van.id, van.vanNumber)}
-                    className="ml-1 opacity-50 hover:opacity-100 transition-opacity font-bold"
+                    className="opacity-50 hover:opacity-100 transition-opacity font-bold leading-none mt-0.5"
                     title="Remove van"
                   >
                     ×

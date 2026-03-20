@@ -1,8 +1,10 @@
-import { pgTable, serial, text, integer } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, numeric } from "drizzle-orm/pg-core";
 
 export const vans = pgTable("vans", {
   id: serial("id").primaryKey(),
   vanNumber: text("van_number").notNull().unique(),
+  driverName: text("driver_name").default(""),
+  driverContact: text("driver_contact").default(""),
 });
 
 export const bookings = pgTable("bookings", {
@@ -14,6 +16,22 @@ export const bookings = pgTable("bookings", {
   details: text("details"),
   vanId: integer("van_id").references(() => vans.id),
   manualChange: integer("manual_change").notNull().default(0),
+  // New fields
+  invoiceNo: text("invoice_no").default(""),
+  clientDetails: text("client_details").default(""),
+  day: text("day").default(""),
+  month: text("month").default(""),
+  year: text("year").default(""),
+  passengerCount: integer("passenger_count").default(1),
+  myrPerVehicle: numeric("myr_per_vehicle").default("0"),
+  amount: numeric("amount").default("0"),
+  vehiclePlate: text("vehicle_plate").default(""),
+  driverName: text("driver_name").default(""),
+  paidStatus: text("paid_status").default("U"),
+  overtime: text("overtime").default(""),
+  introducer: text("introducer").default(""),
+  inHouseOrOutsourced: text("in_house_or_outsourced").default("I"),
+  outsourcedCompany: text("outsourced_company").default(""),
 });
 
 export type Van = typeof vans.$inferSelect;

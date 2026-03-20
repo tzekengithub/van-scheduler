@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { bookings } from "@/drizzle/schema";
+import { bookings, vans } from "@/drizzle/schema";
+import { eq } from "drizzle-orm";
 import { extractTravelBookings } from "@/lib/pdf-parser";
 import { smartAssignVan } from "@/lib/van-assignment";
 
@@ -34,6 +35,17 @@ export async function POST(request: NextRequest) {
       for (const booking of parsed) {
         const vanId = await smartAssignVan(booking.travelDate, booking.fromLocation);
 
+        // Fetch the assigned van to auto-fill plate and driver name
+        let vehiclePlate = booking.vehiclePlate;
+        let driverName = booking.driverName;
+        if (vanId != null) {
+          const [van] = await db.select().from(vans).where(eq(vans.id, vanId)).limit(1);
+          if (van) {
+            vehiclePlate = van.vanNumber;
+            driverName = van.driverName ?? "";
+          }
+        }
+
         await db.insert(bookings).values({
           travelDate: booking.travelDate,
           fromLocation: booking.fromLocation,
@@ -42,6 +54,21 @@ export async function POST(request: NextRequest) {
           details: booking.details,
           vanId,
           manualChange: 0,
+          invoiceNo: booking.invoiceNo,
+          clientDetails: booking.clientDetails,
+          day: booking.day,
+          month: booking.month,
+          year: booking.year,
+          passengerCount: booking.numberOfVehicles,
+          myrPerVehicle: String(booking.myrPerVehicle),
+          amount: String(booking.amount),
+          vehiclePlate,
+          driverName,
+          paidStatus: booking.paidStatus,
+          overtime: booking.overtime,
+          introducer: booking.introducer,
+          inHouseOrOutsourced: booking.inHouseOrOutsourced,
+          outsourcedCompany: booking.outsourcedCompany,
         });
 
         totalInserted++;
