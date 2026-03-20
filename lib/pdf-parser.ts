@@ -200,7 +200,7 @@ export function parseRawText(text: string): ParsedBooking[] {
     let amount = 0;
 
     if (nums.length >= 1) {
-      const first = numTokens[0];
+      const first = numTokens[0] ?? "";
       // Is first token an integer vehicle count (no decimal, value <= 20)?
       if (!first.includes(".") && nums[0] <= 20) {
         numberOfVehicles = nums[0];
