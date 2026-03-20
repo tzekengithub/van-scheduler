@@ -84,6 +84,7 @@ export default function AllJobsPage() {
   const [countdown, setCountdown] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -102,21 +103,30 @@ export default function AllJobsPage() {
 
   useEffect(() => {
     const checkIfWarm = async () => {
+      const serviceUrl = process.env.NEXT_PUBLIC_PDF_SERVICE_URL;
+      if (!serviceUrl) { setServiceStatus('cold'); return; }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
       try {
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_PDF_SERVICE_URL}/health`,
-          { signal: AbortSignal.timeout(3000) }
-        );
+        const res = await fetch(`${serviceUrl}/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (res.ok) {
           setServiceStatus('ready');
         } else {
           setServiceStatus('cold');
         }
       } catch {
+        clearTimeout(timeoutId);
         setServiceStatus('cold');
       }
     };
     checkIfWarm();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, []);
 
   const displayRows = useMemo(() => {
@@ -286,12 +296,26 @@ export default function AllJobsPage() {
   }
 
   const startService = async () => {
+    console.log('Starting service...');
     setServiceStatus('starting');
     setCountdown(60);
 
-    const timer = setInterval(() => {
+    const serviceUrl = process.env.NEXT_PUBLIC_PDF_SERVICE_URL;
+    console.log('Service URL:', serviceUrl);
+
+    if (!serviceUrl) {
+      console.error('NEXT_PUBLIC_PDF_SERVICE_URL is not set!');
+      setServiceStatus('error');
+      return;
+    }
+
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
       setCountdown(prev => {
-        if (prev <= 1) { clearInterval(timer); return 0; }
+        if (prev <= 1) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          return 0;
+        }
         return prev - 1;
       });
     }, 1000);
@@ -301,24 +325,30 @@ export default function AllJobsPage() {
 
     while (attempts < maxAttempts) {
       await new Promise(r => setTimeout(r, 3000));
+      console.log(`Attempt ${attempts + 1} — fetching health...`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_PDF_SERVICE_URL}/health`,
-          { signal: AbortSignal.timeout(5000) }
-        );
+        const res = await fetch(`${serviceUrl}/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        console.log('Response status:', res.status);
+        console.log('Response ok:', res.ok);
         if (res.ok) {
-          clearInterval(timer);
+          console.log('Service is ready!');
+          if (timerRef.current) clearInterval(timerRef.current);
           setCountdown(0);
           setServiceStatus('ready');
           return;
         }
-      } catch {
-        // Not ready yet, keep polling
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        console.log(`Attempt ${attempts + 1} failed:`, err.message);
       }
       attempts++;
     }
 
-    clearInterval(timer);
+    console.log('All attempts failed');
+    if (timerRef.current) clearInterval(timerRef.current);
     setServiceStatus('error');
   };
 
