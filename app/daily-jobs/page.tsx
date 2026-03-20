@@ -862,7 +862,18 @@ export default function DailyJobsPage() {
         )}
       </main>
 
-      {/* Duplicate warning modal */}
+      {/* Duplicate warning modal
+          NOTE: This popup is the safeguard against double-uploads (e.g. INV2025120078
+          was inserted twice before this guard existed). If a duplicate ever slips
+          through again, clean it up with:
+            DELETE FROM bookings WHERE id IN (
+              SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                  PARTITION BY invoice_no, travel_date, amount ORDER BY id ASC
+                ) AS rn FROM bookings
+              ) ranked WHERE rn > 1
+            );
+      */}
       {duplicateWarning && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4">
