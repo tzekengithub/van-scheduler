@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 
 const MONTHS_LIST = [
@@ -8,7 +8,6 @@ const MONTHS_LIST = [
   "July","August","September","October","November","December",
 ];
 const DAYS_LIST = Array.from({ length: 31 }, (_, i) => String(i + 1));
-const YEARS_LIST = ["2024", "2025", "2026", "2027"];
 const OVERTIME_OPTIONS = Array.from({ length: 21 }, (_, i) =>
   (i * 0.5).toFixed(i === 0 ? 0 : 1)
 );
@@ -58,19 +57,19 @@ interface PreviewBooking {
   amount: number;
 }
 
-export default function DailyJobsPage() {
-  const today = new Date();
-  const [day, setDay] = useState(String(today.getDate()));
-  const [month, setMonth] = useState(MONTHS_LIST[today.getMonth()]);
-  const [year, setYear] = useState(String(today.getFullYear()));
+type SortField = "travelDate" | "invoiceNo" | "amount";
+type SortDir = "asc" | "desc";
 
+export default function AllJobsPage() {
   const [rows, setRows] = useState<BookingRow[]>([]);
-  const [draftRow, setDraftRow] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [creatingDraft, setCreatingDraft] = useState(false);
   const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [cellStates, setCellStates] = useState<Record<string, "saving" | "saved" | "error">>({});
+
+  const [search, setSearch] = useState("");
+  const [sortField, setSortField] = useState<SortField>("travelDate");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   // Upload zone
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -86,20 +85,55 @@ export default function DailyJobsPage() {
   const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/bookings?day=${encodeURIComponent(day)}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}`
-      );
+      const res = await fetch("/api/bookings");
       if (res.ok) {
         const data: BookingRow[] = await res.json();
         setRows(data);
-        setDraftRow(data.length === 0);
       }
     } finally {
       setLoading(false);
     }
-  }, [day, month, year]);
+  }, []);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  const displayRows = useMemo(() => {
+    let filtered = rows;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      filtered = rows.filter((r) =>
+        (r.clientDetails ?? "").toLowerCase().includes(q) ||
+        (r.invoiceNo ?? "").toLowerCase().includes(q) ||
+        (r.details ?? "").toLowerCase().includes(q) ||
+        (r.vehiclePlate ?? "").toLowerCase().includes(q) ||
+        (r.driverName ?? "").toLowerCase().includes(q)
+      );
+    }
+    return [...filtered].sort((a, b) => {
+      let aVal: string | number = "";
+      let bVal: string | number = "";
+      if (sortField === "travelDate") { aVal = a.travelDate ?? ""; bVal = b.travelDate ?? ""; }
+      else if (sortField === "invoiceNo") { aVal = a.invoiceNo ?? ""; bVal = b.invoiceNo ?? ""; }
+      else if (sortField === "amount") { aVal = parseFloat(a.amount ?? "0"); bVal = parseFloat(b.amount ?? "0"); }
+      if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [rows, search, sortField, sortDir]);
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  }
+
+  function sortArrow(field: SortField) {
+    if (sortField !== field) return "";
+    return sortDir === "asc" ? " ↑" : " ↓";
+  }
 
   async function patchRow(id: number, field: string, value: unknown) {
     const key = `${id}-${field}`;
@@ -148,36 +182,18 @@ export default function DailyJobsPage() {
     }
   }
 
-  async function materializeDraft(field: string) {
-    if (creatingDraft) return;
-    setCreatingDraft(true);
-    try {
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ day, month, year }),
-      });
-      if (res.ok) {
-        const newRow: BookingRow = await res.json();
-        setRows([newRow]);
-        setDraftRow(false);
-        startEdit(newRow.id, field, "");
-      }
-    } finally {
-      setCreatingDraft(false);
-    }
-  }
-
   async function handleAddRow() {
+    const today = new Date();
+    const d = String(today.getDate());
+    const m = MONTHS_LIST[today.getMonth()];
+    const y = String(today.getFullYear());
     const res = await fetch("/api/bookings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ day, month, year }),
+      body: JSON.stringify({ day: d, month: m, year: y }),
     });
     if (res.ok) {
-      const newRow: BookingRow = await res.json();
-      setRows((prev) => [...prev, newRow]);
-      setDraftRow(false);
+      await fetchRows();
     }
   }
 
@@ -212,15 +228,11 @@ export default function DailyJobsPage() {
     if (uploadFiles.length === 0) return;
     setConfirming(true);
     try {
-      let totalCount = 0;
       for (const file of uploadFiles) {
         const formData = new FormData();
         formData.append("file", file);
         const res = await fetch("/api/upload", { method: "POST", body: formData });
-        if (res.ok) {
-          const { count } = await res.json();
-          totalCount += count;
-        } else {
+        if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           setUploadError(err.error ?? `Upload failed for ${file.name}`);
           return;
@@ -230,18 +242,7 @@ export default function DailyJobsPage() {
       setUploadFiles([]);
       setPreviewRows(null);
       setUploadError(null);
-      const navRes = await fetch(`/api/bookings?recentCount=${totalCount}`);
-      if (navRes.ok) {
-        const recent: BookingRow[] = await navRes.json();
-        const first = recent
-          .filter((r) => r.day && r.month && r.year)
-          .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""))[0];
-        if (first?.day && first?.month && first?.year) {
-          setDay(first.day);
-          setMonth(first.month);
-          setYear(first.year);
-        }
-      }
+      await fetchRows();
     } finally {
       setConfirming(false);
     }
@@ -320,11 +321,8 @@ export default function DailyJobsPage() {
     );
   }
 
-  const colHeaders = [
-    "Day", "I/O", "Outsourced Co.", "Vehicle Plate #", "Driver Name",
-    "Invoice #", "Client's Details", "Amount (MYR)", "Passenger #",
-    "Booking Details", "Overtime", "Introducer", "P/U", "",
-  ];
+  const thSort = "px-2 py-2.5 text-left font-semibold text-zinc-900 whitespace-nowrap cursor-pointer select-none hover:bg-zinc-100";
+  const thPlain = "px-2 py-2.5 text-left font-semibold text-zinc-900 whitespace-nowrap";
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans">
@@ -340,12 +338,12 @@ export default function DailyJobsPage() {
       {/* Header */}
       <header className="bg-white border-b border-zinc-200 px-6 py-4 no-print">
         <div className="max-w-full mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-zinc-900">Daily Jobs Record</h1>
+          <h1 className="text-xl font-semibold text-zinc-900">All Jobs</h1>
           <nav className="flex gap-4 text-sm font-medium">
             <Link href="/" className="text-zinc-500 hover:text-zinc-900 transition-colors">Dashboard</Link>
             <Link href="/database" className="text-zinc-500 hover:text-zinc-900 transition-colors">Raw Database</Link>
-            <Link href="/all-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">All Jobs</Link>
-            <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">Daily Jobs</span>
+            <Link href="/daily-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">Daily Jobs</Link>
+            <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">All Jobs</span>
           </nav>
         </div>
       </header>
@@ -354,36 +352,13 @@ export default function DailyJobsPage() {
 
         {/* Section 1 — Top bar */}
         <div className="flex gap-3 items-end flex-wrap no-print">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Day</label>
-            <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-              value={day}
-              onChange={(e) => setDay(e.target.value)}
-            >
-              {DAYS_LIST.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Month</label>
-            <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            >
-              {MONTHS_LIST.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Year</label>
-            <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-            >
-              {YEARS_LIST.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
+          <input
+            type="text"
+            placeholder="Search by client, invoice, route, plate, driver…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400 w-80"
+          />
           <div className="flex gap-2 ml-2">
             <button
               onClick={openUploadZone}
@@ -408,7 +383,7 @@ export default function DailyJobsPage() {
 
         {/* Print heading */}
         <div className="text-sm font-semibold text-zinc-900 hidden print:block">
-          Daily Jobs Record — {day} {month} {year}
+          All Jobs Record
         </div>
 
         {/* Section 2 — Upload zone (collapsible) */}
@@ -529,17 +504,18 @@ export default function DailyJobsPage() {
           </div>
         )}
 
-        {/* Section 3 — Summary bar */}
+        {/* Section 3 — Summary bar (totals for ALL rows, unfiltered) */}
         {!loading && (
           <div className="no-print flex gap-6 text-sm text-zinc-900 bg-white rounded-lg border border-zinc-200 px-4 py-2 w-fit">
             <span>Rows: <strong>{rows.length}</strong></span>
+            {search && <span className="text-zinc-500">Showing: <strong>{displayRows.length}</strong></span>}
             <span>Total: <strong>MYR {totalAmount.toFixed(2)}</strong></span>
             <span>Paid: <strong className="text-green-600">{paidCount}</strong></span>
             <span>Unpaid: <strong className="text-red-500">{unpaidCount}</strong></span>
           </div>
         )}
 
-        {/* Section 4 — Daily jobs table */}
+        {/* Section 4 — Table */}
         {loading ? (
           <div className="text-center py-20 text-zinc-400 text-sm">Loading…</div>
         ) : (
@@ -547,143 +523,132 @@ export default function DailyJobsPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="bg-zinc-50 border-b border-zinc-200">
-                  {colHeaders.map((col, i) => (
-                    <th
-                      key={i}
-                      className={`px-2 py-2.5 text-left font-semibold text-zinc-900 whitespace-nowrap${i === colHeaders.length - 1 ? " no-print" : ""}`}
-                    >
-                      {col}
-                    </th>
-                  ))}
+                  <th className={thSort} onClick={() => toggleSort("travelDate")}>
+                    Day{sortArrow("travelDate")}
+                  </th>
+                  <th className={thPlain}>I/O</th>
+                  <th className={thPlain}>Outsourced Co.</th>
+                  <th className={thPlain}>Vehicle Plate #</th>
+                  <th className={thPlain}>Driver Name</th>
+                  <th className={thSort} onClick={() => toggleSort("invoiceNo")}>
+                    Invoice #{sortArrow("invoiceNo")}
+                  </th>
+                  <th className={thPlain}>Client&apos;s Details</th>
+                  <th className={thSort} onClick={() => toggleSort("amount")}>
+                    Amount (MYR){sortArrow("amount")}
+                  </th>
+                  <th className={thPlain}>Passenger #</th>
+                  <th className={thPlain}>Booking Details</th>
+                  <th className={thPlain}>Overtime</th>
+                  <th className={thPlain}>Introducer</th>
+                  <th className={thPlain}>P/U</th>
+                  <th className={`${thPlain} no-print`}></th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
-                  return (
-                    <tr key={row.id} className={`border-b border-zinc-100 hover:brightness-95 ${vanRowColor(row.vanId)}`}>
-                      <td className="px-2 py-1.5 w-14">
-                        <EditableSelect id={row.id} field="day" value={row.day} options={DAYS_LIST} />
-                      </td>
-                      <td className="px-2 py-1.5 w-14">
-                        <select
-                          className={`text-xs border rounded px-1 py-0.5 w-full bg-white text-zinc-900 ${
-                            cellStates[`${row.id}-inHouseOrOutsourced`] === "saving" ? "border-zinc-300 animate-pulse" :
-                            cellStates[`${row.id}-inHouseOrOutsourced`] === "saved"  ? "border-green-400" :
-                            cellStates[`${row.id}-inHouseOrOutsourced`] === "error"  ? "border-red-400" : "border-zinc-300"
-                          }`}
-                          value={row.inHouseOrOutsourced ?? "I"}
-                          onChange={async (e) => {
-                            const val = e.target.value;
-                            if (val === "I") {
-                              await patchRow(row.id, "inHouseOrOutsourced", "I");
-                              await patchRow(row.id, "outsourcedCompany", "");
-                            } else {
-                              await patchRow(row.id, "inHouseOrOutsourced", val);
-                            }
-                          }}
-                        >
-                          <option value="I">I</option>
-                          <option value="O">O</option>
-                        </select>
-                      </td>
-                      <td className="px-2 py-1.5 min-w-[100px]">
-                        {row.inHouseOrOutsourced === "O" ? (
-                          <input
-                            autoFocus
-                            className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
-                              cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
-                              cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" :
-                              cellStates[`${row.id}-outsourcedCompany`] === "error"  ? "border-red-400" : "border-zinc-300"
-                            }`}
-                            defaultValue={row.outsourcedCompany ?? ""}
-                            placeholder="Company name"
-                            key={`oc-${row.id}`}
-                            onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
-                          />
-                        ) : (
-                          <span className="text-xs text-zinc-400 px-1 block bg-zinc-100 rounded cursor-not-allowed">—</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 min-w-[80px]">
-                        <EditableText id={row.id} field="vehiclePlate" value={row.vehiclePlate} />
-                      </td>
-                      <td className="px-2 py-1.5 min-w-[80px]">
-                        <EditableText id={row.id} field="driverName" value={row.driverName} />
-                      </td>
-                      <td className="px-2 py-1.5 font-mono whitespace-nowrap text-zinc-900 text-xs">
-                        {row.invoiceNo ?? ""}
-                      </td>
-                      <td className="px-2 py-1.5 min-w-[130px]">
-                        <EditableText id={row.id} field="clientDetails" value={row.clientDetails} />
-                      </td>
-                      <td className="px-2 py-1.5 min-w-[80px]">
-                        <EditableText id={row.id} field="amount" value={row.amount} />
-                      </td>
-                      <td className="px-2 py-1.5 w-14">
+                {displayRows.map((row) => (
+                  <tr key={row.id} className={`border-b border-zinc-100 hover:brightness-95 ${vanRowColor(row.vanId)}`}>
+                    <td className="px-2 py-1.5 w-14">
+                      <EditableSelect id={row.id} field="day" value={row.day} options={DAYS_LIST} />
+                    </td>
+                    <td className="px-2 py-1.5 w-14">
+                      <select
+                        className={`text-xs border rounded px-1 py-0.5 w-full bg-white text-zinc-900 ${
+                          cellStates[`${row.id}-inHouseOrOutsourced`] === "saving" ? "border-zinc-300 animate-pulse" :
+                          cellStates[`${row.id}-inHouseOrOutsourced`] === "saved"  ? "border-green-400" :
+                          cellStates[`${row.id}-inHouseOrOutsourced`] === "error"  ? "border-red-400" : "border-zinc-300"
+                        }`}
+                        value={row.inHouseOrOutsourced ?? "I"}
+                        onChange={async (e) => {
+                          const val = e.target.value;
+                          if (val === "I") {
+                            await patchRow(row.id, "inHouseOrOutsourced", "I");
+                            await patchRow(row.id, "outsourcedCompany", "");
+                          } else {
+                            await patchRow(row.id, "inHouseOrOutsourced", val);
+                          }
+                        }}
+                      >
+                        <option value="I">I</option>
+                        <option value="O">O</option>
+                      </select>
+                    </td>
+                    <td className="px-2 py-1.5 min-w-[100px]">
+                      {row.inHouseOrOutsourced === "O" ? (
                         <input
-                          type="number"
-                          min="0"
+                          autoFocus
                           className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
-                            cellStates[`${row.id}-passengerCount`] === "saving" ? "border-zinc-300 animate-pulse" :
-                            cellStates[`${row.id}-passengerCount`] === "saved"  ? "border-green-400" :
-                            cellStates[`${row.id}-passengerCount`] === "error"  ? "border-red-400" : "border-zinc-300"
+                            cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
+                            cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" :
+                            cellStates[`${row.id}-outsourcedCompany`] === "error"  ? "border-red-400" : "border-zinc-300"
                           }`}
-                          key={`pax-${row.id}`}
-                          defaultValue={row.passengerCount ?? ""}
-                          onBlur={(e) => patchRow(row.id, "passengerCount", e.target.value !== "" ? parseInt(e.target.value) : null)}
+                          defaultValue={row.outsourcedCompany ?? ""}
+                          placeholder="Company name"
+                          key={`oc-${row.id}`}
+                          onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
                         />
-                      </td>
-                      <td className="px-2 py-1.5 min-w-[160px]">
-                        <EditableText id={row.id} field="details" value={row.details} />
-                      </td>
-                      <td className="px-2 py-1.5 w-20">
-                        <EditableSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} />
-                      </td>
-                      <td className="px-2 py-1.5 min-w-[80px]">
-                        <EditableText id={row.id} field="introducer" value={row.introducer} />
-                      </td>
-                      <td className="px-2 py-1.5 w-14">
-                        <EditableSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["P","U"]} />
-                      </td>
-                      <td className="px-2 py-1.5 no-print">
-                        <button
-                          onClick={() => handleDelete(row.id)}
-                          className="text-red-400 hover:text-red-600 font-bold text-base leading-none px-1"
-                          title="Delete row"
-                        >
-                          ×
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {/* Phantom draft row */}
-                {draftRow && (
-                  <tr className="border-b border-zinc-100 bg-zinc-50 opacity-70">
-                    <td className="px-2 py-1.5 w-14">
-                      <span className="text-xs text-zinc-900 px-1">{day}</span>
+                      ) : (
+                        <span className="text-xs text-zinc-400 px-1 block bg-zinc-100 rounded cursor-not-allowed">—</span>
+                      )}
                     </td>
-                    <td className="px-2 py-1.5 w-14">
-                      <span className="cursor-pointer text-xs text-zinc-400 hover:text-zinc-600 px-1" onClick={() => materializeDraft("inHouseOrOutsourced")}>I</span>
-                    </td>
-                    {(["outsourcedCompany","vehiclePlate","driverName"] as const).map((f) => (
-                      <td key={f} className="px-2 py-1.5 min-w-[80px]">
-                        <span className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block" onClick={() => materializeDraft(f)}>—</span>
-                      </td>
-                    ))}
-                    <td className="px-2 py-1.5 text-xs text-zinc-300">—</td>
-                    {(["clientDetails","amount","passengerCount","details"] as const).map((f) => (
-                      <td key={f} className="px-2 py-1.5 min-w-[80px]">
-                        <span className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block" onClick={() => materializeDraft(f)}>—</span>
-                      </td>
-                    ))}
-                    <td className="px-2 py-1.5 w-20"><span className="text-xs text-zinc-300 px-1">0</span></td>
                     <td className="px-2 py-1.5 min-w-[80px]">
-                      <span className="cursor-pointer text-zinc-300 hover:text-zinc-500 text-xs px-1 min-w-[40px] inline-block" onClick={() => materializeDraft("introducer")}>—</span>
+                      <EditableText id={row.id} field="vehiclePlate" value={row.vehiclePlate} />
                     </td>
-                    <td className="px-2 py-1.5 w-14"><span className="text-xs text-zinc-400 px-1">U</span></td>
-                    <td className="px-2 py-1.5 no-print"><span className="text-zinc-200 font-bold text-base px-1">×</span></td>
+                    <td className="px-2 py-1.5 min-w-[80px]">
+                      <EditableText id={row.id} field="driverName" value={row.driverName} />
+                    </td>
+                    <td className="px-2 py-1.5 font-mono whitespace-nowrap text-zinc-900 text-xs">
+                      {row.invoiceNo ?? ""}
+                    </td>
+                    <td className="px-2 py-1.5 min-w-[130px]">
+                      <EditableText id={row.id} field="clientDetails" value={row.clientDetails} />
+                    </td>
+                    <td className="px-2 py-1.5 min-w-[80px]">
+                      <EditableText id={row.id} field="amount" value={row.amount} />
+                    </td>
+                    <td className="px-2 py-1.5 w-14">
+                      <input
+                        type="number"
+                        min="0"
+                        className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
+                          cellStates[`${row.id}-passengerCount`] === "saving" ? "border-zinc-300 animate-pulse" :
+                          cellStates[`${row.id}-passengerCount`] === "saved"  ? "border-green-400" :
+                          cellStates[`${row.id}-passengerCount`] === "error"  ? "border-red-400" : "border-zinc-300"
+                        }`}
+                        key={`pax-${row.id}`}
+                        defaultValue={row.passengerCount ?? ""}
+                        onBlur={(e) => patchRow(row.id, "passengerCount", e.target.value !== "" ? parseInt(e.target.value) : null)}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 min-w-[160px]">
+                      <EditableText id={row.id} field="details" value={row.details} />
+                    </td>
+                    <td className="px-2 py-1.5 w-20">
+                      <EditableSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} />
+                    </td>
+                    <td className="px-2 py-1.5 min-w-[80px]">
+                      <EditableText id={row.id} field="introducer" value={row.introducer} />
+                    </td>
+                    <td className="px-2 py-1.5 w-14">
+                      <EditableSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["P","U"]} />
+                    </td>
+                    <td className="px-2 py-1.5 no-print">
+                      <button
+                        onClick={() => handleDelete(row.id)}
+                        className="text-red-400 hover:text-red-600 font-bold text-base leading-none px-1"
+                        title="Delete row"
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+
+                {displayRows.length === 0 && !loading && (
+                  <tr>
+                    <td colSpan={14} className="px-4 py-10 text-center text-zinc-400 text-sm">
+                      {search ? "No rows match your search." : "No bookings found."}
+                    </td>
                   </tr>
                 )}
               </tbody>

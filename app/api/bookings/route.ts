@@ -54,8 +54,11 @@ export async function GET(request: NextRequest) {
     } else if (recentCountParam) {
       const n = Math.max(1, parseInt(recentCountParam, 10) || 1);
       rows = await base.orderBy(desc(bookings.id)).limit(n);
-    } else {
+    } else if (conditions.length > 0) {
       rows = await base.orderBy(asc(bookings.invoiceNo), asc(bookings.amount));
+    } else {
+      // No date filter (all-jobs) — order by travel date ascending
+      rows = await base.orderBy(asc(bookings.travelDate));
     }
 
     return NextResponse.json(rows);
