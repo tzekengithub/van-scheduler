@@ -135,6 +135,24 @@ export function parseRawText(text: string): ParsedBooking[] {
   const clientDetails = [clientName, clientContact].filter(Boolean).join(" ").trim();
 
   // --- Booking line parsing ---
+  const STOP_PHRASES = [
+    "COMPANY POLICY",
+    "All cheques should be",
+    "Payment by CASH",
+    "Please send the payment",
+    "For Tour",
+    "For Ride",
+    "TOTAL amount",
+    "For Pick Up",
+    "For cancellation",
+    "Balance must",
+    "Balance paid",
+    "All fees in",
+    "Company is not responsible",
+    "For customers travelling",
+    "This is computer generated",
+  ];
+
   let currentDateStr: string | null = null;
   let currentDay = "";
   let currentMonth = "";
@@ -143,6 +161,8 @@ export function parseRawText(text: string): ParsedBooking[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
+
+    if (STOP_PHRASES.some((phrase) => line.includes(phrase))) break;
 
     // Format A: "1. KL - KLIA 13 February, 2026 1 230.00"
     const isFormatA = /^\d+\./.test(line);
