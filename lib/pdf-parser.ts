@@ -194,13 +194,19 @@ export function parseRawText(text: string): ParsedBooking[] {
     if (!travelDate || !dateParts || routeLines.length === 0) continue;
 
     // ── Collect up to 3 numeric tokens: count, MYR/veh, amount ──
+    // Use a whitespace-lookbehind so location suffixes like "KLIA1" / "KLIA2"
+    // are never treated as standalone numbers — only digits preceded by a
+    // space (not a letter) qualify as tokens.
+    const NUM_RE = /(?<=\s)([\d,]+\.?\d*)(?=\s|$)/g;
     const numTokens: string[] = [];
     while (j < lines.length && numTokens.length < 3) {
       const next = lines[j];
       if (isStop(next) || isRowNum(next)) break;
       if (isSkippable(next)) { j++; continue; }
-      if (/^[\d,]+\.?\d*$/.test(next)) {
-        numTokens.push(next);
+      // Prepend a space so the lookbehind fires even on a leading number.
+      const found = [...(` ${next}`).matchAll(NUM_RE)].map((m) => m[1]);
+      if (found.length > 0) {
+        numTokens.push(...found.slice(0, 3 - numTokens.length));
         j++;
       } else {
         break; // non-numeric, non-skippable → done
