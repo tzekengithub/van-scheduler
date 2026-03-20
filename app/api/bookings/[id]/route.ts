@@ -15,6 +15,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
+    console.log("PATCH bookings/", id, body);
 
     const allowed = [
       "day", "vehiclePlate", "driverName", "paidStatus", "inHouseOrOutsourced",

@@ -70,6 +70,7 @@ export default function DailyJobsPage() {
   const [creatingDraft, setCreatingDraft] = useState(false);
   const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [cellStates, setCellStates] = useState<Record<string, "saving" | "saved" | "error">>({});
 
   // Upload zone
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -101,12 +102,30 @@ export default function DailyJobsPage() {
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
   async function patchRow(id: number, field: string, value: unknown) {
-    await fetch(`/api/bookings/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ [field]: value }),
-    });
-    setRows((prev) => prev.map((r) => r.id === id ? { ...r, [field]: value } : r));
+    const key = `${id}-${field}`;
+    setCellStates((prev) => ({ ...prev, [key]: "saving" }));
+    try {
+      const res = await fetch(`/api/bookings/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (res.ok) {
+        setRows((prev) => prev.map((r) => r.id === id ? { ...r, [field]: value } : r));
+        setCellStates((prev) => ({ ...prev, [key]: "saved" }));
+        setTimeout(() => setCellStates((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        }), 1000);
+      } else {
+        console.error("Failed to save:", field, value);
+        setCellStates((prev) => ({ ...prev, [key]: "error" }));
+      }
+    } catch (err) {
+      console.error("patchRow network error:", err);
+      setCellStates((prev) => ({ ...prev, [key]: "error" }));
+    }
   }
 
   function startEdit(id: number, field: string, currentValue: string) {
@@ -123,8 +142,10 @@ export default function DailyJobsPage() {
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this booking?")) return;
-    await fetch(`/api/bookings/${id}`, { method: "DELETE" });
-    setRows((prev) => prev.filter((r) => r.id !== id));
+    const res = await fetch(`/api/bookings/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      await fetchRows();
+    }
   }
 
   async function materializeDraft(field: string) {
@@ -243,11 +264,16 @@ export default function DailyJobsPage() {
 
   function EditableText({ id, field, value }: { id: number; field: string; value: string | null }) {
     const isEditing = editingCell?.id === id && editingCell?.field === field;
+    const saveState = cellStates[`${id}-${field}`];
+    const ringClass =
+      saveState === "saving" ? "ring-1 ring-zinc-300 animate-pulse" :
+      saveState === "saved"  ? "ring-1 ring-green-400" :
+      saveState === "error"  ? "ring-1 ring-red-400" : "";
     if (isEditing) {
       return (
         <input
           autoFocus
-          className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs bg-white text-zinc-900"
+          className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${saveState === "error" ? "border-red-400" : "border-blue-400"}`}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={commitEdit}
@@ -260,7 +286,7 @@ export default function DailyJobsPage() {
     }
     return (
       <span
-        className="cursor-pointer hover:bg-blue-50 rounded px-1 min-w-[40px] inline-block text-xs text-zinc-900"
+        className={`cursor-pointer hover:bg-blue-50 rounded px-1 min-w-[40px] inline-block text-xs text-zinc-900 ${ringClass}`}
         onClick={() => startEdit(id, field, value ?? "")}
       >
         {value || <span className="text-zinc-300">—</span>}
@@ -269,9 +295,14 @@ export default function DailyJobsPage() {
   }
 
   function EditableSelect({ id, field, value, options }: { id: number; field: string; value: string | null; options: string[] }) {
+    const saveState = cellStates[`${id}-${field}`];
+    const borderClass =
+      saveState === "saving" ? "border-zinc-300 animate-pulse" :
+      saveState === "saved"  ? "border-green-400" :
+      saveState === "error"  ? "border-red-400" : "border-zinc-300";
     return (
       <select
-        className="text-xs border border-zinc-300 rounded px-1 py-0.5 w-full bg-white text-zinc-900"
+        className={`text-xs border ${borderClass} rounded px-1 py-0.5 w-full bg-white text-zinc-900`}
         value={value ?? options[0]}
         onChange={async (e) => { await patchRow(id, field, e.target.value); }}
       >
@@ -527,7 +558,11 @@ export default function DailyJobsPage() {
                       </td>
                       <td className="px-2 py-1.5 w-14">
                         <select
-                          className="text-xs border border-zinc-300 rounded px-1 py-0.5 w-full bg-white text-zinc-900"
+                          className={`text-xs border rounded px-1 py-0.5 w-full bg-white text-zinc-900 ${
+                            cellStates[`${row.id}-inHouseOrOutsourced`] === "saving" ? "border-zinc-300 animate-pulse" :
+                            cellStates[`${row.id}-inHouseOrOutsourced`] === "saved"  ? "border-green-400" :
+                            cellStates[`${row.id}-inHouseOrOutsourced`] === "error"  ? "border-red-400" : "border-zinc-300"
+                          }`}
                           value={row.inHouseOrOutsourced ?? "I"}
                           onChange={async (e) => {
                             const val = e.target.value;
@@ -547,7 +582,11 @@ export default function DailyJobsPage() {
                         {row.inHouseOrOutsourced === "O" ? (
                           <input
                             autoFocus
-                            className="w-full border border-zinc-300 rounded px-1 py-0.5 text-xs text-zinc-900 bg-white"
+                            className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
+                              cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
+                              cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" :
+                              cellStates[`${row.id}-outsourcedCompany`] === "error"  ? "border-red-400" : "border-zinc-300"
+                            }`}
                             defaultValue={row.outsourcedCompany ?? ""}
                             placeholder="Company name"
                             key={`oc-${row.id}`}
@@ -576,7 +615,11 @@ export default function DailyJobsPage() {
                         <input
                           type="number"
                           min="0"
-                          className="w-full border border-zinc-300 rounded px-1 py-0.5 text-xs text-zinc-900 bg-white"
+                          className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
+                            cellStates[`${row.id}-passengerCount`] === "saving" ? "border-zinc-300 animate-pulse" :
+                            cellStates[`${row.id}-passengerCount`] === "saved"  ? "border-green-400" :
+                            cellStates[`${row.id}-passengerCount`] === "error"  ? "border-red-400" : "border-zinc-300"
+                          }`}
                           key={`pax-${row.id}`}
                           defaultValue={row.passengerCount ?? ""}
                           onBlur={(e) => patchRow(row.id, "passengerCount", e.target.value !== "" ? parseInt(e.target.value) : null)}
