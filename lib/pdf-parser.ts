@@ -265,28 +265,33 @@ export function parseRawText(text: string): ParsedBooking[] {
 
 /**
  * Extracts travel bookings from a PDF buffer.
- * Uses pdf2json which works reliably in Vercel serverless (no fs.readFileSync at load time).
+ * Calls a Python pdfminer microservice for reliable text extraction,
+ * then passes the text through parseRawText() unchanged.
  */
-export function extractTravelBookings(pdfBuffer: Buffer): Promise<ParsedBooking[]> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const PDFParser = require("pdf2json");
-  return new Promise((resolve, reject) => {
-    const pdfParser = new (PDFParser as any)(null, 1);
+export async function extractTravelBookings(
+  buffer: Buffer
+): Promise<ParsedBooking[]> {
+  const pythonServiceUrl = process.env.PDF_SERVICE_URL;
+  if (!pythonServiceUrl) {
+    throw new Error("PDF_SERVICE_URL environment variable not set");
+  }
 
-    pdfParser.on("pdfParser_dataError", (err: any) => {
-      reject(err.parserError);
-    });
-
-    pdfParser.on("pdfParser_dataReady", () => {
-      try {
-        const rawText: string = pdfParser.getRawTextContent();
-        resolve(parseRawText(rawText));
-      } catch (err) {
-        console.error("Parser error:", err);
-        resolve([]);
-      }
-    });
-
-    pdfParser.parseBuffer(pdfBuffer);
+  const response = await fetch(`${pythonServiceUrl}/parse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/pdf" },
+    body: new Uint8Array(buffer),
   });
+
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(`PDF service error: ${err.error}`);
+  }
+
+  const { text } = await response.json();
+
+  if (!text || text.trim().length < 10) {
+    throw new Error("PDF service returned empty text");
+  }
+
+  return parseRawText(text);
 }
