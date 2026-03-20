@@ -29,6 +29,9 @@ export default function DashboardPage() {
   const [newDriverContact, setNewDriverContact] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showClearAllModal, setShowClearAllModal] = useState(false);
+  const [showClearDuplicatesModal, setShowClearDuplicatesModal] = useState(false);
+  const [actionMessage, setActionMessage] = useState('');
 
   const fetchVans = useCallback(async () => {
     try {
@@ -87,6 +90,26 @@ export default function DashboardPage() {
     }
   }
 
+  const handleClearAll = async () => {
+    setShowClearAllModal(false);
+    const res = await fetch('/api/clear', { method: 'POST' });
+    if (res.ok) {
+      setActionMessage('All bookings deleted successfully');
+    } else {
+      setActionMessage('Failed to delete bookings');
+    }
+  };
+
+  const handleClearDuplicates = async () => {
+    setShowClearDuplicatesModal(false);
+    const res = await fetch('/api/bookings/duplicates', { method: 'DELETE' });
+    if (res.ok) {
+      setActionMessage('Duplicate bookings removed successfully');
+    } else {
+      setActionMessage('Failed to remove duplicates');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 font-sans">
       <header className="bg-white border-b border-zinc-200 px-6 py-4">
@@ -97,7 +120,6 @@ export default function DashboardPage() {
           </div>
           <nav className="flex gap-4 text-sm font-medium">
             <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">Dashboard</span>
-            <Link href="/database" className="text-zinc-500 hover:text-zinc-900 transition-colors">Raw Database</Link>
             <Link href="/daily-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">Daily Jobs</Link>
             <Link href="/all-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">All Jobs</Link>
             <Link href="/van-schedule" className="text-zinc-500 hover:text-zinc-900 transition-colors">Van Schedule</Link>
@@ -178,7 +200,97 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+
+        {/* Danger Zone */}
+        <div className="bg-white rounded-xl border border-red-200 shadow-sm p-5">
+          <h2 className="text-sm font-semibold text-red-700 mb-1">Danger Zone</h2>
+          <p className="text-xs text-zinc-500 mb-4">These actions are irreversible. Use with caution.</p>
+          {actionMessage && (
+            <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800 mb-4">
+              {actionMessage}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => setShowClearAllModal(true)}
+              className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
+            >
+              Clear All Bookings
+            </button>
+            <button
+              onClick={() => setShowClearDuplicatesModal(true)}
+              className="px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600"
+            >
+              Remove Duplicate Bookings
+            </button>
+          </div>
+        </div>
       </main>
+
+      {/* Clear All modal */}
+      {showClearAllModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowClearAllModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Clear all bookings?</h2>
+            <p className="text-sm text-gray-600 mb-6">
+              This will permanently delete ALL booking rows from the database. This cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowClearAllModal(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearAll}
+                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
+              >
+                Yes, delete everything
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Duplicates modal */}
+      {showClearDuplicatesModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowClearDuplicatesModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Remove duplicate bookings?</h2>
+            <p className="text-sm text-gray-600 mb-6">
+              This will delete all rows where the same invoice number, date and amount appear more than once.
+              The first entry of each duplicate will be kept.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowClearDuplicatesModal(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearDuplicates}
+                className="px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600"
+              >
+                Yes, remove duplicates
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
