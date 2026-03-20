@@ -270,7 +270,13 @@ export function parseRawText(text: string): ParsedBooking[] {
 export async function extractTravelBookings(
   pdfBuffer: Buffer
 ): Promise<ParsedBooking[]> {
-  const pdfParse = (await import("pdf-parse")).default;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pdfParse = require("pdf-parse/lib/pdf-parse");
   const data = await pdfParse(pdfBuffer);
-  return parseRawText(data.text);
+  try {
+    return parseRawText(data.text);
+  } catch (err) {
+    console.error("Parser error:", err);
+    return [];
+  }
 }

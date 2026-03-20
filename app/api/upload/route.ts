@@ -86,8 +86,9 @@ export async function POST(request: NextRequest) {
       message: `Inserted ${totalInserted} booking${totalInserted !== 1 ? "s" : ""}`,
       count: totalInserted,
     });
-  } catch (error) {
-    console.error("POST /api/upload error:", error);
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+  } catch (error: any) {
+    console.error("Upload error:", error);
+    console.error("Error stack:", error.stack);
+    return NextResponse.json({ error: error.message, stack: error.stack }, { status: 422 });
   }
 }
