@@ -75,7 +75,7 @@ export default function DailyJobsPage() {
   // Upload zone
   const [uploadOpen, setUploadOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [previewRows, setPreviewRows] = useState<PreviewBooking[] | null>(null);
   const [parsing, setParsing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -181,55 +181,66 @@ export default function DailyJobsPage() {
     }
   }
 
-  async function handleFileSelected(file: File) {
-    setUploadFile(file);
+  async function handleFilesSelected(files: File[]) {
+    setUploadFiles(files);
     setPreviewRows(null);
     setUploadError(null);
+    if (files.length === 0) return;
     setParsing(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/preview", { method: "POST", body: formData });
-      if (res.ok) {
-        const { bookings } = await res.json();
-        setPreviewRows(bookings);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setUploadError(err.error ?? "Failed to parse PDF");
+      const allBookings: PreviewBooking[] = [];
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/preview", { method: "POST", body: formData });
+        if (res.ok) {
+          const { bookings } = await res.json();
+          allBookings.push(...bookings);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setUploadError(err.error ?? `Failed to parse ${file.name}`);
+          return;
+        }
       }
+      setPreviewRows(allBookings);
     } finally {
       setParsing(false);
     }
   }
 
   async function handleConfirmUpload() {
-    if (!uploadFile) return;
+    if (uploadFiles.length === 0) return;
     setConfirming(true);
     try {
-      const formData = new FormData();
-      formData.append("file", uploadFile);
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
-      if (res.ok) {
-        const { count } = await res.json();
-        setUploadOpen(false);
-        setUploadFile(null);
-        setPreviewRows(null);
-        setUploadError(null);
-        const navRes = await fetch(`/api/bookings?recentCount=${count}`);
-        if (navRes.ok) {
-          const recent: BookingRow[] = await navRes.json();
-          const first = recent
-            .filter((r) => r.day && r.month && r.year)
-            .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""))[0];
-          if (first?.day && first?.month && first?.year) {
-            setDay(first.day);
-            setMonth(first.month);
-            setYear(first.year);
-          }
+      let totalCount = 0;
+      for (const file of uploadFiles) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: formData });
+        if (res.ok) {
+          const { count } = await res.json();
+          totalCount += count;
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setUploadError(err.error ?? `Upload failed for ${file.name}`);
+          return;
         }
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setUploadError(err.error ?? "Upload failed");
+      }
+      setUploadOpen(false);
+      setUploadFiles([]);
+      setPreviewRows(null);
+      setUploadError(null);
+      const navRes = await fetch(`/api/bookings?recentCount=${totalCount}`);
+      if (navRes.ok) {
+        const recent: BookingRow[] = await navRes.json();
+        const first = recent
+          .filter((r) => r.day && r.month && r.year)
+          .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""))[0];
+        if (first?.day && first?.month && first?.year) {
+          setDay(first.day);
+          setMonth(first.month);
+          setYear(first.year);
+        }
       }
     } finally {
       setConfirming(false);
@@ -237,7 +248,7 @@ export default function DailyJobsPage() {
   }
 
   function handleCancelUpload() {
-    setUploadFile(null);
+    setUploadFiles([]);
     setPreviewRows(null);
     setUploadError(null);
     setUploadOpen(false);
@@ -246,7 +257,7 @@ export default function DailyJobsPage() {
 
   function openUploadZone() {
     setUploadOpen(true);
-    setUploadFile(null);
+    setUploadFiles([]);
     setPreviewRows(null);
     setUploadError(null);
   }
@@ -254,8 +265,6 @@ export default function DailyJobsPage() {
   const totalAmount = rows.reduce((sum, r) => sum + parseFloat(r.amount ?? "0"), 0);
   const paidCount = rows.filter((r) => r.paidStatus === "P").length;
   const unpaidCount = rows.filter((r) => r.paidStatus !== "P").length;
-
-  const seenInvoices = new Set<string>();
 
   function vanRowColor(vanId: number | null): string {
     if (vanId == null) return "";
@@ -415,7 +424,7 @@ export default function DailyJobsPage() {
             </div>
 
             {/* Drop zone */}
-            {!uploadFile && (
+            {uploadFiles.length === 0 && (
               <div
                 className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors ${
                   dragOver ? "border-zinc-500 bg-zinc-50" : "border-zinc-300 hover:border-zinc-400"
@@ -425,8 +434,8 @@ export default function DailyJobsPage() {
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragOver(false);
-                  const file = e.dataTransfer.files[0];
-                  if (file?.type === "application/pdf") handleFileSelected(file);
+                  const files = Array.from(e.dataTransfer.files).filter((f) => f.type === "application/pdf");
+                  if (files.length > 0) handleFilesSelected(files);
                 }}
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -434,13 +443,14 @@ export default function DailyJobsPage() {
                   ref={fileInputRef}
                   type="file"
                   accept=".pdf"
+                  multiple
                   className="hidden"
                   onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleFileSelected(file);
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length > 0) handleFilesSelected(files);
                   }}
                 />
-                <p className="text-sm text-zinc-500">Drop a PDF here, or click to select</p>
+                <p className="text-sm text-zinc-500">Drop one or more PDFs here, or click to select</p>
                 <p className="text-xs text-zinc-400 mt-1">Invoice PDFs only</p>
               </div>
             )}
@@ -467,7 +477,7 @@ export default function DailyJobsPage() {
             {previewRows && previewRows.length > 0 && (
               <div className="mt-4">
                 <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
-                  Preview — {previewRows.length} booking{previewRows.length !== 1 ? "s" : ""} found in {uploadFile?.name}
+                  Preview — {previewRows.length} booking{previewRows.length !== 1 ? "s" : ""} found in {uploadFiles.map((f) => f.name).join(", ")}
                 </p>
                 <div className="overflow-auto rounded-lg border border-zinc-200">
                   <table className="w-full text-xs border-collapse">
@@ -548,9 +558,6 @@ export default function DailyJobsPage() {
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const isFirstInvoice = row.invoiceNo ? !seenInvoices.has(row.invoiceNo) : false;
-                  if (row.invoiceNo) seenInvoices.add(row.invoiceNo);
-
                   return (
                     <tr key={row.id} className={`border-b border-zinc-100 hover:brightness-95 ${vanRowColor(row.vanId)}`}>
                       <td className="px-2 py-1.5 w-14">
@@ -603,7 +610,7 @@ export default function DailyJobsPage() {
                         <EditableText id={row.id} field="driverName" value={row.driverName} />
                       </td>
                       <td className="px-2 py-1.5 font-mono whitespace-nowrap text-zinc-900 text-xs">
-                        {isFirstInvoice ? (row.invoiceNo ?? "") : ""}
+                        {row.invoiceNo ?? ""}
                       </td>
                       <td className="px-2 py-1.5 min-w-[130px]">
                         <EditableText id={row.id} field="clientDetails" value={row.clientDetails} />
