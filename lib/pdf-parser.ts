@@ -304,14 +304,21 @@ export function parseRawText(text: string): ParsedBooking[] {
     let isRoundTrip: 0 | 1;
 
     if (tripType === "day_trip") {
-      // Day Trip: store full text as fromLocation, toLocation is empty
+      // Day Trip: full description as fromLocation, no toLocation
       fromLocation = bookingDetails;
       toLocation = "";
       isRoundTrip = 0;
+    } else if (tripType === "round_trip") {
+      // Round Trip: preserve the full route exactly as written, e.g.
+      // "KL - Genting Highlands - KL" → "KL → Genting Highlands → KL"
+      fromLocation = bookingDetails.replace(/ - /g, " → ");
+      toLocation = "";
+      isRoundTrip = 1;
     } else {
+      // One-way / trip: split into from/to
       fromLocation = locationResult.fromLocation;
       toLocation = locationResult.toLocation;
-      isRoundTrip = tripType === "round_trip" ? 1 : 0;
+      isRoundTrip = 0;
     }
 
     if (!fromLocation) continue;
