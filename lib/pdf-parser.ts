@@ -304,13 +304,9 @@ export function parseRawText(text: string): ParsedBooking[] {
     let isRoundTrip: 0 | 1;
 
     if (tripType === "day_trip") {
-      // "KL Day Trip" → from=KL, to=KL Day Trip
-      const dayTripIdx = bookingDetails.toLowerCase().indexOf("day trip");
-      const city = dayTripIdx > 0
-        ? bookingDetails.slice(0, dayTripIdx).replace(/[-\s]+$/, "").trim()
-        : bookingDetails;
-      fromLocation = city || bookingDetails;
-      toLocation = bookingDetails;
+      // Day Trip: store full text as fromLocation, toLocation is empty
+      fromLocation = bookingDetails;
+      toLocation = "";
       isRoundTrip = 0;
     } else {
       fromLocation = locationResult.fromLocation;
@@ -318,7 +314,7 @@ export function parseRawText(text: string): ParsedBooking[] {
       isRoundTrip = tripType === "round_trip" ? 1 : 0;
     }
 
-    if (!fromLocation || !toLocation) continue;
+    if (!fromLocation) continue;
 
     // ── Expand: one row per vehicle ──
     const baseRow = {

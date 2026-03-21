@@ -494,9 +494,9 @@ export default function AllJobsPage() {
                 </td>
                 {/* Location */}
                 <td className="px-2 py-1.5 min-w-[160px] whitespace-nowrap text-zinc-800">
-                  {row.fromLocation && row.toLocation
+                  {row.toLocation
                     ? `${row.fromLocation} → ${row.toLocation}`
-                    : row.details || "—"}
+                    : row.fromLocation || "—"}
                 </td>
                 {/* Trip Type badge */}
                 <td className="px-2 py-1.5 whitespace-nowrap">
