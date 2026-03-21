@@ -1,19 +1,39 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, isNull, inArray, asc } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray, asc, ne } from "drizzle-orm";
 import { smartAssignVan } from "@/lib/van-assignment";
+
+/**
+ * Priority rank for processing order and bumping.
+ * Lower number = higher priority = processed first = harder to bump.
+ */
+function priorityRank(tripType: string | null | undefined): number {
+  switch (tripType) {
+    case "day_trip":     return 0; // highest — processed first, can bump others
+    case "one_way_ride": return 1;
+    case "round_trip":   return 2;
+    default:             return 3; // "trip" and unknown — lowest, bumped first
+  }
+}
+
+// Types that can be bumped by a day_trip, in order (bump lowest priority first)
+const BUMP_TYPES = ["trip", "round_trip", "one_way_ride"] as const;
 
 /**
  * Reassign vans to unassigned bookings.
  *
  * @param bookingIds - If provided, only process these specific booking IDs.
  *                     If omitted, process ALL bookings where vanId IS NULL
- *                     and manualChange = 0, in travelDate ASC order.
+ *                     and manualChange = 0.
  *
- * Bookings are processed in date order so that multi-date invoices correctly
- * reuse the same van via Rule 1 (earlier date commits first, later date finds it).
+ * Processing order within each date: day_trip → one_way_ride → round_trip → trip.
+ * This ensures Day Trips always get priority access to free vans.
  *
- * Rows with manualChange = 1 are always skipped.
+ * Bumping: if a day_trip cannot find a free van, it displaces the lowest-priority
+ * already-assigned booking on the same date. The bumped booking is retried in a
+ * second pass (without bumping rights).
+ *
+ * Rows with manualChange = 1 are never touched (neither bumped nor reassigned).
  */
 export async function runReassign(
   bookingIds?: number[]
@@ -22,30 +42,34 @@ export async function runReassign(
   const vanMap = new Map(allVans.map((v) => [v.id, v]));
 
   // ── Fetch target bookings ────────────────────────────────────────────────────
-  const targetBookings =
+  const raw =
     bookingIds && bookingIds.length > 0
       ? await db
           .select()
           .from(bookings)
           .where(inArray(bookings.id, bookingIds))
-          .orderBy(
-            asc(bookings.travelDate),
-            asc(bookings.invoiceNo),
-            asc(bookings.vehicleIndex)
-          )
       : await db
           .select()
           .from(bookings)
-          .where(and(isNull(bookings.vanId), eq(bookings.manualChange, 0)))
-          .orderBy(
-            asc(bookings.travelDate),
-            asc(bookings.invoiceNo),
-            asc(bookings.vehicleIndex)
-          );
+          .where(and(isNull(bookings.vanId), eq(bookings.manualChange, 0)));
+
+  // Sort: date ASC, then priority (day_trip first within each date), then invoice/vehicleIndex
+  const targetBookings = [...raw].sort((a, b) => {
+    if (a.travelDate !== b.travelDate)
+      return a.travelDate.localeCompare(b.travelDate);
+    const pa = priorityRank(a.tripType);
+    const pb = priorityRank(b.tripType);
+    if (pa !== pb) return pa - pb;
+    if ((a.invoiceNo ?? "") !== (b.invoiceNo ?? ""))
+      return (a.invoiceNo ?? "").localeCompare(b.invoiceNo ?? "");
+    return (a.vehicleIndex ?? 1) - (b.vehicleIndex ?? 1);
+  });
 
   let assigned = 0;
   let conflicts = 0;
+  const bumpedIds: number[] = []; // bookings displaced by a day_trip — need a retry
 
+  // ── Main pass ────────────────────────────────────────────────────────────────
   for (const b of targetBookings) {
     if (b.manualChange === 1) continue;
 
@@ -59,6 +83,7 @@ export async function runReassign(
     );
 
     if (vanId != null) {
+      // ── Normal assignment ──────────────────────────────────────────────────
       const van = vanMap.get(vanId);
       await db
         .update(bookings)
@@ -71,19 +96,133 @@ export async function runReassign(
         .where(eq(bookings.id, b.id));
 
       console.log(
-        `[runReassign] OK    id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} → van ${vanId} (${van?.vanNumber ?? "?"})`
+        `[runReassign] OK      id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → van ${vanId} (${van?.vanNumber ?? "?"})`
       );
       assigned++;
+    } else if (b.tripType === "day_trip") {
+      // ── Day Trip: try to bump a lower-priority booking on the same date ────
+      let bumped = false;
+
+      for (const bumpType of BUMP_TYPES) {
+        const [victim] = await db
+          .select({ id: bookings.id, vanId: bookings.vanId })
+          .from(bookings)
+          .where(
+            and(
+              eq(bookings.travelDate, b.travelDate),
+              eq(bookings.tripType, bumpType),
+              isNotNull(bookings.vanId),
+              eq(bookings.manualChange, 0), // never bump manual rows
+              ne(bookings.id, b.id),        // not self
+            )
+          )
+          .limit(1);
+
+        if (victim && victim.vanId != null) {
+          const bumpedVanId = victim.vanId;
+          const van = vanMap.get(bumpedVanId);
+
+          // Displace the victim
+          await db
+            .update(bookings)
+            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
+            .where(eq(bookings.id, victim.id));
+
+          // Assign that van to this Day Trip
+          await db
+            .update(bookings)
+            .set({
+              vanId: bumpedVanId,
+              vehiclePlate: van?.vanNumber ?? "",
+              driverName: van?.driverName ?? "",
+              driverContact: van?.driverContact ?? "",
+            })
+            .where(eq(bookings.id, b.id));
+
+          console.log(
+            `[runReassign] BUMP    day_trip id=${b.id} date=${b.travelDate} displaced ${bumpType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`
+          );
+
+          bumpedIds.push(victim.id);
+          assigned++;
+          bumped = true;
+          break;
+        }
+      }
+
+      if (!bumped) {
+        // All same-date bookings are day_trips or manual — Day Trip is itself a conflict
+        await db
+          .update(bookings)
+          .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
+          .where(eq(bookings.id, b.id));
+
+        console.log(
+          `[runReassign] CONFLICT day_trip id=${b.id} date=${b.travelDate} → no bumpable booking found`
+        );
+        conflicts++;
+      }
     } else {
+      // ── Not a Day Trip: no bumping rights → conflict ───────────────────────
       await db
         .update(bookings)
         .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
         .where(eq(bookings.id, b.id));
 
       console.log(
-        `[runReassign] CONFLICT id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} → no free van`
+        `[runReassign] CONFLICT id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → no free van`
       );
       conflicts++;
+    }
+  }
+
+  // ── Second pass: retry bumped bookings (no bumping rights) ──────────────────
+  if (bumpedIds.length > 0) {
+    console.log(
+      `[runReassign] second pass: retrying ${bumpedIds.length} bumped booking(s)`
+    );
+
+    for (const bumpedId of bumpedIds) {
+      const [b] = await db
+        .select()
+        .from(bookings)
+        .where(eq(bookings.id, bumpedId))
+        .limit(1);
+
+      // Skip if already reassigned, manual, or missing
+      if (!b || b.manualChange === 1 || b.vanId != null) continue;
+
+      const vanId = await smartAssignVan(
+        b.travelDate,
+        b.fromLocation,
+        b.invoiceNo ?? "",
+        b.vehicleIndex ?? 1,
+        b.numberOfVehicles ?? 1,
+        b.tripType,
+      );
+
+      if (vanId != null) {
+        const van = vanMap.get(vanId);
+        await db
+          .update(bookings)
+          .set({
+            vanId,
+            vehiclePlate: van?.vanNumber ?? "",
+            driverName: van?.driverName ?? "",
+            driverContact: van?.driverContact ?? "",
+          })
+          .where(eq(bookings.id, b.id));
+
+        console.log(
+          `[runReassign] RETRY-OK id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} → van ${vanId} (${van?.vanNumber ?? "?"})`
+        );
+        assigned++;
+      } else {
+        console.log(
+          `[runReassign] RETRY-CONFLICT id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} → no free van (outsourced)`
+        );
+        conflicts++;
+      }
     }
   }
 
