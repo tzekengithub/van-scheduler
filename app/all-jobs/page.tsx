@@ -210,13 +210,6 @@ export default function AllJobsPage() {
     return sortDir === "asc" ? " ↑" : " ↓";
   }
 
-  // ── Groups ────────────────────────────────────────────────────────────────
-  const groups = useMemo(() => ({
-    one_way_ride: displayRows.filter((r) => r.tripType === "one_way_ride"),
-    round_trip:   displayRows.filter((r) => r.tripType === "round_trip"),
-    day_trip:     displayRows.filter((r) => r.tripType === "day_trip"),
-    trip:         displayRows.filter((r) => !r.tripType || r.tripType === "trip"),
-  }), [displayRows]);
 
   // Conflict rows: vanId=null with an invoice (means conflict, not just manual blanks)
   const conflictRows = useMemo(
@@ -434,13 +427,10 @@ export default function AllJobsPage() {
   const thSort = "px-2 py-2 text-left font-semibold text-zinc-700 whitespace-nowrap cursor-pointer select-none hover:bg-zinc-100 text-xs";
   const thPlain = "px-2 py-2 text-left font-semibold text-zinc-700 whitespace-nowrap text-xs";
 
-  function TripTable({ label, groupRows }: { label: string; groupRows: BookingRow[] }) {
+  function TripTable({ groupRows }: { groupRows: BookingRow[] }) {
     if (groupRows.length === 0) return null;
     return (
       <div className="bg-white rounded-xl border border-zinc-200 overflow-auto shadow-sm">
-        <div className="px-4 py-2.5 border-b border-zinc-100 font-semibold text-sm text-zinc-800">
-          {label} <span className="text-zinc-400 font-normal text-xs ml-1">({groupRows.length})</span>
-        </div>
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr className="bg-zinc-50 border-b border-zinc-200">
@@ -857,12 +847,7 @@ export default function AllJobsPage() {
             No rows match your search.
           </div>
         ) : (
-          <div className="space-y-4">
-            <TripTable label="🔵 One Way Rides" groupRows={groups.one_way_ride} />
-            <TripTable label="🟢 Round Trips"   groupRows={groups.round_trip} />
-            <TripTable label="🟡 Day Trips"      groupRows={groups.day_trip} />
-            <TripTable label="🟠 Trips"          groupRows={groups.trip} />
-          </div>
+          <TripTable groupRows={displayRows} />
         )}
       </main>
     </div>

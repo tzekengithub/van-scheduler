@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ne } from "drizzle-orm";
 
 /** Returns the number of whole calendar days between two YYYY-MM-DD strings. */
 function daysBetween(dateA: string, dateB: string): number {
@@ -53,14 +53,19 @@ export async function smartAssignVan(
 
     if (existingForThisIndex.length > 0 && existingForThisIndex[0].vanId != null) {
       const existingVanId = existingForThisIndex[0].vanId;
-      // Verify no double-booking on this date before reusing
+      // Verify no double-booking on this date before reusing.
+      // Exclude rows from the same invoice — they are not a conflict.
       const conflict = await db
         .select({ id: bookings.id })
         .from(bookings)
-        .where(and(eq(bookings.vanId, existingVanId), eq(bookings.travelDate, travelDate)))
+        .where(and(
+          eq(bookings.vanId, existingVanId),
+          eq(bookings.travelDate, travelDate),
+          ne(bookings.invoiceNo, invoiceNo),
+        ))
         .limit(1);
       if (conflict.length === 0) return existingVanId;
-      // Van already booked on this date — fall through to find another
+      // Van already booked by a DIFFERENT invoice on this date — fall through
     }
 
     // Get all vans already used by OTHER vehicleIndices of this invoice
@@ -73,13 +78,18 @@ export async function smartAssignVan(
       existingForInvoice.map((e) => e.vanId).filter((v): v is number => v != null)
     );
 
-    // Pass A: find a free van not already used by this invoice
+    // Pass A: find a free van not already used by this invoice.
+    // Exclude own invoice rows from the conflict check.
     for (const van of allVans) {
       if (usedByInvoice.has(van.id)) continue;
       const conflict = await db
         .select({ id: bookings.id })
         .from(bookings)
-        .where(and(eq(bookings.vanId, van.id), eq(bookings.travelDate, travelDate)))
+        .where(and(
+          eq(bookings.vanId, van.id),
+          eq(bookings.travelDate, travelDate),
+          ne(bookings.invoiceNo, invoiceNo),
+        ))
         .limit(1);
       if (conflict.length === 0) return van.id;
     }

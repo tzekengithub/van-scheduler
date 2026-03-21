@@ -359,13 +359,6 @@ export default function DailyJobsPage() {
   const paidCount = rows.filter((r) => r.paidStatus === "P").length;
   const unpaidCount = rows.filter((r) => r.paidStatus !== "P").length;
 
-  // Group rows by tripType
-  const groups: Record<TripType, BookingRow[]> = {
-    one_way_ride: rows.filter((r) => r.tripType === "one_way_ride"),
-    round_trip:   rows.filter((r) => r.tripType === "round_trip"),
-    day_trip:     rows.filter((r) => r.tripType === "day_trip"),
-    trip:         rows.filter((r) => !r.tripType || r.tripType === "trip"),
-  };
 
   // Conflict rows: vanId is null (unassigned due to insufficient vans)
   const conflictRows = rows.filter((r) => r.vanId === null && r.invoiceNo);
@@ -431,13 +424,10 @@ export default function DailyJobsPage() {
     "Tour Guide", "Pax", "Overtime", "I/O", "Outsourced Co.", "Amount (MYR)", "P/U", "",
   ];
 
-  function TripTable({ label, groupRows }: { label: string; groupRows: BookingRow[] }) {
+  function TripTable({ groupRows }: { groupRows: BookingRow[] }) {
     if (groupRows.length === 0) return null;
     return (
       <div className="bg-white rounded-xl border border-zinc-200 overflow-auto shadow-sm">
-        <div className="px-4 py-2.5 border-b border-zinc-100 font-semibold text-sm text-zinc-800">
-          {label} <span className="text-zinc-400 font-normal text-xs ml-1">({groupRows.length})</span>
-        </div>
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr className="bg-zinc-50 border-b border-zinc-200">
@@ -893,12 +883,7 @@ export default function DailyJobsPage() {
             No bookings for {fullDateLabel}
           </div>
         ) : (
-          <div className="space-y-4">
-            <TripTable label="🔵 One Way Rides" groupRows={groups.one_way_ride} />
-            <TripTable label="🟢 Round Trips"   groupRows={groups.round_trip} />
-            <TripTable label="🟡 Day Trips"      groupRows={groups.day_trip} />
-            <TripTable label="🟠 Trips"          groupRows={groups.trip} />
-          </div>
+          <TripTable groupRows={rows} />
         )}
       </main>
     </div>
