@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { vans } from "@/drizzle/schema";
-import { eq } from "drizzle-orm";
+import { vans, bookings } from "@/drizzle/schema";
+import { eq, isNull, and } from "drizzle-orm";
+import { runReassign } from "@/lib/reassign";
+
+export const runtime = "nodejs";
 
 export async function GET() {
   try {
@@ -26,6 +29,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Plate number already exists" }, { status: 409 });
     }
 
+    // Step 1: Insert the new van
     const [created] = await db
       .insert(vans)
       .values({
@@ -34,7 +38,14 @@ export async function POST(request: NextRequest) {
         driverContact: driverContact?.trim() ?? "",
       })
       .returning();
-    return NextResponse.json(created, { status: 201 });
+
+    // Step 2: Try to assign the new van to any currently unassigned bookings
+    const { assigned, conflicts } = await runReassign();
+    console.log(
+      `[vans/POST] new van ${plate} → reassigned ${assigned} previously unassigned bookings (${conflicts} still conflict)`
+    );
+
+    return NextResponse.json({ ...created, reassigned: assigned }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
@@ -44,8 +55,31 @@ export async function DELETE(request: NextRequest) {
   try {
     const { id } = await request.json();
     if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+
+    // Step 1: Null out all bookings that reference this van
+    //         Reset manualChange too so they are eligible for auto-reassign
+    const affected = await db
+      .update(bookings)
+      .set({ vanId: null, manualChange: 0, vehiclePlate: "", driverName: "", driverContact: "" })
+      .where(eq(bookings.vanId, id))
+      .returning({ id: bookings.id });
+
+    const affectedIds = affected.map((r) => r.id);
+    console.log(
+      `[vans/DELETE] nulled ${affectedIds.length} bookings for vanId=${id}:`,
+      affectedIds
+    );
+
+    // Step 2: Delete the van
     await db.delete(vans).where(eq(vans.id, id));
-    return NextResponse.json({ message: "Van deleted" });
+
+    // Step 3: Reassign the affected bookings to remaining vans
+    const { assigned, conflicts } = await runReassign(affectedIds);
+    console.log(
+      `[vans/DELETE] reassigned ${assigned}/${affectedIds.length} (${conflicts} conflict)`
+    );
+
+    return NextResponse.json({ message: "Van deleted", reassigned: assigned, conflicts });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
