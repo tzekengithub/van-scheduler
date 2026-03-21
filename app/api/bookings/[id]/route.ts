@@ -18,10 +18,11 @@ export async function PATCH(
     console.log("PATCH bookings/", id, body);
 
     const allowed = [
-      "day", "vehiclePlate", "driverName", "paidStatus", "inHouseOrOutsourced",
-      "outsourcedCompany", "overtime", "introducer", "amount",
-      "clientDetails", "invoiceNo", "details", "passengerCount",
+      "day", "vehiclePlate", "driverName", "driverContact", "paidStatus",
+      "inHouseOrOutsourced", "outsourcedCompany", "overtime", "introducer",
+      "amount", "clientDetails", "invoiceNo", "details", "passengerCount",
       "myrPerVehicle", "vanId", "manualChange",
+      "tripType", "tourGuide", "vehicleIndex", "numberOfVehicles",
     ] as const;
 
     const updates: Record<string, unknown> = {};

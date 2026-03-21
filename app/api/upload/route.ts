@@ -38,15 +38,23 @@ export async function POST(request: NextRequest) {
     let totalInserted = 0;
 
     for (const booking of allParsed) {
-      const vanId = await smartAssignVan(booking.travelDate, booking.fromLocation);
+      const vanId = await smartAssignVan(
+        booking.travelDate,
+        booking.fromLocation,
+        booking.invoiceNo,
+        booking.vehicleIndex,
+        booking.numberOfVehicles,
+      );
 
       let vehiclePlate = booking.vehiclePlate;
       let driverName = booking.driverName;
+      let driverContact = "";
       if (vanId != null) {
         const [van] = await db.select().from(vans).where(eq(vans.id, vanId)).limit(1);
         if (van) {
           vehiclePlate = van.vanNumber;
           driverName = van.driverName ?? "";
+          driverContact = van.driverContact ?? "";
         }
       }
 
@@ -68,11 +76,15 @@ export async function POST(request: NextRequest) {
         amount: String(booking.amount),
         vehiclePlate,
         driverName,
+        driverContact,
         paidStatus: booking.paidStatus,
         overtime: booking.overtime,
         introducer: booking.introducer,
         inHouseOrOutsourced: booking.inHouseOrOutsourced,
         outsourcedCompany: booking.outsourcedCompany,
+        tripType: booking.tripType,
+        vehicleIndex: booking.vehicleIndex,
+        numberOfVehicles: booking.numberOfVehicles,
       });
 
       totalInserted++;

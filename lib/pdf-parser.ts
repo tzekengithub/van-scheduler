@@ -1,3 +1,5 @@
+export type TripType = "one_way_ride" | "round_trip" | "day_trip" | "trip";
+
 export interface ParsedBooking {
   // existing fields (for van-assignment compatibility)
   travelDate: string;      // YYYY-MM-DD
@@ -5,13 +7,14 @@ export interface ParsedBooking {
   toLocation: string;
   isRoundTrip: 0 | 1;
   details: string;         // cleaned booking description
-  // new fields
+  // invoice fields
   invoiceNo: string;
   clientDetails: string;
   day: string;
   month: string;
   year: string;
   numberOfVehicles: number;
+  vehicleIndex: number;
   myrPerVehicle: number;
   amount: number;
   vehiclePlate: string;
@@ -21,6 +24,8 @@ export interface ParsedBooking {
   outsourcedCompany: string;
   overtime: string;
   introducer: string;
+  // new fields — Section 1
+  tripType: TripType;
 }
 
 /**
@@ -90,6 +95,33 @@ function cleanBookingDetails(raw: string): string {
 }
 
 /**
+ * Determine tripType from booking details and annotation.
+ * Priority: annotation "(One-Way Ride Only)" > "Day Trip" in details > A-B-A route > default "trip"
+ */
+function detectTripType(
+  bookingDetails: string,
+  annotationLine: string,
+  isRoundTripByRoute: boolean
+): TripType {
+  if (
+    annotationLine.includes("One-Way Ride Only") ||
+    bookingDetails.includes("One-Way Ride Only")
+  ) {
+    return "one_way_ride";
+  }
+  if (
+    bookingDetails.toLowerCase().includes("day trip") ||
+    annotationLine.toLowerCase().includes("day trip")
+  ) {
+    return "day_trip";
+  }
+  if (isRoundTripByRoute) {
+    return "round_trip";
+  }
+  return "trip";
+}
+
+/**
  * Parse raw text extracted from an invoice PDF.
  * Designed for PyMuPDF block output where each table cell is its own line.
  * Pure function — no PDF dependency, fully testable.
@@ -100,7 +132,6 @@ export function parseRawText(text: string): ParsedBooking[] {
   const results: ParsedBooking[] = [];
 
   // ── Invoice Number ──────────────────────────────────────────────────────────
-  // PyMuPDF: INV number is on its own line.  Regex fallback for older format.
   let invoiceNo = "";
   for (const line of lines) {
     if (/^INV\d+$/.test(line)) { invoiceNo = line; break; }
@@ -113,8 +144,6 @@ export function parseRawText(text: string): ParsedBooking[] {
   }
 
   // ── Client Details ──────────────────────────────────────────────────────────
-  // Collect ALL lines after the BOOK anchor until we hit a numbered booking
-  // line, a stop phrase, or reach the 4-line maximum.
   const COMPANY_PHONE = "+60 12-606 1728";
   let bookIdx = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -131,8 +160,8 @@ export function parseRawText(text: string): ParsedBooking[] {
         l.includes("No Booking Details") ||
         l.includes("Booking Details")
       ) break;
-      if (l === COMPANY_PHONE) continue; // never include company's own phone
-      if (l === "No") continue;           // skip stray "No" column header from PDF table
+      if (l === COMPANY_PHONE) continue;
+      if (l === "No") continue;
       clientDetailLines.push(l);
     }
   }
@@ -153,7 +182,6 @@ export function parseRawText(text: string): ParsedBooking[] {
   const STOP_PHRASES = ["COMPANY POLICY", "COMPANY POLICIES"];
   const isStop      = (l: string) => STOP_PHRASES.some((p) => l.includes(p));
   const isRowNum    = (l: string) => /^\d+\.$/.test(l);
-  // Lines to skip when collecting route or numbers
   const isSkippable = (l: string) =>
     l.startsWith("[") ||
     l.startsWith("(") ||
@@ -191,23 +219,36 @@ export function parseRawText(text: string): ParsedBooking[] {
 
     if (!travelDate || !dateParts || routeLines.length === 0) continue;
 
-    // ── Collect up to 3 numeric tokens: count, MYR/veh, amount ──
-    // Split each line into whitespace-separated words and only accept tokens
-    // that are purely numeric — matching /^[\d,]+\.?\d*$/ exactly.
-    // This ensures location suffixes like "KLIA2" never bleed into the amount:
-    // any word starting with a letter is skipped entirely.
+    // ── Collect up to 3 numeric tokens; capture annotation "(…)" lines ──
     const numTokens: string[] = [];
+    let annotationLine = "";
+
     while (j < lines.length && numTokens.length < 3) {
       const next = lines[j];
       if (isStop(next) || isRowNum(next)) break;
-      if (isSkippable(next)) { j++; continue; }
+      if (isSkippable(next)) {
+        // Capture annotation lines starting with "(" before skipping
+        if (next.startsWith("(") && !annotationLine) annotationLine = next;
+        j++; continue;
+      }
       const words = next.trim().split(/\s+/);
       const found = words.filter((w) => /^[\d,]+\.?\d*$/.test(w));
       if (found.length > 0) {
         numTokens.push(...found.slice(0, 3 - numTokens.length));
         j++;
       } else {
-        break; // non-numeric, non-skippable → done
+        break;
+      }
+    }
+
+    // Also look ahead for annotation if not yet found
+    if (!annotationLine) {
+      for (let k = j; k < lines.length; k++) {
+        const l = lines[k];
+        if (isStop(l) || isRowNum(l)) break;
+        if (l.startsWith("(")) { annotationLine = l; break; }
+        // Stop if we've hit something clearly non-annotation
+        if (!isSkippable(l)) break;
       }
     }
 
@@ -218,7 +259,6 @@ export function parseRawText(text: string): ParsedBooking[] {
     if (numTokens.length >= 3) {
       const n0 = parseAmt(numTokens[0]);
       if (!numTokens[0].includes(".") && n0 <= 20) {
-        // count  myr/veh  total
         numberOfVehicles = n0;
         myrPerVehicle    = parseAmt(numTokens[1]);
         amount           = parseAmt(numTokens[2]);
@@ -244,16 +284,44 @@ export function parseRawText(text: string): ParsedBooking[] {
     // ── Clean booking description ──
     const rawRoute = routeLines.join(" ");
     const bookingDetails = cleanBookingDetails(rawRoute)
-      .replace(/\[[^\]]*\]/g, "")      // strip any [bracket] that leaked in
+      .replace(/\[[^\]]*\]/g, "")
       .replace(/Maximum \d+\s*hrs.*/i, "")
       .trim();
 
     if (!bookingDetails) continue;
 
-    const { fromLocation, toLocation, isRoundTrip } = parseLocations(bookingDetails);
+    // ── Determine trip type ──
+    const locationResult = parseLocations(bookingDetails);
+    const tripType = detectTripType(
+      bookingDetails,
+      annotationLine,
+      locationResult.isRoundTrip === 1
+    );
+
+    // ── Resolve fromLocation / toLocation based on tripType ──
+    let fromLocation: string;
+    let toLocation: string;
+    let isRoundTrip: 0 | 1;
+
+    if (tripType === "day_trip") {
+      // "KL Day Trip" → from=KL, to=KL Day Trip
+      const dayTripIdx = bookingDetails.toLowerCase().indexOf("day trip");
+      const city = dayTripIdx > 0
+        ? bookingDetails.slice(0, dayTripIdx).replace(/[-\s]+$/, "").trim()
+        : bookingDetails;
+      fromLocation = city || bookingDetails;
+      toLocation = bookingDetails;
+      isRoundTrip = 0;
+    } else {
+      fromLocation = locationResult.fromLocation;
+      toLocation = locationResult.toLocation;
+      isRoundTrip = tripType === "round_trip" ? 1 : 0;
+    }
+
     if (!fromLocation || !toLocation) continue;
 
-    results.push({
+    // ── Expand: one row per vehicle ──
+    const baseRow = {
       travelDate,
       fromLocation,
       toLocation,
@@ -274,7 +342,12 @@ export function parseRawText(text: string): ParsedBooking[] {
       outsourcedCompany: "",
       overtime: "",
       introducer: "",
-    });
+      tripType,
+    } as const;
+
+    for (let vi = 1; vi <= numberOfVehicles; vi++) {
+      results.push({ ...baseRow, vehicleIndex: vi });
+    }
   }
 
   return results;

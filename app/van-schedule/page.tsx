@@ -31,6 +31,8 @@ interface BookingRow {
   paidStatus: string | null;
   fromLocation: string;
   toLocation: string;
+  tripType: string | null;
+  vanId: number | null;
 }
 
 interface ConflictItem {
@@ -107,11 +109,13 @@ export default function VanSchedulePage() {
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const isCurrentMonth = viewMonth === today.getMonth() && viewYear === today.getFullYear();
 
-  // bookingMap: plate (or "" for no-van) → dayNum → BookingRow[]
+  // bookingMap: plate (or "" for unassigned/no-van) → dayNum → BookingRow[]
+  // Bookings with vanId=null are always placed in the "" bucket (UNASSIGNED row)
   const bookingMap = useMemo(() => {
     const map = new Map<string, Map<number, BookingRow[]>>();
     for (const b of bookings) {
-      const plate = b.vehiclePlate?.trim() ?? "";
+      // If vanId is null, treat as unassigned regardless of vehiclePlate
+      const plate = b.vanId == null ? "" : (b.vehiclePlate?.trim() ?? "");
       const dayNum = parseInt(b.day ?? "0", 10);
       if (!dayNum) continue;
       if (!map.has(plate)) map.set(plate, new Map());
@@ -364,13 +368,19 @@ export default function VanSchedulePage() {
                                   {clientFirstLine(bks[0]) || "—"}
                                 </div>
                                 <div className="truncate max-w-[84px] opacity-75 leading-tight mt-0.5">
-                                  {bks[0].details || `${bks[0].fromLocation}→${bks[0].toLocation}`}
+                                  {bks[0].fromLocation && bks[0].toLocation
+                                    ? `${bks[0].fromLocation}→${bks[0].toLocation}`
+                                    : bks[0].details || "—"}
                                 </div>
-                                <div className="truncate max-w-[84px] opacity-60 text-[10px] leading-tight mt-0.5">
-                                  {bks[0].invoiceNo}
-                                </div>
+                                {bks[0].tripType && (
+                                  <div className="text-[9px] leading-tight mt-0.5 opacity-80">
+                                    {bks[0].tripType === "one_way_ride" ? "🔵 One Way" :
+                                     bks[0].tripType === "round_trip"   ? "🟢 Round Trip" :
+                                     bks[0].tripType === "day_trip"     ? "🟡 Day Trip" : "🟠 Trip"}
+                                  </div>
+                                )}
                                 {bks.length > 1 && (
-                                  <div className="text-[10px] font-bold mt-0.5">+{bks.length - 1} more</div>
+                                  <div className="text-[10px] font-bold mt-0.5">⚠️ CONFLICT +{bks.length - 1}</div>
                                 )}
                               </div>
                             </td>
@@ -384,8 +394,8 @@ export default function VanSchedulePage() {
                   {noVanMap.size > 0 && (
                     <tr className="border-b border-zinc-100">
                       <td className="sticky left-0 z-10 bg-red-50 border-r border-zinc-200 px-3 py-2 min-w-[160px]">
-                        <div className="font-semibold text-red-700 text-xs">No Van</div>
-                        <div className="text-red-400 text-[10px]">Unassigned</div>
+                        <div className="font-semibold text-red-700 text-xs">⚠️ UNASSIGNED</div>
+                        <div className="text-red-400 text-[10px]">Conflict / No van</div>
                       </td>
                       {days.map((d) => {
                         const isToday = isCurrentMonth && d === today.getDate();

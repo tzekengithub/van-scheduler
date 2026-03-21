@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
         myrPerVehicle: bookings.myrPerVehicle,
         vehiclePlate: bookings.vehiclePlate,
         driverName: bookings.driverName,
+        driverContact: bookings.driverContact,
         paidStatus: bookings.paidStatus,
         overtime: bookings.overtime,
         introducer: bookings.introducer,
@@ -43,6 +44,10 @@ export async function GET(request: NextRequest) {
         day: bookings.day,
         month: bookings.month,
         year: bookings.year,
+        tripType: bookings.tripType,
+        tourGuide: bookings.tourGuide,
+        vehicleIndex: bookings.vehicleIndex,
+        numberOfVehicles: bookings.numberOfVehicles,
       })
       .from(bookings)
       .leftJoin(vans, eq(bookings.vanId, vans.id))
@@ -95,6 +100,9 @@ export async function POST(request: NextRequest) {
         year: year ?? "",
         paidStatus: "U",
         inHouseOrOutsourced: "I",
+        tripType: "trip",
+        vehicleIndex: 1,
+        numberOfVehicles: 1,
       })
       .returning();
 

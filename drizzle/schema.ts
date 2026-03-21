@@ -16,7 +16,7 @@ export const bookings = pgTable("bookings", {
   details: text("details"),
   vanId: integer("van_id").references(() => vans.id),
   manualChange: integer("manual_change").notNull().default(0),
-  // New fields
+  // Invoice fields
   invoiceNo: text("invoice_no").default(""),
   clientDetails: text("client_details").default(""),
   day: text("day").default(""),
@@ -25,13 +25,21 @@ export const bookings = pgTable("bookings", {
   passengerCount: integer("passenger_count").default(1),
   myrPerVehicle: numeric("myr_per_vehicle").default("0"),
   amount: numeric("amount").default("0"),
+  // Driver / vehicle (per-booking overrides, copied from van on upload)
   vehiclePlate: text("vehicle_plate").default(""),
   driverName: text("driver_name").default(""),
+  driverContact: text("driver_contact").default(""),
+  // Status / operational fields
   paidStatus: text("paid_status").default("U"),
   overtime: text("overtime").default(""),
   introducer: text("introducer").default(""),
   inHouseOrOutsourced: text("in_house_or_outsourced").default("I"),
   outsourcedCompany: text("outsourced_company").default(""),
+  // New fields — Section 1
+  tripType: text("trip_type").default("trip"),
+  tourGuide: text("tour_guide"),
+  vehicleIndex: integer("vehicle_index").default(1),
+  numberOfVehicles: integer("number_of_vehicles").default(1),
 });
 
 export type Van = typeof vans.$inferSelect;
