@@ -7,14 +7,11 @@ const MONTHS_LIST = [
   "January","February","March","April","May","June",
   "July","August","September","October","November","December",
 ];
-const DAYS_LIST = Array.from({ length: 31 }, (_, i) => String(i + 1));
 const OVERTIME_OPTIONS = Array.from({ length: 21 }, (_, i) =>
   (i * 0.5).toFixed(i === 0 ? 0 : 1)
 );
-const BADGE_COLORS = [
-  "bg-blue-50","bg-emerald-50","bg-amber-50","bg-rose-50",
-  "bg-violet-50","bg-cyan-50","bg-orange-50","bg-pink-50",
-];
+
+type TripType = "one_way_ride" | "round_trip" | "day_trip" | "trip";
 
 interface BookingRow {
   id: number;
@@ -33,6 +30,7 @@ interface BookingRow {
   myrPerVehicle: string | null;
   vehiclePlate: string | null;
   driverName: string | null;
+  driverContact: string | null;
   paidStatus: string | null;
   overtime: string | null;
   introducer: string | null;
@@ -41,6 +39,10 @@ interface BookingRow {
   day: string | null;
   month: string | null;
   year: string | null;
+  tripType: TripType | null;
+  tourGuide: string | null;
+  vehicleIndex: number | null;
+  numberOfVehicles: number | null;
 }
 
 interface PreviewBooking {
@@ -54,11 +56,58 @@ interface PreviewBooking {
   fromLocation: string;
   toLocation: string;
   numberOfVehicles: number;
+  vehicleIndex: number;
   amount: number;
+  tripType: string;
 }
 
 type SortField = "travelDate" | "invoiceNo" | "amount";
 type SortDir = "asc" | "desc";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function clientName(row: BookingRow): string {
+  return (row.clientDetails ?? "").split("\n")[0].trim();
+}
+
+function clientPhone(row: BookingRow): string {
+  return (row.clientDetails ?? "").split("\n")[1]?.trim() ?? "";
+}
+
+function tripTypeBadge(t: TripType | null) {
+  switch (t) {
+    case "one_way_ride":
+      return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 whitespace-nowrap">🔵 One Way</span>;
+    case "round_trip":
+      return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 whitespace-nowrap">🟢 Round Trip</span>;
+    case "day_trip":
+      return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-800 whitespace-nowrap">🟡 Day Trip</span>;
+    case "trip":
+    default:
+      return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 whitespace-nowrap">🟠 Trip</span>;
+  }
+}
+
+function tripTypeLabel(t: TripType | null): string {
+  switch (t) {
+    case "one_way_ride": return "One-Way Ride Only";
+    case "round_trip":   return "Round Trip";
+    case "day_trip":     return "Day Trip";
+    default:             return "Trip";
+  }
+}
+
+function formatDate(row: BookingRow): string {
+  const monthNum = MONTHS_LIST.indexOf(row.month ?? "");
+  if (monthNum === -1 || !row.day || !row.year) return row.travelDate;
+  const d = new Date(Number(row.year), monthNum, Number(row.day));
+  const weekday = d.toLocaleDateString("en-GB", { weekday: "short" });
+  const mm = String(monthNum + 1).padStart(2, "0");
+  const dd = String(row.day).padStart(2, "0");
+  return `${dd}/${mm}/${row.year} (${weekday})`;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AllJobsPage() {
   const [rows, setRows] = useState<BookingRow[]>([]);
@@ -80,12 +129,13 @@ export default function AllJobsPage() {
   const [confirming, setConfirming] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const [serviceStatus, setServiceStatus] = useState<'unknown' | 'cold' | 'starting' | 'ready' | 'error'>('unknown');
+  const [serviceStatus, setServiceStatus] = useState<"unknown" | "cold" | "starting" | "ready" | "error">("unknown");
   const [countdown, setCountdown] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ── Data fetching ──────────────────────────────────────────────────────────
   const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
@@ -104,31 +154,26 @@ export default function AllJobsPage() {
   useEffect(() => {
     const checkIfWarm = async () => {
       const serviceUrl = process.env.NEXT_PUBLIC_PDF_SERVICE_URL;
-      if (!serviceUrl) { setServiceStatus('cold'); return; }
+      if (!serviceUrl) { setServiceStatus("cold"); return; }
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       try {
         const res = await fetch(`${serviceUrl}/health`, { signal: controller.signal });
         clearTimeout(timeoutId);
-        if (res.ok) {
-          setServiceStatus('ready');
-        } else {
-          setServiceStatus('cold');
-        }
+        setServiceStatus(res.ok ? "ready" : "cold");
       } catch {
         clearTimeout(timeoutId);
-        setServiceStatus('cold');
+        setServiceStatus("cold");
       }
     };
     checkIfWarm();
   }, []);
 
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
+  // ── Sort & filter ──────────────────────────────────────────────────────────
   const displayRows = useMemo(() => {
     let filtered = rows;
     if (search.trim()) {
@@ -138,7 +183,9 @@ export default function AllJobsPage() {
         (r.invoiceNo ?? "").toLowerCase().includes(q) ||
         (r.details ?? "").toLowerCase().includes(q) ||
         (r.vehiclePlate ?? "").toLowerCase().includes(q) ||
-        (r.driverName ?? "").toLowerCase().includes(q)
+        (r.driverName ?? "").toLowerCase().includes(q) ||
+        (r.fromLocation ?? "").toLowerCase().includes(q) ||
+        (r.toLocation ?? "").toLowerCase().includes(q)
       );
     }
     return [...filtered].sort((a, b) => {
@@ -154,12 +201,8 @@ export default function AllJobsPage() {
   }, [rows, search, sortField, sortDir]);
 
   function toggleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir("asc");
-    }
+    if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortField(field); setSortDir("asc"); }
   }
 
   function sortArrow(field: SortField) {
@@ -167,6 +210,21 @@ export default function AllJobsPage() {
     return sortDir === "asc" ? " ↑" : " ↓";
   }
 
+  // ── Groups ────────────────────────────────────────────────────────────────
+  const groups = useMemo(() => ({
+    one_way_ride: displayRows.filter((r) => r.tripType === "one_way_ride"),
+    round_trip:   displayRows.filter((r) => r.tripType === "round_trip"),
+    day_trip:     displayRows.filter((r) => r.tripType === "day_trip"),
+    trip:         displayRows.filter((r) => !r.tripType || r.tripType === "trip"),
+  }), [displayRows]);
+
+  // Conflict rows: vanId=null with an invoice (means conflict, not just manual blanks)
+  const conflictRows = useMemo(
+    () => rows.filter((r) => r.vanId === null && r.invoiceNo),
+    [rows]
+  );
+
+  // ── Patch / edit ──────────────────────────────────────────────────────────
   async function patchRow(id: number, field: string, value: unknown) {
     const key = `${id}-${field}`;
     setCellStates((prev) => ({ ...prev, [key]: "saving" }));
@@ -180,16 +238,12 @@ export default function AllJobsPage() {
         setRows((prev) => prev.map((r) => r.id === id ? { ...r, [field]: value } : r));
         setCellStates((prev) => ({ ...prev, [key]: "saved" }));
         setTimeout(() => setCellStates((prev) => {
-          const next = { ...prev };
-          delete next[key];
-          return next;
+          const next = { ...prev }; delete next[key]; return next;
         }), 1000);
       } else {
-        console.error("Failed to save:", field, value);
         setCellStates((prev) => ({ ...prev, [key]: "error" }));
       }
-    } catch (err) {
-      console.error("patchRow network error:", err);
+    } catch {
       setCellStates((prev) => ({ ...prev, [key]: "error" }));
     }
   }
@@ -209,26 +263,24 @@ export default function AllJobsPage() {
   async function handleDelete(id: number) {
     if (!confirm("Delete this booking?")) return;
     const res = await fetch(`/api/bookings/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      await fetchRows();
-    }
+    if (res.ok) await fetchRows();
   }
 
   async function handleAddRow() {
     const today = new Date();
-    const d = String(today.getDate());
-    const m = MONTHS_LIST[today.getMonth()];
-    const y = String(today.getFullYear());
     const res = await fetch("/api/bookings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ day: d, month: m, year: y }),
+      body: JSON.stringify({
+        day: String(today.getDate()),
+        month: MONTHS_LIST[today.getMonth()],
+        year: String(today.getFullYear()),
+      }),
     });
-    if (res.ok) {
-      await fetchRows();
-    }
+    if (res.ok) await fetchRows();
   }
 
+  // ── Upload ────────────────────────────────────────────────────────────────
   async function handleFilesSelected(files: File[]) {
     setUploadFiles(files);
     setPreviewRows(null);
@@ -269,7 +321,6 @@ export default function AllJobsPage() {
           setUploadError(err.error ?? `Upload failed for ${file.name}`);
           return;
         }
-        await res.json();
       }
       setUploadOpen(false);
       setUploadFiles([]);
@@ -289,80 +340,46 @@ export default function AllJobsPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function openUploadZone() {
-    setUploadOpen(true);
-    setUploadFiles([]);
-    setPreviewRows(null);
-    setUploadError(null);
-  }
-
   const startService = async () => {
-    console.log('Starting service...');
-    setServiceStatus('starting');
+    setServiceStatus("starting");
     setCountdown(60);
-
     const serviceUrl = process.env.NEXT_PUBLIC_PDF_SERVICE_URL;
-    console.log('Service URL:', serviceUrl);
-
-    if (!serviceUrl) {
-      console.error('NEXT_PUBLIC_PDF_SERVICE_URL is not set!');
-      setServiceStatus('error');
-      return;
-    }
-
+    if (!serviceUrl) { setServiceStatus("error"); return; }
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          return 0;
-        }
+      setCountdown((prev) => {
+        if (prev <= 1) { if (timerRef.current) clearInterval(timerRef.current); return 0; }
         return prev - 1;
       });
     }, 1000);
-
-    const maxAttempts = 20;
-    let attempts = 0;
-
-    while (attempts < maxAttempts) {
-      await new Promise(r => setTimeout(r, 3000));
-      console.log(`Attempt ${attempts + 1} — fetching health...`);
+    for (let attempts = 0; attempts < 20; attempts++) {
+      await new Promise((r) => setTimeout(r, 3000));
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
         const res = await fetch(`${serviceUrl}/health`, { signal: controller.signal });
         clearTimeout(timeoutId);
-        console.log('Response status:', res.status);
-        console.log('Response ok:', res.ok);
         if (res.ok) {
-          console.log('Service is ready!');
           if (timerRef.current) clearInterval(timerRef.current);
           setCountdown(0);
-          setServiceStatus('ready');
+          setServiceStatus("ready");
           return;
         }
-      } catch (err: any) {
-        clearTimeout(timeoutId);
-        console.log(`Attempt ${attempts + 1} failed:`, err.message);
-      }
-      attempts++;
+      } catch { clearTimeout(timeoutId); }
     }
-
-    console.log('All attempts failed');
     if (timerRef.current) clearInterval(timerRef.current);
-    setServiceStatus('error');
+    setServiceStatus("error");
   };
 
+  // ── Computed totals ───────────────────────────────────────────────────────
   const totalAmount = rows.reduce((sum, r) => sum + parseFloat(r.amount ?? "0"), 0);
   const paidCount = rows.filter((r) => r.paidStatus === "P").length;
   const unpaidCount = rows.filter((r) => r.paidStatus !== "P").length;
 
-  function vanRowColor(vanId: number | null): string {
-    if (vanId == null) return "";
-    return BADGE_COLORS[(vanId - 1) % BADGE_COLORS.length];
-  }
-
-  function EditableText({ id, field, value }: { id: number; field: string; value: string | null }) {
+  // ── Editable cell components ──────────────────────────────────────────────
+  function EditableText({ id, field, value, placeholder }: {
+    id: number; field: string; value: string | null; placeholder?: string;
+  }) {
     const isEditing = editingCell?.id === id && editingCell?.field === field;
     const saveState = cellStates[`${id}-${field}`];
     const ringClass =
@@ -389,12 +406,14 @@ export default function AllJobsPage() {
         className={`cursor-pointer hover:bg-blue-50 rounded px-1 min-w-[40px] inline-block text-xs text-zinc-900 ${ringClass}`}
         onClick={() => startEdit(id, field, value ?? "")}
       >
-        {value || <span className="text-zinc-300">—</span>}
+        {value || <span className="text-zinc-300">{placeholder ?? "—"}</span>}
       </span>
     );
   }
 
-  function EditableSelect({ id, field, value, options }: { id: number; field: string; value: string | null; options: string[] }) {
+  function EditableSelect({ id, field, value, options }: {
+    id: number; field: string; value: string | null; options: string[];
+  }) {
     const saveState = cellStates[`${id}-${field}`];
     const borderClass =
       saveState === "saving" ? "border-zinc-300 animate-pulse" :
@@ -411,9 +430,179 @@ export default function AllJobsPage() {
     );
   }
 
-  const thSort = "px-2 py-2.5 text-left font-semibold text-zinc-900 whitespace-nowrap cursor-pointer select-none hover:bg-zinc-100";
-  const thPlain = "px-2 py-2.5 text-left font-semibold text-zinc-900 whitespace-nowrap";
+  // ── Trip-type table ───────────────────────────────────────────────────────
+  const thSort = "px-2 py-2 text-left font-semibold text-zinc-700 whitespace-nowrap cursor-pointer select-none hover:bg-zinc-100 text-xs";
+  const thPlain = "px-2 py-2 text-left font-semibold text-zinc-700 whitespace-nowrap text-xs";
 
+  function TripTable({ label, groupRows }: { label: string; groupRows: BookingRow[] }) {
+    if (groupRows.length === 0) return null;
+    return (
+      <div className="bg-white rounded-xl border border-zinc-200 overflow-auto shadow-sm">
+        <div className="px-4 py-2.5 border-b border-zinc-100 font-semibold text-sm text-zinc-800">
+          {label} <span className="text-zinc-400 font-normal text-xs ml-1">({groupRows.length})</span>
+        </div>
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-zinc-50 border-b border-zinc-200">
+              <th className={thSort} onClick={() => toggleSort("travelDate")}>
+                Date{sortArrow("travelDate")}
+              </th>
+              <th className={thSort} onClick={() => toggleSort("invoiceNo")}>
+                Invoice #{sortArrow("invoiceNo")}
+              </th>
+              <th className={thPlain}>Client Name</th>
+              <th className={thPlain}>Client Phone</th>
+              <th className={thPlain}>Location</th>
+              <th className={thPlain}>Type</th>
+              <th className={thPlain}>Description</th>
+              <th className={thPlain}>Van Plate</th>
+              <th className={thPlain}>Driver Name</th>
+              <th className={thPlain}>Driver Contact</th>
+              <th className={thPlain}>Tour Guide</th>
+              <th className={thPlain}>Pax</th>
+              <th className={thPlain}>Overtime</th>
+              <th className={thPlain}>I/O</th>
+              <th className={thPlain}>Outsourced Co.</th>
+              <th className={thSort} onClick={() => toggleSort("amount")}>
+                Amount (MYR){sortArrow("amount")}
+              </th>
+              <th className={thPlain}>P/U</th>
+              <th className={`${thPlain} no-print`}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {groupRows.map((row) => (
+              <tr key={row.id} className="border-b border-zinc-100 hover:bg-zinc-50">
+                {/* Date */}
+                <td className="px-2 py-1.5 whitespace-nowrap text-zinc-600 text-xs">
+                  {formatDate(row)}
+                </td>
+                {/* Invoice # */}
+                <td className="px-2 py-1.5 font-mono whitespace-nowrap text-zinc-700">
+                  {row.invoiceNo || <span className="text-zinc-300">—</span>}
+                  {(row.numberOfVehicles ?? 1) > 1 && (
+                    <span className="ml-1 text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
+                  )}
+                </td>
+                {/* Client Name */}
+                <td className="px-2 py-1.5 min-w-[110px]">
+                  <EditableText id={row.id} field="clientDetails" value={clientName(row)} placeholder="Client name" />
+                </td>
+                {/* Client Phone */}
+                <td className="px-2 py-1.5 min-w-[100px] text-zinc-600">
+                  {clientPhone(row) || <span className="text-zinc-300">—</span>}
+                </td>
+                {/* Location */}
+                <td className="px-2 py-1.5 min-w-[160px] whitespace-nowrap text-zinc-800">
+                  {row.fromLocation && row.toLocation
+                    ? `${row.fromLocation} → ${row.toLocation}`
+                    : row.details || "—"}
+                </td>
+                {/* Trip Type badge */}
+                <td className="px-2 py-1.5 whitespace-nowrap">
+                  {tripTypeBadge(row.tripType)}
+                </td>
+                {/* Description */}
+                <td className="px-2 py-1.5 whitespace-nowrap text-zinc-600 text-[10px]">
+                  {tripTypeLabel(row.tripType)}
+                </td>
+                {/* Van Plate */}
+                <td className="px-2 py-1.5 min-w-[80px]">
+                  <EditableText id={row.id} field="vehiclePlate" value={row.vehiclePlate} placeholder="—" />
+                </td>
+                {/* Driver Name */}
+                <td className="px-2 py-1.5 min-w-[90px]">
+                  <EditableText id={row.id} field="driverName" value={row.driverName} placeholder="—" />
+                </td>
+                {/* Driver Contact */}
+                <td className="px-2 py-1.5 min-w-[90px]">
+                  <EditableText id={row.id} field="driverContact" value={row.driverContact} placeholder="—" />
+                </td>
+                {/* Tour Guide */}
+                <td className="px-2 py-1.5 min-w-[90px]">
+                  <EditableText id={row.id} field="tourGuide" value={row.tourGuide} placeholder="—" />
+                </td>
+                {/* Pax */}
+                <td className="px-2 py-1.5 w-12">
+                  <input
+                    type="number"
+                    min="0"
+                    className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
+                      cellStates[`${row.id}-passengerCount`] === "saving" ? "border-zinc-300 animate-pulse" :
+                      cellStates[`${row.id}-passengerCount`] === "saved"  ? "border-green-400" :
+                      cellStates[`${row.id}-passengerCount`] === "error"  ? "border-red-400" : "border-zinc-300"
+                    }`}
+                    key={`pax-${row.id}`}
+                    defaultValue={row.passengerCount ?? ""}
+                    onBlur={(e) => patchRow(row.id, "passengerCount", e.target.value !== "" ? parseInt(e.target.value) : null)}
+                  />
+                </td>
+                {/* Overtime */}
+                <td className="px-2 py-1.5 w-20">
+                  <EditableSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} />
+                </td>
+                {/* I/O */}
+                <td className="px-2 py-1.5 w-12">
+                  <select
+                    className={`text-xs border rounded px-1 py-0.5 w-full bg-white text-zinc-900 ${
+                      cellStates[`${row.id}-inHouseOrOutsourced`] === "saving" ? "border-zinc-300 animate-pulse" :
+                      cellStates[`${row.id}-inHouseOrOutsourced`] === "saved"  ? "border-green-400" : "border-zinc-300"
+                    }`}
+                    value={row.inHouseOrOutsourced ?? "I"}
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      await patchRow(row.id, "inHouseOrOutsourced", val);
+                      if (val === "I") await patchRow(row.id, "outsourcedCompany", "");
+                    }}
+                  >
+                    <option value="I">I</option>
+                    <option value="O">O</option>
+                  </select>
+                </td>
+                {/* Outsourced Company */}
+                <td className="px-2 py-1.5 min-w-[100px]">
+                  {row.inHouseOrOutsourced === "O" ? (
+                    <input
+                      className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
+                        cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
+                        cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" : "border-zinc-300"
+                      }`}
+                      defaultValue={row.outsourcedCompany ?? ""}
+                      placeholder="Company name"
+                      key={`oc-${row.id}`}
+                      onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
+                    />
+                  ) : (
+                    <span className="text-xs text-zinc-300 px-1">—</span>
+                  )}
+                </td>
+                {/* Amount */}
+                <td className="px-2 py-1.5 min-w-[80px]">
+                  <EditableText id={row.id} field="amount" value={row.amount} />
+                </td>
+                {/* Paid Status */}
+                <td className="px-2 py-1.5 w-14">
+                  <EditableSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["U", "P"]} />
+                </td>
+                {/* Delete */}
+                <td className="px-2 py-1.5 no-print">
+                  <button
+                    onClick={() => handleDelete(row.id)}
+                    className="text-red-400 hover:text-red-600 font-bold text-base leading-none px-1"
+                    title="Delete row"
+                  >
+                    ×
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-zinc-50 font-sans">
       <style>{`
@@ -440,7 +629,7 @@ export default function AllJobsPage() {
 
       <main className="px-4 py-6 space-y-4">
 
-        {/* Section 1 — Top bar */}
+        {/* Top bar */}
         <div className="flex gap-3 items-end flex-wrap no-print">
           <input
             type="text"
@@ -451,13 +640,13 @@ export default function AllJobsPage() {
           />
           <div className="flex gap-2 ml-2">
             <button
-              onClick={openUploadZone}
-              disabled={serviceStatus !== 'ready'}
-              title={serviceStatus !== 'ready' ? 'Click Start PDF Service first' : ''}
+              onClick={() => setUploadOpen(true)}
+              disabled={serviceStatus !== "ready"}
+              title={serviceStatus !== "ready" ? "Click Start PDF Service first" : ""}
               className={`h-9 px-4 rounded-lg text-sm font-medium transition-colors ${
-                serviceStatus === 'ready'
-                  ? 'border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                serviceStatus === "ready"
+                  ? "border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50"
+                  : "bg-gray-200 text-gray-400 cursor-not-allowed"
               }`}
             >
               Upload Invoice PDF
@@ -478,71 +667,57 @@ export default function AllJobsPage() {
         </div>
 
         {/* Print heading */}
-        <div className="text-sm font-semibold text-zinc-900 hidden print:block">
-          All Jobs Record
-        </div>
+        <div className="text-sm font-semibold text-zinc-900 hidden print:block">All Jobs Record</div>
 
         {/* PDF Service status bar */}
         <div className="no-print">
-          {serviceStatus === 'unknown' && (
-            <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg mb-4">
-              <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+          {serviceStatus === "unknown" && (
+            <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="w-2 h-2 rounded-full bg-gray-400" />
               <span className="text-sm text-gray-500">Checking PDF service...</span>
             </div>
           )}
-          {serviceStatus === 'cold' && (
-            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
-              <div className="w-2 h-2 rounded-full bg-amber-400"></div>
+          {serviceStatus === "cold" && (
+            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="w-2 h-2 rounded-full bg-amber-400" />
               <span className="text-sm text-amber-700">PDF service is sleeping</span>
-              <button
-                onClick={startService}
-                className="ml-auto px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-              >
+              <button onClick={startService} className="ml-auto px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
                 Start PDF Service
               </button>
             </div>
           )}
-          {serviceStatus === 'starting' && (
-            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg mb-4">
-              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
+          {serviceStatus === "starting" && (
+            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               <span className="text-sm text-amber-700">Starting PDF service...</span>
               <span className="ml-auto text-sm font-mono text-amber-600">{countdown}s</span>
             </div>
           )}
-          {serviceStatus === 'ready' && (
-            <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg mb-4">
-              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+          {serviceStatus === "ready" && (
+            <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <div className="w-2 h-2 rounded-full bg-green-500" />
               <span className="text-sm text-green-700">PDF service ready — you can upload invoices</span>
             </div>
           )}
-          {serviceStatus === 'error' && (
-            <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg mb-4">
-              <div className="w-2 h-2 rounded-full bg-red-500"></div>
+          {serviceStatus === "error" && (
+            <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="w-2 h-2 rounded-full bg-red-500" />
               <span className="text-sm text-red-700">PDF service failed to start — try again</span>
-              <button
-                onClick={startService}
-                className="ml-auto px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
-              >
+              <button onClick={startService} className="ml-auto px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700">
                 Retry
               </button>
             </div>
           )}
         </div>
 
-        {/* Section 2 — Upload zone (collapsible) */}
+        {/* Upload zone */}
         {uploadOpen && (
           <div className="no-print bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-zinc-900">Upload Invoice PDF</h2>
-              <button
-                onClick={handleCancelUpload}
-                className="text-zinc-400 hover:text-zinc-700 text-lg leading-none font-bold"
-              >
-                ×
-              </button>
+              <button onClick={handleCancelUpload} className="text-zinc-400 hover:text-zinc-700 text-lg font-bold">×</button>
             </div>
 
-            {/* Drop zone */}
             {uploadFiles.length === 0 && (
               <div
                 className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors ${
@@ -574,7 +749,6 @@ export default function AllJobsPage() {
               </div>
             )}
 
-            {/* Parsing spinner */}
             {parsing && (
               <div className="flex items-center gap-3 py-6 justify-center text-zinc-500 text-sm">
                 <svg className="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -585,24 +759,22 @@ export default function AllJobsPage() {
               </div>
             )}
 
-            {/* Error */}
             {uploadError && (
               <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800 mt-3">
                 {uploadError}
               </div>
             )}
 
-            {/* Preview table */}
             {previewRows && previewRows.length > 0 && (
               <div className="mt-4">
                 <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
-                  Preview — {previewRows.length} booking{previewRows.length !== 1 ? "s" : ""} found in {uploadFiles.map((f) => f.name).join(", ")}
+                  Preview — {previewRows.length} row{previewRows.length !== 1 ? "s" : ""} found in {uploadFiles.map((f) => f.name).join(", ")}
                 </p>
                 <div className="overflow-auto rounded-lg border border-zinc-200">
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="bg-zinc-50 border-b border-zinc-200">
-                        {["Date", "Invoice #", "Client", "Details", "Pax", "Amount (MYR)"].map((h) => (
+                        {["Date", "Invoice #", "Client", "Route", "Type", "Veh", "Amount (MYR)"].map((h) => (
                           <th key={h} className="px-3 py-2 text-left font-semibold text-zinc-600 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -612,9 +784,12 @@ export default function AllJobsPage() {
                         <tr key={i} className="border-b border-zinc-100">
                           <td className="px-3 py-1.5 text-zinc-900 whitespace-nowrap">{r.day} {r.month} {r.year}</td>
                           <td className="px-3 py-1.5 text-zinc-500 font-mono whitespace-nowrap">{r.invoiceNo}</td>
-                          <td className="px-3 py-1.5 text-zinc-900">{r.clientDetails}</td>
-                          <td className="px-3 py-1.5 text-zinc-900">{r.details}</td>
-                          <td className="px-3 py-1.5 text-zinc-900 text-center">{r.numberOfVehicles}</td>
+                          <td className="px-3 py-1.5 text-zinc-900">{(r.clientDetails ?? "").split("\n")[0]}</td>
+                          <td className="px-3 py-1.5 text-zinc-900 whitespace-nowrap">{r.fromLocation} → {r.toLocation}</td>
+                          <td className="px-3 py-1.5">{tripTypeBadge(r.tripType as TripType)}</td>
+                          <td className="px-3 py-1.5 text-zinc-500 text-center">
+                            {(r.numberOfVehicles ?? 1) > 1 ? `v${r.vehicleIndex}/${r.numberOfVehicles}` : "1"}
+                          </td>
                           <td className="px-3 py-1.5 text-zinc-900 font-mono">{Number(r.amount).toFixed(2)}</td>
                         </tr>
                       ))}
@@ -625,13 +800,13 @@ export default function AllJobsPage() {
                   <button
                     onClick={handleConfirmUpload}
                     disabled={confirming}
-                    className="h-9 px-5 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                    className="h-9 px-5 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50"
                   >
                     {confirming ? "Inserting…" : `Confirm — Insert ${previewRows.length} row${previewRows.length !== 1 ? "s" : ""}`}
                   </button>
                   <button
                     onClick={handleCancelUpload}
-                    className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+                    className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-700 hover:bg-zinc-50"
                   >
                     Cancel
                   </button>
@@ -640,14 +815,12 @@ export default function AllJobsPage() {
             )}
 
             {previewRows && previewRows.length === 0 && !parsing && (
-              <div className="mt-3 text-sm text-zinc-500">
-                No bookings found in this PDF. Check the file format.
-              </div>
+              <div className="mt-3 text-sm text-zinc-500">No bookings found in this PDF. Check the file format.</div>
             )}
           </div>
         )}
 
-        {/* Section 3 — Summary bar (totals for ALL rows, unfiltered) */}
+        {/* Summary bar */}
         {!loading && (
           <div className="no-print flex gap-6 text-sm text-zinc-900 bg-white rounded-lg border border-zinc-200 px-4 py-2 w-fit">
             <span>Rows: <strong>{rows.length}</strong></span>
@@ -658,148 +831,40 @@ export default function AllJobsPage() {
           </div>
         )}
 
-        {/* Section 4 — Table */}
+        {/* Conflict banner */}
+        {!loading && conflictRows.length > 0 && (
+          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 space-y-1">
+            <div className="font-bold text-red-800 text-sm">
+              ⚠️ CONFLICT — Insufficient vans for:
+            </div>
+            {conflictRows.map((r) => (
+              <div key={r.id} className="text-xs text-red-700 pl-4">
+                • {formatDate(r)} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>REQUIRES OUTSOURCED COMPANY</strong>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Trip-type tables */}
         {loading ? (
           <div className="text-center py-20 text-zinc-400 text-sm">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="bg-white rounded-xl border border-zinc-200 p-12 text-center text-zinc-400 text-sm">
+            No bookings found.
+          </div>
+        ) : displayRows.length === 0 ? (
+          <div className="bg-white rounded-xl border border-zinc-200 p-12 text-center text-zinc-400 text-sm">
+            No rows match your search.
+          </div>
         ) : (
-          <div className="bg-white rounded-xl border border-zinc-200 overflow-auto shadow-sm">
-            <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="bg-zinc-50 border-b border-zinc-200">
-                  <th className={thSort} onClick={() => toggleSort("travelDate")}>
-                    Day{sortArrow("travelDate")}
-                  </th>
-                  <th className={thPlain}>I/O</th>
-                  <th className={thPlain}>Outsourced Co.</th>
-                  <th className={thPlain}>Vehicle Plate #</th>
-                  <th className={thPlain}>Driver Name</th>
-                  <th className={thSort} onClick={() => toggleSort("invoiceNo")}>
-                    Invoice #{sortArrow("invoiceNo")}
-                  </th>
-                  <th className={thPlain}>Client&apos;s Details</th>
-                  <th className={thSort} onClick={() => toggleSort("amount")}>
-                    Amount (MYR){sortArrow("amount")}
-                  </th>
-                  <th className={thPlain}>Passenger #</th>
-                  <th className={thPlain}>Booking Details</th>
-                  <th className={thPlain}>Overtime</th>
-                  <th className={thPlain}>Introducer</th>
-                  <th className={thPlain}>P/U</th>
-                  <th className={`${thPlain} no-print`}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayRows.map((row) => (
-                  <tr key={row.id} className={`border-b border-zinc-100 hover:brightness-95 ${vanRowColor(row.vanId)}`}>
-                    <td className="px-2 py-1.5 w-14">
-                      <EditableSelect id={row.id} field="day" value={row.day} options={DAYS_LIST} />
-                    </td>
-                    <td className="px-2 py-1.5 w-14">
-                      <select
-                        className={`text-xs border rounded px-1 py-0.5 w-full bg-white text-zinc-900 ${
-                          cellStates[`${row.id}-inHouseOrOutsourced`] === "saving" ? "border-zinc-300 animate-pulse" :
-                          cellStates[`${row.id}-inHouseOrOutsourced`] === "saved"  ? "border-green-400" :
-                          cellStates[`${row.id}-inHouseOrOutsourced`] === "error"  ? "border-red-400" : "border-zinc-300"
-                        }`}
-                        value={row.inHouseOrOutsourced ?? "I"}
-                        onChange={async (e) => {
-                          const val = e.target.value;
-                          if (val === "I") {
-                            await patchRow(row.id, "inHouseOrOutsourced", "I");
-                            await patchRow(row.id, "outsourcedCompany", "");
-                          } else {
-                            await patchRow(row.id, "inHouseOrOutsourced", val);
-                          }
-                        }}
-                      >
-                        <option value="I">I</option>
-                        <option value="O">O</option>
-                      </select>
-                    </td>
-                    <td className="px-2 py-1.5 min-w-[100px]">
-                      {row.inHouseOrOutsourced === "O" ? (
-                        <input
-                          autoFocus
-                          className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
-                            cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
-                            cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" :
-                            cellStates[`${row.id}-outsourcedCompany`] === "error"  ? "border-red-400" : "border-zinc-300"
-                          }`}
-                          defaultValue={row.outsourcedCompany ?? ""}
-                          placeholder="Company name"
-                          key={`oc-${row.id}`}
-                          onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
-                        />
-                      ) : (
-                        <span className="text-xs text-zinc-400 px-1 block bg-zinc-100 rounded cursor-not-allowed">—</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5 min-w-[80px]">
-                      <EditableText id={row.id} field="vehiclePlate" value={row.vehiclePlate} />
-                    </td>
-                    <td className="px-2 py-1.5 min-w-[80px]">
-                      <EditableText id={row.id} field="driverName" value={row.driverName} />
-                    </td>
-                    <td className="px-2 py-1.5 font-mono whitespace-nowrap text-zinc-900 text-xs">
-                      {row.invoiceNo ?? ""}
-                    </td>
-                    <td className="px-2 py-1.5 min-w-[130px]">
-                      <EditableText id={row.id} field="clientDetails" value={row.clientDetails} />
-                    </td>
-                    <td className="px-2 py-1.5 min-w-[80px]">
-                      <EditableText id={row.id} field="amount" value={row.amount} />
-                    </td>
-                    <td className="px-2 py-1.5 w-14">
-                      <input
-                        type="number"
-                        min="0"
-                        className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
-                          cellStates[`${row.id}-passengerCount`] === "saving" ? "border-zinc-300 animate-pulse" :
-                          cellStates[`${row.id}-passengerCount`] === "saved"  ? "border-green-400" :
-                          cellStates[`${row.id}-passengerCount`] === "error"  ? "border-red-400" : "border-zinc-300"
-                        }`}
-                        key={`pax-${row.id}`}
-                        defaultValue={row.passengerCount ?? ""}
-                        onBlur={(e) => patchRow(row.id, "passengerCount", e.target.value !== "" ? parseInt(e.target.value) : null)}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5 min-w-[160px]">
-                      <EditableText id={row.id} field="details" value={row.details} />
-                    </td>
-                    <td className="px-2 py-1.5 w-20">
-                      <EditableSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} />
-                    </td>
-                    <td className="px-2 py-1.5 min-w-[80px]">
-                      <EditableText id={row.id} field="introducer" value={row.introducer} />
-                    </td>
-                    <td className="px-2 py-1.5 w-14">
-                      <EditableSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["P","U"]} />
-                    </td>
-                    <td className="px-2 py-1.5 no-print">
-                      <button
-                        onClick={() => handleDelete(row.id)}
-                        className="text-red-400 hover:text-red-600 font-bold text-base leading-none px-1"
-                        title="Delete row"
-                      >
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-
-                {displayRows.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={14} className="px-4 py-10 text-center text-zinc-400 text-sm">
-                      {search ? "No rows match your search." : "No bookings found."}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="space-y-4">
+            <TripTable label="🔵 One Way Rides" groupRows={groups.one_way_ride} />
+            <TripTable label="🟢 Round Trips"   groupRows={groups.round_trip} />
+            <TripTable label="🟡 Day Trips"      groupRows={groups.day_trip} />
+            <TripTable label="🟠 Trips"          groupRows={groups.trip} />
           </div>
         )}
       </main>
-
     </div>
   );
 }
