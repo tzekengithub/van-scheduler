@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
         booking.invoiceNo,
         booking.vehicleIndex,
         booking.numberOfVehicles,
+        booking.tripType,
       );
 
       let vehiclePlate = booking.vehiclePlate;

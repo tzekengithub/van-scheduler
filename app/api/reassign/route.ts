@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq } from "drizzle-orm";
+import { eq, asc } from "drizzle-orm";
 import { smartAssignVan } from "@/lib/van-assignment";
 
 export const runtime = "nodejs";
@@ -9,126 +9,107 @@ export const runtime = "nodejs";
 /**
  * POST /api/reassign
  *
- * Force-reassigns vans to all unassigned (or inconsistently assigned) invoice groups.
+ * Full re-assignment from scratch. Enforces the golden rule: 1 van = 1 job per day.
  *
- * Logic per invoice group:
- *   1. Find the dominant vanId (most common non-null vanId in the group).
- *   2. If none exists yet, call smartAssignVan() once for the first row and use that result.
- *   3. Force-UPDATE every row in the group to the dominant vanId.
- *      — Rows with manualChange = 1 are skipped.
- *      — No free-van check: same invoice overrides double-booking detection.
+ * Algorithm:
+ *   1. Clear vanId on all auto-assigned rows (manualChange = 0).
+ *   2. Fetch all bookings ordered by travelDate ASC, then invoiceNo, then vehicleIndex.
+ *   3. Process one booking at a time in date order.
+ *   4. For each: apply RULE 1 → RULE 2 → RULE 3 via smartAssignVan().
+ *   5. Commit the van assignment to the DB immediately so the next booking
+ *      sees accurate availability (critical for multi-vehicle same-date).
+ *   6. Rows with manualChange = 1 are skipped entirely (their vanId is preserved).
  */
 export async function POST() {
   try {
-    // ── Fetch everything ────────────────────────────────────────────────────────
-    const allBookings = await db.select().from(bookings);
     const allVans = await db.select().from(vans);
     const vanMap = new Map(allVans.map((v) => [v.id, v]));
 
     console.log(
-      `[reassign] bookings=${allBookings.length} vans=${allVans.length}`,
+      `[reassign] vans=${allVans.length}:`,
       allVans.map((v) => `${v.id}:${v.vanNumber}`).join(", ")
     );
 
-    // ── Group by invoiceNo ───────────────────────────────────────────────────────
-    const groups = new Map<string, typeof allBookings>();
-    for (const b of allBookings) {
-      const key = b.invoiceNo ?? "";
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(b);
-    }
-    console.log(`[reassign] invoice groups: ${groups.size}`);
+    // ── Step 1: Clear all auto-assigned vans ────────────────────────────────────
+    const cleared = await db
+      .update(bookings)
+      .set({ vanId: null })
+      .where(eq(bookings.manualChange, 0))
+      .returning({ id: bookings.id });
 
-    let updatedCount = 0;
-    let skippedManual = 0;
-    let conflicts = 0;
+    console.log(`[reassign] cleared ${cleared.length} auto-assignments`);
 
-    for (const [invoiceNo, rows] of groups) {
-      // Skip bookings with no invoice (manual / legacy entries)
-      if (!invoiceNo) continue;
-
-      console.log(
-        `\n[reassign] ${invoiceNo}: ${rows.length} rows —`,
-        rows
-          .map(
-            (r) =>
-              `id=${r.id} date=${r.travelDate} vi=${r.vehicleIndex} vanId=${r.vanId} manual=${r.manualChange}`
-          )
-          .join(" | ")
+    // ── Step 2: Fetch all bookings in date order ─────────────────────────────────
+    const allBookings = await db
+      .select()
+      .from(bookings)
+      .orderBy(
+        asc(bookings.travelDate),
+        asc(bookings.invoiceNo),
+        asc(bookings.vehicleIndex)
       );
 
-      // ── Find dominant vanId ────────────────────────────────────────────────────
-      const vanCounts = new Map<number, number>();
-      for (const r of rows) {
-        if (r.vanId != null) {
-          vanCounts.set(r.vanId, (vanCounts.get(r.vanId) ?? 0) + 1);
-        }
-      }
+    console.log(`[reassign] processing ${allBookings.length} bookings in date order`);
 
-      let dominantVanId: number | null = null;
-      if (vanCounts.size > 0) {
-        // Most-frequent non-null vanId
-        dominantVanId = [...vanCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        console.log(`  dominant vanId from existing assignments: ${dominantVanId}`);
-      } else {
-        // No van assigned yet — use smartAssignVan on the first row
-        const first = rows[0];
-        dominantVanId = await smartAssignVan(
-          first.travelDate,
-          first.fromLocation,
-          first.invoiceNo ?? "",
-          first.vehicleIndex ?? 1,
-          first.numberOfVehicles ?? 1
+    let assigned = 0;
+    let conflicts = 0;
+    let skippedManual = 0;
+
+    for (const b of allBookings) {
+      // ── Step 6: Preserve manualChange rows ──────────────────────────────────
+      if (b.manualChange === 1) {
+        console.log(
+          `  SKIP  id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (manualChange=1 → vanId=${b.vanId})`
         );
-        console.log(`  smartAssignVan returned: ${dominantVanId}`);
-      }
-
-      if (dominantVanId == null) {
-        console.log(`  CONFLICT: no available van for ${invoiceNo}`);
-        conflicts++;
+        skippedManual++;
         continue;
       }
 
-      const van = vanMap.get(dominantVanId);
-      console.log(
-        `  assigning vanId=${dominantVanId} (${van?.vanNumber ?? "?"}) to all ${rows.length} rows`
+      // ── Steps 3-4: Determine van via rules ──────────────────────────────────
+      const vanId = await smartAssignVan(
+        b.travelDate,
+        b.fromLocation,
+        b.invoiceNo ?? "",
+        b.vehicleIndex ?? 1,
+        b.numberOfVehicles ?? 1,
+        b.tripType,
       );
 
-      // ── Force-update every row (skip manualChange=1) ───────────────────────────
-      for (const r of rows) {
-        if (r.manualChange === 1) {
-          console.log(`  skip id=${r.id} (manualChange=1)`);
-          skippedManual++;
-          continue;
-        }
+      // ── Step 5: Commit to DB immediately ────────────────────────────────────
+      if (vanId != null) {
+        const van = vanMap.get(vanId);
         await db
           .update(bookings)
           .set({
-            vanId: dominantVanId,
+            vanId,
             vehiclePlate: van?.vanNumber ?? "",
             driverName: van?.driverName ?? "",
             driverContact: van?.driverContact ?? "",
           })
-          .where(eq(bookings.id, r.id));
-        console.log(`  updated id=${r.id} → vanId=${dominantVanId}`);
-        updatedCount++;
+          .where(eq(bookings.id, b.id));
+
+        console.log(
+          `  OK    id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} → van ${vanId} (${van?.vanNumber ?? "?"})`
+        );
+        assigned++;
+      } else {
+        await db
+          .update(bookings)
+          .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
+          .where(eq(bookings.id, b.id));
+
+        console.log(
+          `  CONFLICT id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} → no free van`
+        );
+        conflicts++;
       }
     }
 
-    // ── Debug: re-query the specific invoice mentioned in the bug report ─────────
-    const debugRows = await db
-      .select({ id: bookings.id, vanId: bookings.vanId, travelDate: bookings.travelDate })
-      .from(bookings)
-      .where(eq(bookings.invoiceNo, "INV2025120078"));
-    if (debugRows.length > 0) {
-      console.log(`\n[reassign] INV2025120078 after update:`, debugRows);
-    }
-
     console.log(
-      `\n[reassign] done — updated=${updatedCount} skippedManual=${skippedManual} conflicts=${conflicts}`
+      `\n[reassign] done — assigned=${assigned} conflicts=${conflicts} skippedManual=${skippedManual}`
     );
 
-    return NextResponse.json({ updated: updatedCount, skippedManual, conflicts });
+    return NextResponse.json({ assigned, conflicts, skippedManual });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error("[reassign] error:", error);
