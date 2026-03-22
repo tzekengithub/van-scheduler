@@ -127,6 +127,22 @@ export default function VanSchedulePage() {
     return () => document.removeEventListener("mousedown", handler);
   }, [popup]);
 
+  function exportJson() {
+    const payload = {
+      month: MONTH_NAMES[viewMonth],
+      year: viewYear,
+      vans,
+      bookings,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `van-schedule-${viewYear}-${String(viewMonth + 1).padStart(2, "0")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
     else setViewMonth((m) => m - 1);
@@ -483,6 +499,18 @@ export default function VanSchedulePage() {
                 ✓ All clear
               </span>
             )
+          )}
+          {!loading && (
+            <button
+              onClick={exportJson}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-medium transition-colors"
+              title="Export this month's schedule as JSON for debugging"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Export JSON
+            </button>
           )}
           {!loading && (
             <div className="flex items-center gap-3 ml-auto text-xs text-zinc-500">
