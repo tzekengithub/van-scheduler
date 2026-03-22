@@ -57,9 +57,25 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [minimised, setMinimised] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [uploadResults, setUploadResults] = useState<{ fileName: string; inserted: number; error?: string }[] | null>(null);
+  const [insertProgress, setInsertProgress] = useState<{
+    inserted: number;
+    total: number;
+    phase: "inserting" | "rechecking";
+  } | null>(null);
+
+  const [parseProgress, setParseProgress] = useState<{
+    phase: "preview" | "upload";
+    current: number;
+    total: number;
+    currentFile: string;
+    startTime: number;
+    etaMs: number | null;
+  } | null>(null);
+  const [progressTick, setProgressTick] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Check service health once on mount
   useEffect(() => {
@@ -81,6 +97,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
+  // Tick every second while a parse/upload progress bar is active
+  useEffect(() => {
+    if (!parseProgress) { setProgressTick(0); return; }
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    progressTimerRef.current = setInterval(() => setProgressTick((t) => t + 1), 500);
+    return () => { if (progressTimerRef.current) clearInterval(progressTimerRef.current); };
+  }, [parseProgress]);
+
   // Auto-show panel when parsing starts or preview is ready
   useEffect(() => {
     if (parsing || previewRows !== null) setUploadOpen(true);
@@ -92,9 +116,19 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setUploadError(null);
     if (files.length === 0) return;
     setParsing(true);
+    const startTime = Date.now();
     try {
       const allBookings: PreviewBooking[] = [];
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setParseProgress({
+          phase: "preview",
+          current: i + 1,
+          total: files.length,
+          currentFile: file.name,
+          startTime,
+          etaMs: null,
+        });
         const formData = new FormData();
         formData.append("file", file);
         const res = await fetch("/api/preview", { method: "POST", body: formData });
@@ -104,12 +138,19 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         } else {
           const err = await res.json().catch(() => ({}));
           setUploadError(err.error ?? `Failed to parse ${file.name}`);
+          setParseProgress(null);
           return;
         }
+        // After each file, compute ETA from average time per file so far
+        const elapsed = Date.now() - startTime;
+        const avgPerFile = elapsed / (i + 1);
+        const remaining = files.length - (i + 1);
+        setParseProgress((prev) => prev ? { ...prev, etaMs: remaining * avgPerFile } : prev);
       }
       setPreviewRows(allBookings);
     } finally {
       setParsing(false);
+      setParseProgress(null);
     }
   }
 
@@ -117,26 +158,68 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     if (uploadFiles.length === 0) return;
     setConfirming(true);
     setUploadResults(null);
+    setInsertProgress(null);
+    const startTime = Date.now();
     try {
       let totalCount = 0;
       const results: { fileName: string; inserted: number; error?: string }[] = [];
-      for (const file of uploadFiles) {
+      for (let i = 0; i < uploadFiles.length; i++) {
+        const file = uploadFiles[i];
+        setParseProgress({
+          phase: "upload",
+          current: i + 1,
+          total: uploadFiles.length,
+          currentFile: file.name,
+          startTime,
+          etaMs: null,
+        });
+        setInsertProgress(null);
         const formData = new FormData();
         formData.append("file", file);
         const res = await fetch("/api/upload", { method: "POST", body: formData });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          const detail = Array.isArray(err.details) && err.details.length > 0
-            ? err.details[0] : (err.error ?? `Upload failed`);
-          results.push({ fileName: file.name, inserted: 0, error: detail });
-        } else {
-          const data = await res.json();
-          const inserted = data.inserted ?? 0;
-          results.push({ fileName: file.name, inserted });
-          totalCount += inserted;
+
+        let fileInserted = 0;
+        let fileError: string | undefined;
+
+        if (res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop() ?? "";
+            for (const part of parts) {
+              if (!part.startsWith("data: ")) continue;
+              try {
+                const event = JSON.parse(part.slice(6));
+                if (event.type === "parsed") {
+                  setInsertProgress({ inserted: 0, total: event.total, phase: "inserting" });
+                } else if (event.type === "progress") {
+                  setInsertProgress({ inserted: event.inserted, total: event.total, phase: "inserting" });
+                } else if (event.type === "recheck") {
+                  setInsertProgress((prev) => prev ? { ...prev, phase: "rechecking" } : { inserted: 0, total: 0, phase: "rechecking" });
+                } else if (event.type === "done") {
+                  fileInserted = event.inserted ?? 0;
+                } else if (event.type === "error") {
+                  fileError = Array.isArray(event.details) && event.details.length > 0
+                    ? event.details[0] : (event.error ?? "Upload failed");
+                }
+              } catch {}
+            }
+          }
         }
+
+        results.push({ fileName: file.name, inserted: fileInserted, error: fileError });
+        totalCount += fileInserted;
+        const elapsed = Date.now() - startTime;
+        const avgPerFile = elapsed / (i + 1);
+        const remaining = uploadFiles.length - (i + 1);
+        setParseProgress((prev) => prev ? { ...prev, etaMs: remaining * avgPerFile } : prev);
       }
-      // Notify any listening page to refresh
+      setInsertProgress(null);
       window.dispatchEvent(new CustomEvent("bookings-uploaded", { detail: { count: totalCount } }));
       setUploadResults(results);
       setPreviewRows(null);
@@ -144,6 +227,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       if (fileInputRef.current) fileInputRef.current.value = "";
     } finally {
       setConfirming(false);
+      setParseProgress(null);
+      setInsertProgress(null);
     }
   }
 
@@ -219,7 +304,15 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                   Parsing…
                 </span>
               )}
-              {confirming && <span className="text-xs text-blue-600">Inserting rows…</span>}
+              {confirming && (
+                <span className="text-xs text-blue-600">
+                  {insertProgress?.phase === "rechecking"
+                    ? "Rechecking vans…"
+                    : insertProgress
+                    ? `Inserting ${insertProgress.inserted} / ${insertProgress.total} rows…`
+                    : "Uploading…"}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1">
               {/* Minimise / restore */}
@@ -346,14 +439,118 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               </div>
             )}
 
-            {/* Parsing spinner */}
-            {parsing && (
+            {/* Parsing / upload progress */}
+            {(parsing || confirming) && parseProgress && (() => {
+              const elapsedMs = Date.now() - parseProgress.startTime + (progressTick * 0); // progressTick triggers re-render
+              const elapsedMs2 = Date.now() - parseProgress.startTime;
+              const elapsedSec = Math.floor(elapsedMs2 / 1000);
+              const pct = Math.round((parseProgress.current - 1) / parseProgress.total * 100);
+              const etaSec = parseProgress.etaMs != null ? Math.ceil(parseProgress.etaMs / 1000) : null;
+              const phaseLabel = parseProgress.phase === "preview" ? "Parsing" : "Uploading";
+              return (
+                <div className="py-6 px-2 space-y-4">
+                  {/* File counter + phase */}
+                  <div className="flex items-center justify-between text-xs font-medium text-zinc-700">
+                    <span className="flex items-center gap-1.5">
+                      <svg className="animate-spin h-3.5 w-3.5 text-amber-500 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                      {phaseLabel} file {parseProgress.current} of {parseProgress.total}
+                    </span>
+                    <span className="text-zinc-400 font-mono">{pct}%</span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full h-2 bg-zinc-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-amber-400 rounded-full transition-all duration-300"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+
+                  {/* Current file name */}
+                  <div className="text-xs text-zinc-500 truncate" title={parseProgress.currentFile}>
+                    📄 {parseProgress.currentFile}
+                  </div>
+
+                  {/* Elapsed + ETA */}
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Elapsed: <span className="font-mono text-zinc-600">{elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec/60)}m ${elapsedSec%60}s`}</span></span>
+                    <span>
+                      {etaSec === null
+                        ? "Estimating…"
+                        : etaSec === 0
+                        ? "Almost done"
+                        : <>ETA: <span className="font-mono text-zinc-600">~{etaSec < 60 ? `${etaSec}s` : `${Math.floor(etaSec/60)}m ${etaSec%60}s`}</span></>
+                      }
+                    </span>
+                  </div>
+
+                  {/* Per-file chips */}
+                  {parseProgress.total > 1 && (
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {uploadFiles.map((f, i) => {
+                        const done = i < parseProgress.current - 1;
+                        const active = i === parseProgress.current - 1;
+                        return (
+                          <span
+                            key={i}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border truncate max-w-[160px] ${
+                              done    ? "bg-green-50 border-green-200 text-green-700" :
+                              active  ? "bg-amber-50 border-amber-300 text-amber-700" :
+                                        "bg-zinc-50 border-zinc-200 text-zinc-400"
+                            }`}
+                            title={f.name}
+                          >
+                            {done ? "✓" : active ? "⟳" : "○"} {f.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Row-level insertion progress (upload phase only) */}
+                  {confirming && insertProgress && (
+                    <div className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3">
+                      {insertProgress.phase === "rechecking" ? (
+                        <div className="flex items-center gap-2 text-xs text-indigo-600">
+                          <svg className="animate-spin h-3 w-3 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                          </svg>
+                          Rechecking van assignments…
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between text-xs text-zinc-600">
+                            <span>Inserting rows</span>
+                            <span className="font-mono tabular-nums">
+                              {insertProgress.inserted} / {insertProgress.total}
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-500 rounded-full transition-all duration-150"
+                              style={{ width: `${insertProgress.total > 0 ? Math.round(insertProgress.inserted / insertProgress.total * 100) : 0}%` }}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Simple spinner fallback when no progress state yet */}
+            {parsing && !parseProgress && (
               <div className="flex items-center gap-3 py-8 justify-center text-zinc-500 text-sm">
                 <svg className="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                 </svg>
-                Parsing {uploadFiles.map((f) => f.name).join(", ")}…
+                Parsing…
               </div>
             )}
 
