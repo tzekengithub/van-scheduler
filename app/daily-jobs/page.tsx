@@ -119,10 +119,13 @@ export default function DailyJobsPage() {
 
   const [rows, setRows] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [allInvoiceNos, setAllInvoiceNos] = useState<string[]>([]);
   const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [cellStates, setCellStates] = useState<Record<string, "saving" | "saved" | "error">>({});
   const [patchError, setPatchError] = useState<string | null>(null);
+  const [deleteInvoiceInput, setDeleteInvoiceInput] = useState("");
+  const [deleteInvoiceState, setDeleteInvoiceState] = useState<"idle" | "confirm" | "deleting">("idle");
 
   const { uploadOpen, setUploadOpen, serviceStatus } = useUploadContext();
 
@@ -152,6 +155,17 @@ export default function DailyJobsPage() {
   }, [day, month, year]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  // Fetch all invoice numbers once for the dropdown datalist
+  useEffect(() => {
+    fetch("/api/bookings")
+      .then((r) => r.json())
+      .then((data: BookingRow[]) => {
+        const unique = [...new Set(data.map((r) => r.invoiceNo).filter(Boolean) as string[])].sort();
+        setAllInvoiceNos(unique);
+      })
+      .catch(() => {});
+  }, []);
 
   // Refresh data and navigate to first inserted date after PDF upload
   useEffect(() => {
@@ -247,6 +261,28 @@ export default function DailyJobsPage() {
     if (!confirm("Delete this booking?")) return;
     const res = await fetch(`/api/bookings/${id}`, { method: "DELETE" });
     if (res.ok) await fetchRows();
+  }
+
+  async function handleDeleteByInvoice() {
+    const inv = deleteInvoiceInput.trim();
+    if (!inv) return;
+    if (deleteInvoiceState === "idle") { setDeleteInvoiceState("confirm"); return; }
+    setDeleteInvoiceState("deleting");
+    try {
+      const res = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(inv)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok) {
+        setDeleteInvoiceInput("");
+        setDeleteInvoiceState("idle");
+        await fetchRows();
+      } else {
+        alert(data.error ?? "Delete failed");
+        setDeleteInvoiceState("idle");
+      }
+    } catch {
+      alert("Delete failed");
+      setDeleteInvoiceState("idle");
+    }
   }
 
   async function handleAddRow() {
@@ -378,10 +414,27 @@ export default function DailyJobsPage() {
             {groupRows.map((row) => (
               <tr key={row.id} className="border-b border-zinc-100 hover:bg-zinc-50">
                 {/* Invoice # */}
-                <td className="px-3 py-2 font-mono whitespace-nowrap text-zinc-700 min-w-[110px]">
-                  {row.invoiceNo || <span className="text-zinc-300">—</span>}
+                <td className="px-3 py-2 min-w-[140px]">
+                  <datalist id={`inv-list-${row.id}`}>
+                    {allInvoiceNos.map((inv) => <option key={inv} value={inv} />)}
+                  </datalist>
+                  <input
+                    type="text"
+                    list={`inv-list-${row.id}`}
+                    defaultValue={row.invoiceNo ?? ""}
+                    placeholder="Invoice #"
+                    className={`w-full font-mono text-xs border rounded px-1.5 py-0.5 bg-white text-zinc-900 focus:outline-none focus:ring-1 focus:ring-blue-400 ${
+                      cellStates[`${row.id}-invoiceNo`] === "saving" ? "border-zinc-300 animate-pulse" :
+                      cellStates[`${row.id}-invoiceNo`] === "saved"  ? "border-green-400" :
+                      cellStates[`${row.id}-invoiceNo`] === "error"  ? "border-red-400" : "border-zinc-200"
+                    }`}
+                    onBlur={(e) => {
+                      const val = e.target.value.trim();
+                      if (val !== (row.invoiceNo ?? "")) patchRow(row.id, "invoiceNo", val || null);
+                    }}
+                  />
                   {(row.numberOfVehicles ?? 1) > 1 && (
-                    <span className="ml-1 text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
+                    <span className="text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
                   )}
                 </td>
                 {/* Client Name */}
@@ -638,6 +691,30 @@ export default function DailyJobsPage() {
             >
               Print as PDF
             </button>
+            {/* Delete by invoice number */}
+            <div className="flex items-center gap-1 border border-red-200 rounded-lg overflow-hidden bg-white">
+              <input
+                type="text"
+                placeholder="Invoice # (e.g. INV001)"
+                value={deleteInvoiceInput}
+                onChange={(e) => { setDeleteInvoiceInput(e.target.value); setDeleteInvoiceState("idle"); }}
+                onKeyDown={(e) => { if (e.key === "Enter") handleDeleteByInvoice(); if (e.key === "Escape") { setDeleteInvoiceInput(""); setDeleteInvoiceState("idle"); } }}
+                className="h-9 px-3 text-sm text-zinc-900 focus:outline-none w-44 bg-transparent"
+              />
+              <button
+                onClick={handleDeleteByInvoice}
+                disabled={!deleteInvoiceInput.trim() || deleteInvoiceState === "deleting"}
+                className={`h-9 px-3 text-sm font-medium transition-colors whitespace-nowrap ${
+                  deleteInvoiceState === "confirm"
+                    ? "bg-red-600 text-white hover:bg-red-700"
+                    : deleteInvoiceState === "deleting"
+                    ? "bg-red-300 text-white cursor-wait"
+                    : "bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                }`}
+              >
+                {deleteInvoiceState === "confirm" ? "Confirm delete?" : deleteInvoiceState === "deleting" ? "Deleting…" : "Delete Invoice"}
+              </button>
+            </div>
           </div>
         </div>
 

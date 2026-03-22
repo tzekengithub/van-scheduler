@@ -140,6 +140,12 @@ export default function AllJobsPage() {
     return () => window.removeEventListener("bookings-uploaded", handler);
   }, [fetchRows]);
 
+  // All unique invoice numbers (for dropdown datalist)
+  const allInvoiceNos = useMemo(
+    () => [...new Set(rows.map((r) => r.invoiceNo).filter(Boolean) as string[])].sort(),
+    [rows]
+  );
+
   // ── Sort & filter ──────────────────────────────────────────────────────────
   const displayRows = useMemo(() => {
     let filtered = rows;
@@ -424,10 +430,27 @@ export default function AllJobsPage() {
                   {formatDate(row)}
                 </td>
                 {/* Invoice # */}
-                <td className="px-3 py-2 font-mono whitespace-nowrap text-zinc-700 min-w-[110px]">
-                  {row.invoiceNo || <span className="text-zinc-300">—</span>}
+                <td className="px-3 py-2 min-w-[140px]">
+                  <datalist id={`inv-list-${row.id}`}>
+                    {allInvoiceNos.map((inv) => <option key={inv} value={inv} />)}
+                  </datalist>
+                  <input
+                    type="text"
+                    list={`inv-list-${row.id}`}
+                    defaultValue={row.invoiceNo ?? ""}
+                    placeholder="Invoice #"
+                    className={`w-full font-mono text-xs border rounded px-1.5 py-0.5 bg-white text-zinc-900 focus:outline-none focus:ring-1 focus:ring-blue-400 ${
+                      cellStates[`${row.id}-invoiceNo`] === "saving" ? "border-zinc-300 animate-pulse" :
+                      cellStates[`${row.id}-invoiceNo`] === "saved"  ? "border-green-400" :
+                      cellStates[`${row.id}-invoiceNo`] === "error"  ? "border-red-400" : "border-zinc-200"
+                    }`}
+                    onBlur={(e) => {
+                      const val = e.target.value.trim();
+                      if (val !== (row.invoiceNo ?? "")) patchRow(row.id, "invoiceNo", val || null);
+                    }}
+                  />
                   {(row.numberOfVehicles ?? 1) > 1 && (
-                    <span className="ml-1 text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
+                    <span className="text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
                   )}
                 </td>
                 {/* Client Name */}
