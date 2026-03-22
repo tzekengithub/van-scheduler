@@ -44,6 +44,11 @@ export function parseLocations(details: string): {
     return { fromLocation: details.trim(), toLocation: "", isRoundTrip: 0 };
   }
 
+  if (parts.length === 1) {
+    // Single segment — no destination (e.g. "KL Day Trip", "Overtime")
+    return { fromLocation: parts[0], toLocation: "", isRoundTrip: 0 };
+  }
+
   if (parts.length === 2) {
     return { fromLocation: parts[0], toLocation: parts[1], isRoundTrip: 0 };
   }
@@ -55,7 +60,7 @@ export function parseLocations(details: string): {
     return { fromLocation: parts[0], toLocation: parts[1], isRoundTrip: 1 };
   }
 
-  // Fallback: first and last
+  // Fallback: first → last
   return {
     fromLocation: parts[0],
     toLocation: parts[parts.length - 1],
