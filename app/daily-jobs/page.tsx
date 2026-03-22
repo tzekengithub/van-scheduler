@@ -50,12 +50,22 @@ interface BookingRow {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function parseClientDetails(clientDetails: string): { name: string; phone: string } {
+  if (!clientDetails) return { name: "", phone: "" };
+  const lines = clientDetails.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length === 0) return { name: "", phone: "" };
+  if (lines.length === 1) return { name: lines[0], phone: "" };
+  if (lines.length === 2) return { name: lines[0], phone: lines[1] };
+  // 3+ lines: line 0 = name, line 1 = contact person (skip), line 2 = phone
+  return { name: lines[0], phone: lines[2] };
+}
+
 function clientName(row: BookingRow): string {
-  return (row.clientDetails ?? "").split("\n")[0].trim();
+  return parseClientDetails(row.clientDetails ?? "").name;
 }
 
 function clientPhone(row: BookingRow): string {
-  return (row.clientDetails ?? "").split("\n")[1]?.trim() ?? "";
+  return parseClientDetails(row.clientDetails ?? "").phone;
 }
 
 function tripTypeBadge(t: TripType | null) {
