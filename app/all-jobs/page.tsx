@@ -595,8 +595,17 @@ export default function AllJobsPage() {
                           driverContact: null,
                         }, "inHouseOrOutsourced");
                       } else {
-                        await patchRow(row.id, "inHouseOrOutsourced", val);
-                        if (val === "I") await patchRow(row.id, "outsourcedCompany", "");
+                        // Switching back to In-house: reset fields then auto-assign a van
+                        await patchFields(row.id, {
+                          inHouseOrOutsourced: "I",
+                          outsourcedCompany: "",
+                          manualChange: 0,
+                        }, "inHouseOrOutsourced");
+                        const res = await fetch(`/api/bookings/${row.id}/reassign`, { method: "POST" });
+                        if (res.ok) {
+                          const updated = await res.json();
+                          setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, ...updated } : r));
+                        }
                       }
                     }}
                   >
