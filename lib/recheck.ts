@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, isNull, isNotNull, inArray, ne, asc } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray, notInArray, ne, asc } from "drizzle-orm";
 import { runReassign } from "@/lib/reassign";
 
 /**
@@ -123,6 +123,13 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
 /**
  * Sweep all auto-managed bookings and ensure that every (invoiceNo, vehicleIndex)
  * group uses the SAME van across all its travel dates.
+ *
+ * Strategy: for each inconsistent group, find ANY van that has zero conflicts
+ * on ALL dates of the group (ignoring the group's own bookings). Prefer vans
+ * already used by the group to minimise displacement. Move all bookings in the
+ * group to that van.
+ *
+ * If no single van is free on every date, leave the group as-is (logged).
  */
 async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise<void> {
   // Snapshot: all auto-managed bookings that already have a van
@@ -138,7 +145,6 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
     .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
 
   const allVans = await db.select().from(vans);
-  const vanMap = new Map(allVans.map((v) => [v.id, v]));
 
   // Group by (invoiceNo, vehicleIndex)
   const bySlot = new Map<string, typeof assigned>();
@@ -161,121 +167,70 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
 
     inconsistent++;
 
-    // Canonical van = van of the earliest-date booking for this slot
-    const sorted = [...rows].sort((a, b) => a.travelDate.localeCompare(b.travelDate));
-    const canonicalVanId = sorted[0].vanId!;
-    const canonicalVan = vanMap.get(canonicalVanId);
-    const invoiceNo = rows[0].invoiceNo ?? "";
+    const dates = rows.map((r) => r.travelDate);
+    const bookingIds = rows.map((r) => r.id);
 
     log(
-      `[enforceInvoice] ${slotKey}: vans split across [${[...vanSet].join(",")}] → consolidating to van ${canonicalVanId}`
+      `[enforceInvoice] ${slotKey}: ${rows.length} bookings split across vans [${[...vanSet].join(",")}] on dates [${dates.join(",")}]`
     );
 
-    for (const b of rows) {
-      if (b.vanId === canonicalVanId) continue;
+    // Prefer vans already used by this group (fewer moves), then try all others
+    const vanPriority = [
+      ...allVans.filter((v) => vanSet.has(v.id)),
+      ...allVans.filter((v) => !vanSet.has(v.id)),
+    ];
 
-      // Is canonical van blocked on this date by a DIFFERENT invoice?
+    let targetVan: typeof allVans[number] | null = null;
+    for (const van of vanPriority) {
+      // Check if this van has ANY other booking on ANY of the group's dates
       const [blocker] = await db
-        .select({
-          id: bookings.id,
-          invoiceNo: bookings.invoiceNo,
-          manualChange: bookings.manualChange,
-        })
+        .select({ id: bookings.id })
         .from(bookings)
         .where(
           and(
-            eq(bookings.vanId, canonicalVanId),
-            eq(bookings.travelDate, b.travelDate),
-            ne(bookings.invoiceNo, invoiceNo),
+            eq(bookings.vanId, van.id),
+            inArray(bookings.travelDate, dates),
+            notInArray(bookings.id, bookingIds),
           )
         )
         .limit(1);
 
       if (!blocker) {
-        // Canonical van free on this date — just move b to it
-        await db
-          .update(bookings)
-          .set({
-            vanId: canonicalVanId,
-            vehiclePlate: canonicalVan?.vanNumber ?? "",
-            driverName: canonicalVan?.driverName ?? "",
-            driverContact: canonicalVan?.driverContact ?? "",
-          })
-          .where(eq(bookings.id, b.id));
-        log(
-          `[enforceInvoice] id=${b.id} date=${b.travelDate} → van ${canonicalVanId} (free)`
-        );
-        fixed++;
-        continue;
+        targetVan = van;
+        break;
       }
+      log(`  van ${van.id} (${van.vanNumber}) blocked on ≥1 date — trying next`);
+    }
 
-      // Skip manual or multi-booking-invoice blockers (can't safely displace)
-      if (blocker.manualChange === 1) {
-        log(`[enforceInvoice] id=${b.id} date=${b.travelDate} — blocked by manual booking id=${blocker.id}, skipping`);
-        continue;
-      }
+    if (!targetVan) {
+      log(`[enforceInvoice] ${slotKey}: no single van free on all dates — leaving split`);
+      continue;
+    }
 
-      const [, blockerExtra] = await db
-        .select({ id: bookings.id })
-        .from(bookings)
-        .where(eq(bookings.invoiceNo, blocker.invoiceNo ?? ""))
-        .limit(2);
-      if (blockerExtra) {
-        log(`[enforceInvoice] id=${b.id} date=${b.travelDate} — blocker id=${blocker.id} is multi-booking invoice, skipping`);
-        continue; // blocker invoice has >1 booking — leave it
-      }
-
-      // Guard: b's current van must only have b on this date — otherwise
-      // sending the blocker there would create a double-booking.
-      const [otherOnBVan] = await db
-        .select({ id: bookings.id })
-        .from(bookings)
-        .where(
-          and(
-            eq(bookings.vanId, b.vanId!),
-            eq(bookings.travelDate, b.travelDate),
-            ne(bookings.id, b.id),
-          )
-        )
-        .limit(1);
-      if (otherOnBVan) {
-        log(`[enforceInvoice] id=${b.id} date=${b.travelDate} — can't swap, current van is shared`);
-        continue; // can't safely swap — b's van is shared
-      }
-
-      // Safe to swap: blocker takes b's current van, b takes canonical van
-      const bVan = vanMap.get(b.vanId!);
+    // Move all rows not already on targetVan
+    let moved = 0;
+    for (const b of rows) {
+      if (b.vanId === targetVan.id) continue;
       await db
         .update(bookings)
         .set({
-          vanId: b.vanId,
-          vehiclePlate: bVan?.vanNumber ?? "",
-          driverName: bVan?.driverName ?? "",
-          driverContact: bVan?.driverContact ?? "",
-        })
-        .where(eq(bookings.id, blocker.id));
-
-      await db
-        .update(bookings)
-        .set({
-          vanId: canonicalVanId,
-          vehiclePlate: canonicalVan?.vanNumber ?? "",
-          driverName: canonicalVan?.driverName ?? "",
-          driverContact: canonicalVan?.driverContact ?? "",
+          vanId: targetVan.id,
+          vehiclePlate: targetVan.vanNumber ?? "",
+          driverName: targetVan.driverName ?? "",
+          driverContact: targetVan.driverContact ?? "",
         })
         .where(eq(bookings.id, b.id));
-
-      log(
-        `[enforceInvoice] ${slotKey} date=${b.travelDate}: swapped blocker id=${blocker.id} → van ${b.vanId}, booking id=${b.id} → van ${canonicalVanId}`
-      );
-      fixed++;
+      log(`[enforceInvoice] ${slotKey} id=${b.id} date=${b.travelDate} → van ${targetVan.id} (${targetVan.vanNumber})`);
+      moved++;
     }
+    log(`[enforceInvoice] ${slotKey}: consolidated to van ${targetVan.id} (${targetVan.vanNumber ?? "?"}), moved ${moved} booking(s)`);
+    fixed += moved;
   }
 
   if (inconsistent === 0) {
     log("  all invoice slots consistent ✓");
   } else {
-    log(`  checked ${inconsistent} inconsistent slot(s), fixed ${fixed} booking(s)`);
+    log(`  checked ${inconsistent} inconsistent slot(s), moved ${fixed} booking(s) to consolidate`);
   }
 }
 
