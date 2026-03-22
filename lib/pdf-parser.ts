@@ -147,26 +147,54 @@ export function parseRawText(text: string): ParsedBooking[] {
   const COMPANY_PHONE = "+60 12-606 1728";
   let bookIdx = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (/^BOOK\d+$/.test(lines[i])) { bookIdx = i; break; }
+    if (/^BOOK\d+/.test(lines[i])) { bookIdx = i; break; }
   }
 
-  const clientDetailLines: string[] = [];
+  let clientDetails = "";
   if (bookIdx >= 0) {
-    for (let i = bookIdx + 1; i < lines.length && clientDetailLines.length < 4; i++) {
-      const l = lines[i];
-      if (/^\d+\./.test(l)) break;
-      if (
-        l.includes("COMPANY POLICY") ||
-        l.includes("No Booking Details") ||
-        l.includes("Booking Details")
-      ) break;
-      if (l === COMPANY_PHONE) continue;
-      if (l === "No") continue;
-      clientDetailLines.push(l);
+    const bookLine = lines[bookIdx];
+    const bookLineWithName = bookLine.match(/^BOOK\d+\s+(.+)/i);
+
+    if (bookLineWithName) {
+      // BOOK number and company name on same line: "BOOK2026030045 E Like Travel..."
+      const clientName = bookLineWithName[1].trim();
+      const extraLines: string[] = [];
+      let clientPhone = "";
+
+      for (let i = bookIdx + 1; i < Math.min(lines.length, bookIdx + 6); i++) {
+        const line = lines[i];
+        if (/^\d+\./.test(line)) break;
+        if (/COMPANY POLICY|No Booking Details|Booking Details/i.test(line)) break;
+        if (line === COMPANY_PHONE) continue;
+        if (line === "No") continue;
+        if (/^\+6[05\d][\d\s-]{6,}/.test(line)) {
+          clientPhone = line;
+          break;
+        }
+        extraLines.push(line);
+      }
+
+      const parts = [clientName, ...extraLines];
+      if (clientPhone) parts.push(clientPhone);
+      clientDetails = parts.filter((p) => p.trim().length > 0).join("\n");
+    } else {
+      // BOOK number alone on its line; collect subsequent lines as before
+      const clientDetailLines: string[] = [];
+      for (let i = bookIdx + 1; i < lines.length && clientDetailLines.length < 4; i++) {
+        const l = lines[i];
+        if (/^\d+\./.test(l)) break;
+        if (
+          l.includes("COMPANY POLICY") ||
+          l.includes("No Booking Details") ||
+          l.includes("Booking Details")
+        ) break;
+        if (l === COMPANY_PHONE) continue;
+        if (l === "No") continue;
+        clientDetailLines.push(l);
+      }
+      clientDetails = clientDetailLines.join("\n").trim();
     }
   }
-
-  const clientDetails = clientDetailLines.join("\n").trim();
 
   // ── Booking Row Parsing ─────────────────────────────────────────────────────
   // PyMuPDF splits the table into individual cells, one per line.

@@ -7,6 +7,7 @@ interface TestCase {
   invoiceNo: string;
   clientName: string;
   clientPhone: string;
+  contactPerson?: string;
   rowCount: number;
   firstAmount: number;
   lastAmount?: number;
@@ -72,6 +73,7 @@ const TEST_CASES: TestCase[] = [
     file: "INV2026030045.pdf",
     invoiceNo: "INV2026030045",
     clientName: "E Like Travel & Tours Sdn Bhd",
+    contactPerson: "Winnice",
     clientPhone: "+60 16-923 8826",
     rowCount: 2,
     firstAmount: 850,
@@ -109,6 +111,10 @@ async function runTests() {
 
       check("clientName",      !!b0?.clientDetails?.includes(tc.clientName),
         b0?.clientDetails, `includes "${tc.clientName}"`);
+
+      if (tc.contactPerson !== undefined)
+        check("contactPerson", !!b0?.clientDetails?.includes(tc.contactPerson),
+          b0?.clientDetails, `includes "${tc.contactPerson}"`);
 
       check("clientPhone",     !!b0?.clientDetails?.includes(tc.clientPhone),
         b0?.clientDetails, `includes "${tc.clientPhone}"`);
