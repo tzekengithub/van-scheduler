@@ -362,7 +362,7 @@ export default function VanSchedulePage() {
     if (!targetVan) return;
 
     const updates: Record<string, unknown> = {
-      manualChange: 1,
+      manualChange: 0,  // drag-and-drop is a soft assignment — recheck can override it
       vanId: targetVan.id,
       vehiclePlate: targetVan.vanNumber,
       driverName: targetVan.driverName,
