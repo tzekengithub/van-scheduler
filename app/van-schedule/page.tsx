@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 
 const MONTH_NAMES = [
@@ -27,14 +27,46 @@ interface BookingRow {
   details: string | null;
   vehiclePlate: string | null;
   driverName: string | null;
+  driverContact: string | null;
   amount: string | null;
+  myrPerVehicle: string | null;
+  passengerCount: number | null;
   paidStatus: string | null;
   fromLocation: string;
   toLocation: string;
+  isRoundTrip: number | null;
   tripType: string | null;
   vanId: number | null;
+  manualChange: number | null;
   inHouseOrOutsourced: string | null;
   outsourcedCompany: string | null;
+  overtime: string | null;
+  introducer: string | null;
+  tourGuide: string | null;
+}
+
+interface EditForm {
+  invoiceNo: string;
+  travelDate: string;
+  fromLocation: string;
+  toLocation: string;
+  tripType: string;
+  details: string;
+  clientDetails: string;
+  passengerCount: string;
+  amount: string;
+  myrPerVehicle: string;
+  paidStatus: string;
+  vanId: string;
+  vehiclePlate: string;
+  driverName: string;
+  driverContact: string;
+  manualChange: boolean;
+  inHouseOrOutsourced: string;
+  outsourcedCompany: string;
+  overtime: string;
+  introducer: string;
+  tourGuide: string;
 }
 
 interface ConflictItem {
@@ -45,10 +77,9 @@ interface ConflictItem {
   plate: string;
 }
 
-interface PopupState {
-  bookings: BookingRow[];
+interface EditPanelState {
+  booking: BookingRow;
   vanLabel: string;
-  dayNum: number;
 }
 
 function isOutsourced(b: BookingRow): boolean {
@@ -81,8 +112,9 @@ export default function VanSchedulePage() {
   const [vans, setVans] = useState<Van[]>([]);
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [popup, setPopup] = useState<PopupState | null>(null);
-  const popupRef = useRef<HTMLDivElement>(null);
+  const [editPanel, setEditPanel] = useState<EditPanelState | null>(null);
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
 
   // Action table state
   const [selectedVan, setSelectedVan] = useState<Record<number, string>>({});
@@ -116,16 +148,6 @@ export default function VanSchedulePage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  useEffect(() => {
-    if (!popup) return;
-    function handler(e: MouseEvent) {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        setPopup(null);
-      }
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [popup]);
 
   function exportJson() {
     const payload = {
@@ -141,6 +163,77 @@ export default function VanSchedulePage() {
     a.download = `van-schedule-${viewYear}-${String(viewMonth + 1).padStart(2, "0")}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function openEdit(booking: BookingRow, vanLabel: string) {
+    setEditPanel({ booking, vanLabel });
+    setEditForm({
+      invoiceNo: booking.invoiceNo ?? "",
+      travelDate: booking.travelDate ?? "",
+      fromLocation: booking.fromLocation ?? "",
+      toLocation: booking.toLocation ?? "",
+      tripType: booking.tripType ?? "trip",
+      details: booking.details ?? "",
+      clientDetails: booking.clientDetails ?? "",
+      passengerCount: String(booking.passengerCount ?? ""),
+      amount: String(booking.amount ?? ""),
+      myrPerVehicle: String(booking.myrPerVehicle ?? ""),
+      paidStatus: booking.paidStatus ?? "U",
+      vanId: booking.vanId != null ? String(booking.vanId) : "",
+      vehiclePlate: booking.vehiclePlate ?? "",
+      driverName: booking.driverName ?? "",
+      driverContact: booking.driverContact ?? "",
+      manualChange: (booking.manualChange ?? 0) === 1,
+      inHouseOrOutsourced: booking.inHouseOrOutsourced ?? "I",
+      outsourcedCompany: booking.outsourcedCompany ?? "",
+      overtime: booking.overtime ?? "",
+      introducer: booking.introducer ?? "",
+      tourGuide: booking.tourGuide ?? "",
+    });
+  }
+
+  async function handleEditSave() {
+    if (!editPanel || !editForm) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/bookings/${editPanel.booking.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceNo: editForm.invoiceNo,
+          travelDate: editForm.travelDate,
+          fromLocation: editForm.fromLocation,
+          toLocation: editForm.toLocation,
+          tripType: editForm.tripType,
+          details: editForm.details,
+          clientDetails: editForm.clientDetails,
+          passengerCount: editForm.passengerCount !== "" ? parseInt(editForm.passengerCount) : null,
+          amount: editForm.amount,
+          myrPerVehicle: editForm.myrPerVehicle,
+          paidStatus: editForm.paidStatus,
+          vanId: editForm.vanId !== "" ? parseInt(editForm.vanId) : null,
+          vehiclePlate: editForm.vehiclePlate,
+          driverName: editForm.driverName,
+          driverContact: editForm.driverContact,
+          manualChange: editForm.manualChange ? 1 : 0,
+          inHouseOrOutsourced: editForm.inHouseOrOutsourced,
+          outsourcedCompany: editForm.outsourcedCompany,
+          overtime: editForm.overtime,
+          introducer: editForm.introducer,
+          tourGuide: editForm.tourGuide,
+        }),
+      });
+      if (res.ok) {
+        setEditPanel(null);
+        setEditForm(null);
+        await fetchData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error ?? "Save failed");
+      }
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   function prevMonth() {
@@ -390,68 +483,319 @@ export default function VanSchedulePage() {
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans">
-      {/* Popup overlay */}
-      {popup && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 bg-black/20">
-          <div
-            ref={popupRef}
-            className="bg-white rounded-xl border border-zinc-200 shadow-xl p-4 w-72 text-sm"
-          >
-            <div className="font-semibold text-zinc-900 mb-3 pb-2 border-b border-zinc-100">
-              {popup.vanLabel} — {MONTH_SHORT[viewMonth]} {popup.dayNum}
-            </div>
-            {popup.bookings.map((b, i) => (
-              <div
-                key={b.id}
-                className={`space-y-1 text-xs text-zinc-700 ${i > 0 ? "mt-3 pt-3 border-t border-zinc-100" : ""}`}
-              >
-                <div>
-                  <span className="font-medium text-zinc-500 w-16 inline-block">Driver:</span>
-                  {b.driverName?.trim() ? b.driverName : <span className="text-amber-600">Not assigned</span>}
+      {/* Bottom Edit Panel */}
+      {editPanel && editForm && (
+        <div
+          className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t-2 border-zinc-200 shadow-2xl flex flex-col"
+          style={{ maxHeight: "56vh" }}
+        >
+          {/* Panel header */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 bg-zinc-50 flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-1 h-8 rounded-full bg-blue-500 flex-shrink-0" />
+              <div>
+                <div className="text-sm font-semibold text-zinc-900 flex items-center gap-2">
+                  {editForm.invoiceNo
+                    ? <span className="font-mono text-blue-700">{editForm.invoiceNo}</span>
+                    : <span className="text-zinc-400">No invoice</span>}
+                  <span className="text-zinc-300">·</span>
+                  <span>{editPanel.vanLabel}</span>
+                  <span className="text-zinc-300">·</span>
+                  <span className="text-zinc-500">{MONTH_SHORT[viewMonth]} {editPanel.booking.day}</span>
                 </div>
-                {isOutsourced(b) && (
-                  <div>
-                    <span className="font-medium text-zinc-500 w-16 inline-block">Company:</span>
-                    <span className="text-purple-700 font-semibold">{b.outsourcedCompany || "—"}</span>
-                  </div>
-                )}
-                <div>
-                  <span className="font-medium text-zinc-500 w-16 inline-block">Client:</span>
-                  {clientFirstLine(b) || "—"}
-                </div>
-                <div>
-                  <span className="font-medium text-zinc-500 w-16 inline-block">Route:</span>
-                  {b.details || (b.fromLocation && b.toLocation ? `${b.fromLocation} → ${b.toLocation}` : "—")}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-zinc-500 w-16 inline-block flex-shrink-0">Invoice:</span>
-                  <span className="font-mono">{b.invoiceNo || "—"}</span>
-                  {b.invoiceNo && invoiceColorMap.has(b.invoiceNo) && (
-                    <span
-                      className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                      style={{ background: invoiceColorMap.get(b.invoiceNo) }}
-                      title="Multi-day trip"
-                    />
-                  )}
-                </div>
-                <div>
-                  <span className="font-medium text-zinc-500 w-16 inline-block">Amount:</span>
-                  MYR {Number(b.amount ?? 0).toFixed(2)}
-                </div>
-                <div>
-                  <span className="font-medium text-zinc-500 w-16 inline-block">Status:</span>
-                  {b.paidStatus === "P"
-                    ? <span className="text-green-600 font-medium">Paid</span>
-                    : <span className="text-red-500 font-medium">Unpaid</span>}
-                </div>
+                <div className="text-[11px] text-zinc-400 mt-0.5">Click any field to edit · press Save when done</div>
               </div>
-            ))}
-            <button
-              onClick={() => setPopup(null)}
-              className="mt-4 text-xs text-zinc-400 hover:text-zinc-600 underline"
-            >
-              Close
-            </button>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => { setEditPanel(null); setEditForm(null); }}
+                className="px-3 py-1.5 rounded-lg border border-zinc-300 text-zinc-600 text-xs font-medium hover:bg-zinc-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                disabled={editSaving}
+                className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {editSaving ? "Saving…" : "💾 Save Changes"}
+              </button>
+            </div>
+          </div>
+
+          {/* Panel body */}
+          <div className="overflow-y-auto flex-1 px-5 py-4">
+            <div className="grid grid-cols-4 gap-x-5 gap-y-3 text-xs">
+
+              {/* ── Trip Details ── */}
+              <div className="col-span-4 flex items-center gap-2 mt-0.5">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Trip Details</span>
+                <div className="flex-1 h-px bg-zinc-100" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Invoice No.</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  value={editForm.invoiceNo}
+                  onChange={(e) => setEditForm((f) => f && { ...f, invoiceNo: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Travel Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  value={editForm.travelDate}
+                  onChange={(e) => setEditForm((f) => f && { ...f, travelDate: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">From Location</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  value={editForm.fromLocation}
+                  onChange={(e) => setEditForm((f) => f && { ...f, fromLocation: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">To Location</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  value={editForm.toLocation}
+                  onChange={(e) => setEditForm((f) => f && { ...f, toLocation: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Trip Type</label>
+                <select
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
+                  value={editForm.tripType}
+                  onChange={(e) => setEditForm((f) => f && { ...f, tripType: e.target.value })}
+                >
+                  <option value="trip">🟠 Trip</option>
+                  <option value="one_way_ride">🔵 One Way</option>
+                  <option value="round_trip">🟢 Round Trip</option>
+                  <option value="day_trip">🟡 Day Trip</option>
+                </select>
+              </div>
+
+              <div className="space-y-1 col-span-3">
+                <label className="block text-zinc-500 font-medium">Details / Notes</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  placeholder="Additional trip notes…"
+                  value={editForm.details}
+                  onChange={(e) => setEditForm((f) => f && { ...f, details: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1 col-span-2">
+                <label className="block text-zinc-500 font-medium">Client Details</label>
+                <textarea
+                  rows={2}
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs resize-none"
+                  placeholder="Client name, phone, notes…"
+                  value={editForm.clientDetails}
+                  onChange={(e) => setEditForm((f) => f && { ...f, clientDetails: e.target.value })}
+                />
+              </div>
+
+              {/* ── Financials & Status ── */}
+              <div className="col-span-4 flex items-center gap-2 mt-1">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Financials & Status</span>
+                <div className="flex-1 h-px bg-zinc-100" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Amount (MYR)</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  value={editForm.amount}
+                  onChange={(e) => setEditForm((f) => f && { ...f, amount: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Per Vehicle (MYR)</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  value={editForm.myrPerVehicle}
+                  onChange={(e) => setEditForm((f) => f && { ...f, myrPerVehicle: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Passengers</label>
+                <input
+                  type="number" min="0"
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  value={editForm.passengerCount}
+                  onChange={(e) => setEditForm((f) => f && { ...f, passengerCount: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Payment Status</label>
+                <select
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
+                  value={editForm.paidStatus}
+                  onChange={(e) => setEditForm((f) => f && { ...f, paidStatus: e.target.value })}
+                >
+                  <option value="U">❌ Unpaid</option>
+                  <option value="P">✅ Paid</option>
+                </select>
+              </div>
+
+              {/* ── Vehicle & Driver ── */}
+              <div className="col-span-4 flex items-center gap-2 mt-1">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Vehicle & Driver</span>
+                <div className="flex-1 h-px bg-zinc-100" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Assign Van</label>
+                <select
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
+                  value={editForm.vanId}
+                  onChange={(e) => {
+                    const vanId = e.target.value;
+                    const van = vans.find((v) => String(v.id) === vanId);
+                    setEditForm((f) => f && {
+                      ...f,
+                      vanId,
+                      vehiclePlate: van?.vanNumber ?? f.vehiclePlate,
+                      driverName: van?.driverName ?? f.driverName,
+                      driverContact: van?.driverContact ?? f.driverContact,
+                    });
+                  }}
+                >
+                  <option value="">— Unassigned —</option>
+                  {vans.map((v) => (
+                    <option key={v.id} value={String(v.id)}>
+                      {v.vanNumber}{v.driverName ? ` — ${v.driverName}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Vehicle Plate</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs font-mono"
+                  placeholder="e.g. WXX 1234"
+                  value={editForm.vehiclePlate}
+                  onChange={(e) => setEditForm((f) => f && { ...f, vehiclePlate: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Driver Name</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  placeholder="Driver full name…"
+                  value={editForm.driverName}
+                  onChange={(e) => setEditForm((f) => f && { ...f, driverName: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Driver Contact</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  placeholder="+60 …"
+                  value={editForm.driverContact}
+                  onChange={(e) => setEditForm((f) => f && { ...f, driverContact: e.target.value })}
+                />
+              </div>
+
+              {/* ── Operations ── */}
+              <div className="col-span-4 flex items-center gap-2 mt-1">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Operations</span>
+                <div className="flex-1 h-px bg-zinc-100" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">In-house / Outsourced</label>
+                <select
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
+                  value={editForm.inHouseOrOutsourced}
+                  onChange={(e) => setEditForm((f) => f && { ...f, inHouseOrOutsourced: e.target.value })}
+                >
+                  <option value="I">🏠 In-house</option>
+                  <option value="O">🔄 Outsourced</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">
+                  Outsourced Company
+                  {editForm.inHouseOrOutsourced !== "O" && (
+                    <span className="ml-1 text-zinc-300">(inactive)</span>
+                  )}
+                </label>
+                <input
+                  className={`w-full border rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400 text-xs ${editForm.inHouseOrOutsourced === "O" ? "border-zinc-300" : "border-zinc-200 bg-zinc-50 text-zinc-400"}`}
+                  placeholder="Company name…"
+                  disabled={editForm.inHouseOrOutsourced !== "O"}
+                  value={editForm.outsourcedCompany}
+                  onChange={(e) => setEditForm((f) => f && { ...f, outsourcedCompany: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Overtime</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  placeholder="e.g. 2h"
+                  value={editForm.overtime}
+                  onChange={(e) => setEditForm((f) => f && { ...f, overtime: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Introducer</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  placeholder="Referral / introducer name…"
+                  value={editForm.introducer}
+                  onChange={(e) => setEditForm((f) => f && { ...f, introducer: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Tour Guide</label>
+                <input
+                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
+                  placeholder="Guide name…"
+                  value={editForm.tourGuide}
+                  onChange={(e) => setEditForm((f) => f && { ...f, tourGuide: e.target.value })}
+                />
+              </div>
+
+              <div className="col-span-3 flex items-center gap-2 mt-1">
+                <input
+                  type="checkbox"
+                  id="edit-manual-change"
+                  checked={editForm.manualChange}
+                  onChange={(e) => setEditForm((f) => f && { ...f, manualChange: e.target.checked })}
+                  className="rounded border-zinc-300 text-blue-600"
+                />
+                <label htmlFor="edit-manual-change" className="text-zinc-500 cursor-pointer select-none">
+                  <span className="font-medium text-zinc-700">Lock van assignment</span>
+                  <span className="text-zinc-400 ml-1">— prevents auto-reassignment when re-uploading PDFs</span>
+                </label>
+              </div>
+
+              {/* Bottom padding */}
+              <div className="col-span-4 h-2" />
+            </div>
           </div>
         </div>
       )}
@@ -469,7 +813,7 @@ export default function VanSchedulePage() {
         </div>
       </header>
 
-      <main className="px-4 py-6 space-y-4">
+      <main className={`px-4 py-6 space-y-4 transition-all ${editPanel ? "pb-[58vh]" : ""}`}>
         {/* Month nav + issue badge */}
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">
@@ -633,7 +977,7 @@ export default function VanSchedulePage() {
                                   }}
                                   className={`rounded border px-1.5 py-1 transition-opacity ${isOutsourced ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} hover:opacity-80 ${bi > 0 ? "mt-0.5" : ""} ${color} ${dragBookingId === b.id ? "opacity-40 scale-95" : ""}`}
                                   style={b.invoiceNo && invoiceColorMap.has(b.invoiceNo) ? { borderLeft: `3px solid ${invoiceColorMap.get(b.invoiceNo)}` } : undefined}
-                                  onClick={() => { if (!dragBookingId) setPopup({ bookings: [b], vanLabel: plate, dayNum: d }); }}
+                                  onClick={() => { if (!dragBookingId) openEdit(b, plate); }}
                                 >
                                   <div className="font-semibold truncate max-w-[84px] leading-tight">
                                     {clientFirstLine(b) || "—"}
@@ -718,7 +1062,7 @@ export default function VanSchedulePage() {
                                 }}
                                 className={`rounded border px-1.5 py-1 mb-0.5 cursor-grab active:cursor-grabbing hover:opacity-80 transition-opacity bg-red-100 border-red-300 text-red-900 ${dragBookingId === b.id ? "opacity-40" : ""}`}
                                 style={b.invoiceNo && invoiceColorMap.has(b.invoiceNo) ? { borderLeft: `3px solid ${invoiceColorMap.get(b.invoiceNo)}` } : undefined}
-                                onClick={() => { if (!dragBookingId) setPopup({ bookings: [b], vanLabel: "No Van", dayNum: d }); }}
+                                onClick={() => { if (!dragBookingId) openEdit(b, "No Van"); }}
                               >
                                 <div className="font-semibold truncate max-w-[84px] leading-tight">
                                   {clientFirstLine(b) || "—"}
