@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { bookings, vans } from "@/drizzle/schema";
-import { eq } from "drizzle-orm";
+import { bookings } from "@/drizzle/schema";
 import { extractTravelBookings } from "@/lib/pdf-parser";
-import { smartAssignVan } from "@/lib/van-assignment";
+import { recheckAllVans } from "@/lib/recheck";
 
 // pdf-parse requires Node.js built-ins (Buffer, fs, path) — not available in Edge runtime
 export const runtime = "nodejs";
@@ -17,7 +16,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
-    // Parse all files first, collect all bookings
+    // Parse all files, collect all bookings
     const allParsed: Awaited<ReturnType<typeof extractTravelBookings>> = [];
     for (const entry of files) {
       if (typeof entry === "string") continue;
@@ -34,43 +33,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Insert all with van assignment
-    let totalInserted = 0;
-
+    // Insert all parsed bookings without van assignment.
+    // recheckAllVans() below will assign vans to everything in one pass.
     for (const booking of allParsed) {
-      const assignResult = await smartAssignVan(
-        booking.travelDate,
-        booking.fromLocation,
-        booking.invoiceNo,
-        booking.vehicleIndex,
-        booking.numberOfVehicles,
-        booking.tripType,
-      );
-
-      // Determine if this booking should be outsourced
-      const isOutsourced = typeof assignResult === "object" && "outsource" in assignResult;
-      const vanId = isOutsourced ? null : (assignResult as number);
-
-      let vehiclePlate: string | null = null;
-      let driverName: string | null = null;
-      let driverContact: string | null = null;
-
-      if (!isOutsourced && vanId != null) {
-        const [van] = await db.select().from(vans).where(eq(vans.id, vanId)).limit(1);
-        if (van) {
-          vehiclePlate = van.vanNumber;
-          driverName = van.driverName ?? "";
-          driverContact = van.driverContact ?? "";
-        }
-      }
-
       await db.insert(bookings).values({
         travelDate: booking.travelDate,
         fromLocation: booking.fromLocation,
         toLocation: booking.toLocation,
         isRoundTrip: booking.isRoundTrip,
         details: booking.details,
-        vanId,
+        vanId: null,
         manualChange: 0,
         invoiceNo: booking.invoiceNo,
         clientDetails: booking.clientDetails,
@@ -79,25 +51,26 @@ export async function POST(request: NextRequest) {
         year: booking.year,
         passengerCount: booking.numberOfVehicles,
         myrPerVehicle: String(booking.myrPerVehicle),
-        // Store per-vehicle price as the row amount (not the invoice total)
         amount: String(booking.myrPerVehicle),
-        vehiclePlate,
-        driverName,
-        driverContact,
+        vehiclePlate: null,
+        driverName: null,
+        driverContact: null,
         paidStatus: booking.paidStatus,
         overtime: booking.overtime,
         introducer: booking.introducer,
-        inHouseOrOutsourced: isOutsourced ? "O" : (booking.inHouseOrOutsourced ?? "I"),
+        inHouseOrOutsourced: "I",
         outsourcedCompany: booking.outsourcedCompany,
         tripType: booking.tripType,
         vehicleIndex: booking.vehicleIndex,
         numberOfVehicles: booking.numberOfVehicles,
       });
-
-      totalInserted++;
     }
 
-    return NextResponse.json({ inserted: totalInserted });
+    // Run a full van schedule recheck — assigns vans to all unassigned bookings,
+    // and marks any that still can't get a van as outsourced (I/O = 'O').
+    await recheckAllVans();
+
+    return NextResponse.json({ inserted: allParsed.length });
   } catch (error: any) {
     console.error("Upload error:", error);
     console.error("Error stack:", error.stack);

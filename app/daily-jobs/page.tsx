@@ -268,12 +268,19 @@ export default function DailyJobsPage() {
   const unpaidCount = rows.filter((r) => r.paidStatus !== "P").length;
 
 
-  // No-van conflicts: vanId is null (unassigned due to insufficient vans)
+  // No-van conflicts: vanId is null, in-house, has an invoice (shouldn't happen after recheck)
   const noVanRows = rows.filter((r) =>
     r.vanId === null &&
     r.invoiceNo &&
     r.inHouseOrOutsourced !== "O" &&
     r.inHouseOrOutsourced !== "outsourced"
+  );
+
+  // Outsource needed: marked outsourced by the system but no company name entered yet
+  const outsourceNeededRows = rows.filter((r) =>
+    (r.inHouseOrOutsourced === "O" || r.inHouseOrOutsourced === "outsourced") &&
+    !r.outsourcedCompany?.trim() &&
+    r.invoiceNo
   );
 
   // Double-booked conflicts: same van assigned to multiple bookings on this day
@@ -660,14 +667,19 @@ export default function DailyJobsPage() {
         )}
 
         {/* Conflict banner */}
-        {!loading && (noVanRows.length > 0 || doubleBookedRows.length > 0) && (
+        {!loading && (noVanRows.length > 0 || outsourceNeededRows.length > 0 || doubleBookedRows.length > 0) && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 space-y-1">
             <div className="font-bold text-red-800 text-sm">
-              ⚠️ CONFLICT — {noVanRows.length + doubleBookedRows.length} issue{noVanRows.length + doubleBookedRows.length !== 1 ? "s" : ""} found
+              ⚠️ CONFLICT — {noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length} issue{noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length !== 1 ? "s" : ""} found
             </div>
+            {outsourceNeededRows.map((r) => (
+              <div key={`on-${r.id}`} className="text-xs text-red-700 pl-4">
+                • {r.travelDate} | {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""} | {tripTypeLabel(r.tripType)} | <strong>OUTSOURCE COMPANY NEEDED — enter company name in the row</strong>
+              </div>
+            ))}
             {noVanRows.map((r) => (
               <div key={r.id} className="text-xs text-red-700 pl-4">
-                • {r.travelDate} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>NO VAN ASSIGNED — REQUIRES OUTSOURCED COMPANY</strong>
+                • {r.travelDate} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>NO VAN ASSIGNED</strong>
               </div>
             ))}
             {doubleBookedRows.map((r) => (

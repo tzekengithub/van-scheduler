@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, ne } from "drizzle-orm";
-import { runReassign } from "@/lib/reassign";
+import { recheckAllVans } from "@/lib/recheck";
 
 export async function PATCH(
   request: NextRequest,
@@ -115,45 +115,12 @@ export async function DELETE(
       return NextResponse.json({ error: "Invalid id" }, { status: 400 });
     }
 
-    // Capture invoiceNo before deleting so we can reassign siblings.
-    const [target] = await db
-      .select({ invoiceNo: bookings.invoiceNo })
-      .from(bookings)
-      .where(eq(bookings.id, id))
-      .limit(1);
-
     await db.delete(bookings).where(eq(bookings.id, id));
 
-    // After deletion, reassign sibling bookings (same invoiceNo, not manually set).
-    // Clearing their van first lets smartAssignVan pick the best van from scratch.
-    const invoiceNo = target?.invoiceNo ?? "";
-    if (invoiceNo) {
-      const siblings = await db
-        .select({ id: bookings.id })
-        .from(bookings)
-        .where(
-          and(
-            eq(bookings.invoiceNo, invoiceNo),
-            eq(bookings.manualChange, 0),
-          )
-        );
-
-      if (siblings.length > 0) {
-        const siblingIds = siblings.map((s) => s.id);
-
-        // Clear their current van so smartAssignVan reassigns from scratch.
-        for (const sibId of siblingIds) {
-          await db.update(bookings).set({
-            vanId: null,
-            vehiclePlate: null,
-            driverName: null,
-            driverContact: null,
-          }).where(eq(bookings.id, sibId));
-        }
-
-        await runReassign(siblingIds);
-      }
-    }
+    // Recheck the entire van schedule after deletion.
+    // A deleted booking may free a van that allows other bookings to move from
+    // outsourced back to in-house, or resolves cross-invoice conflicts.
+    await recheckAllVans();
 
     return NextResponse.json({ message: "Booking deleted" });
   } catch (error) {
