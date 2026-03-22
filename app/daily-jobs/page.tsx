@@ -216,6 +216,31 @@ export default function DailyJobsPage() {
     }
   }
 
+  // Multi-field patch — sends all updates in one request and reflects them in local state.
+  // primaryField controls which cell's save-indicator ring is shown.
+  async function patchFields(id: number, updates: Record<string, unknown>, primaryField: string) {
+    const key = `${id}-${primaryField}`;
+    setCellStates((prev) => ({ ...prev, [key]: "saving" }));
+    try {
+      const res = await fetch(`/api/bookings/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...updates } : r));
+        setCellStates((prev) => ({ ...prev, [key]: "saved" }));
+        setTimeout(() => setCellStates((prev) => {
+          const next = { ...prev }; delete next[key]; return next;
+        }), 1000);
+      } else {
+        setCellStates((prev) => ({ ...prev, [key]: "error" }));
+      }
+    } catch {
+      setCellStates((prev) => ({ ...prev, [key]: "error" }));
+    }
+  }
+
   function startEdit(id: number, field: string, currentValue: string) {
     setEditingCell({ id, field });
     setEditValue(currentValue);
@@ -536,8 +561,19 @@ export default function DailyJobsPage() {
                     value={row.inHouseOrOutsourced ?? "I"}
                     onChange={async (e) => {
                       const val = e.target.value;
-                      await patchRow(row.id, "inHouseOrOutsourced", val);
-                      if (val === "I") await patchRow(row.id, "outsourcedCompany", "");
+                      if (val === "O") {
+                        // Switching to Outsourced: clear van assignment in one atomic call
+                        await patchFields(row.id, {
+                          inHouseOrOutsourced: "O",
+                          vanId: null,
+                          vehiclePlate: null,
+                          driverName: null,
+                          driverContact: null,
+                        }, "inHouseOrOutsourced");
+                      } else {
+                        await patchRow(row.id, "inHouseOrOutsourced", val);
+                        if (val === "I") await patchRow(row.id, "outsourcedCompany", "");
+                      }
                     }}
                   >
                     <option value="I">I</option>

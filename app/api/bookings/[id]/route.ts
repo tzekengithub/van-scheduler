@@ -40,6 +40,14 @@ export async function PATCH(
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
     }
 
+    // Rule: switching to Outsourced ("O" or "outsourced") clears van assignment
+    if (updates.inHouseOrOutsourced === "O" || updates.inHouseOrOutsourced === "outsourced") {
+      updates.vanId = null;
+      updates.vehiclePlate = null;
+      updates.driverName = null;
+      updates.driverContact = null;
+    }
+
     const [updated] = await db
       .update(bookings)
       .set(updates)
