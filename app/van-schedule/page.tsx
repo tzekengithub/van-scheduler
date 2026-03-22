@@ -56,6 +56,11 @@ function isOutsourced(b: BookingRow): boolean {
   return v === "outsourced" || v === "O";
 }
 
+/** True only when outsourced AND the company name is filled in — has its own calendar row. */
+function isConfirmedOutsourced(b: BookingRow): boolean {
+  return isOutsourced(b) && (b.outsourcedCompany?.trim() ?? "") !== "";
+}
+
 function clientFirstLine(b: BookingRow): string {
   return (b.clientDetails ?? "").split("\n")[0].trim();
 }
@@ -220,10 +225,11 @@ export default function VanSchedulePage() {
       }
     }
 
-    // No-van: skip bookings that are already marked outsourced (they have their own row)
+    // No-van: skip only confirmed-outsourced bookings (they have their own company row)
+    // Unconfirmed outsourced ("OUTSOURCE COMPANY NEEDED") still need action → show as conflict
     for (const [dayNum, bks] of noVanMap) {
       for (const b of bks) {
-        if (isOutsourced(b)) continue;
+        if (isConfirmedOutsourced(b)) continue;
         conflicts.push({
           type: "no-van",
           label: `${MONTH_SHORT[viewMonth]} ${dayNum} — Booking has no van`,
@@ -593,9 +599,9 @@ export default function VanSchedulePage() {
                     );
                   })}
 
-                  {/* UNASSIGNED row — only truly unassigned (not outsourced) */}
+                  {/* UNASSIGNED row — unassigned + unconfirmed outsourced ("OUTSOURCE COMPANY NEEDED") */}
                   {noVanMap.size > 0 && [...noVanMap.values()].some(
-                    (bks) => bks.some((b) => !isOutsourced(b))
+                    (bks) => bks.some((b) => !isConfirmedOutsourced(b))
                   ) && (
                     <tr className="border-b border-zinc-100">
                       <td className="sticky left-0 z-10 bg-red-50 border-r border-zinc-200 px-3 py-2 min-w-[160px]">
@@ -605,7 +611,7 @@ export default function VanSchedulePage() {
                       {days.map((d) => {
                         const isToday = isCurrentMonth && d === today.getDate();
                         const bks = (noVanMap.get(d) ?? []).filter(
-                          (b) => !isOutsourced(b)
+                          (b) => !isConfirmedOutsourced(b)
                         );
                         if (bks.length === 0) {
                           return (
