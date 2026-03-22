@@ -22,7 +22,7 @@ export const bookings = pgTable("bookings", {
   day: text("day").default(""),
   month: text("month").default(""),
   year: text("year").default(""),
-  passengerCount: integer("passenger_count").default(1),
+  passengerCount: integer("passenger_count").default(0),
   myrPerVehicle: numeric("myr_per_vehicle").default("0"),
   amount: numeric("amount").default("0"),
   // Driver / vehicle (per-booking overrides, copied from van on upload)

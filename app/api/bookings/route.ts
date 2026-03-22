@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, desc, asc } from "drizzle-orm";
+import { recheckAllVans } from "@/lib/recheck";
 
 export async function GET(request: NextRequest) {
   try {
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
         day: day ? String(day) : "",
         month: month ?? "",
         year: year ?? "",
+        passengerCount: 0,
         paidStatus: "U",
         inHouseOrOutsourced: "I",
         tripType: "trip",
@@ -109,6 +111,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(inserted, { status: 201 });
   } catch (error) {
     console.error("POST /api/bookings error:", error);
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const invoiceNo = new URL(request.url).searchParams.get("invoiceNo")?.trim();
+    if (!invoiceNo) {
+      return NextResponse.json({ error: "invoiceNo query param is required" }, { status: 400 });
+    }
+
+    const deleted = await db
+      .delete(bookings)
+      .where(eq(bookings.invoiceNo, invoiceNo))
+      .returning({ id: bookings.id });
+
+    if (deleted.length === 0) {
+      return NextResponse.json({ error: `No bookings found for invoice ${invoiceNo}` }, { status: 404 });
+    }
+
+    await recheckAllVans();
+
+    return NextResponse.json({ deleted: deleted.length, invoiceNo });
+  } catch (error) {
+    console.error("DELETE /api/bookings error:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

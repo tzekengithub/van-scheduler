@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
         day: booking.day,
         month: booking.month,
         year: booking.year,
-        passengerCount: booking.numberOfVehicles,
+        passengerCount: 0,
         myrPerVehicle: String(booking.myrPerVehicle),
         amount: String(booking.myrPerVehicle),
         vehiclePlate: null,
