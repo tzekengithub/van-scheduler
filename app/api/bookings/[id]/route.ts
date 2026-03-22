@@ -103,6 +103,13 @@ export async function PATCH(
       return NextResponse.json({ error: "Booking not found" }, { status: 404 });
     }
 
+    // Re-evaluate the full schedule when a manual van assignment is made.
+    // manualChange=1 means the user explicitly chose a van — recheck all
+    // auto-managed bookings so priorities stay correct after the change.
+    if (updates.manualChange === 1) {
+      await recheckAllVans();
+    }
+
     return NextResponse.json(updated);
   } catch (error) {
     console.error("PATCH /api/bookings/[id] error:", error);

@@ -202,11 +202,11 @@ export default function DailyJobsPage() {
         body: JSON.stringify({ [field]: value }),
       });
       if (res.ok) {
-        setRows((prev) => prev.map((r) => r.id === id ? { ...r, [field]: value } : r));
         setCellStates((prev) => ({ ...prev, [key]: "saved" }));
         setTimeout(() => setCellStates((prev) => {
           const next = { ...prev }; delete next[key]; return next;
         }), 1000);
+        await fetchRows();
       } else if (res.status === 409) {
         const data = await res.json();
         setPatchError(data.error ?? "Double booking conflict — please choose another van.");
@@ -231,11 +231,11 @@ export default function DailyJobsPage() {
         body: JSON.stringify(updates),
       });
       if (res.ok) {
-        setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...updates } : r));
         setCellStates((prev) => ({ ...prev, [key]: "saved" }));
         setTimeout(() => setCellStates((prev) => {
           const next = { ...prev }; delete next[key]; return next;
         }), 1000);
+        await fetchRows();
       } else {
         setCellStates((prev) => ({ ...prev, [key]: "error" }));
       }
@@ -413,7 +413,7 @@ export default function DailyJobsPage() {
             {groupRows.map((row) => (
               <tr key={row.id} className="border-b border-zinc-100 hover:bg-zinc-50">
                 {/* Invoice # */}
-                <td className="px-3 py-2 font-mono whitespace-nowrap text-zinc-700 min-w-[110px]">
+                <td className="px-3 py-2 font-mono whitespace-nowrap text-zinc-700 min-w-[160px]">
                   {row.invoiceNo || <span className="text-zinc-300">—</span>}
                   {(row.numberOfVehicles ?? 1) > 1 && (
                     <span className="ml-1 text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
@@ -500,8 +500,7 @@ export default function DailyJobsPage() {
                         }, "inHouseOrOutsourced");
                         const res = await fetch(`/api/bookings/${row.id}/reassign`, { method: "POST" });
                         if (res.ok) {
-                          const updated = await res.json();
-                          setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, ...updated } : r));
+                          await fetchRows();
                         }
                       }
                     };

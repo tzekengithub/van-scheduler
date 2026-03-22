@@ -230,11 +230,11 @@ export default function AllJobsPage() {
         body: JSON.stringify({ [field]: value }),
       });
       if (res.ok) {
-        setRows((prev) => prev.map((r) => r.id === id ? { ...r, [field]: value } : r));
         setCellStates((prev) => ({ ...prev, [key]: "saved" }));
         setTimeout(() => setCellStates((prev) => {
           const next = { ...prev }; delete next[key]; return next;
         }), 1000);
+        await fetchRows();
       } else {
         setCellStates((prev) => ({ ...prev, [key]: "error" }));
       }
@@ -255,11 +255,11 @@ export default function AllJobsPage() {
         body: JSON.stringify(updates),
       });
       if (res.ok) {
-        setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...updates } : r));
         setCellStates((prev) => ({ ...prev, [key]: "saved" }));
         setTimeout(() => setCellStates((prev) => {
           const next = { ...prev }; delete next[key]; return next;
         }), 1000);
+        await fetchRows();
       } else {
         setCellStates((prev) => ({ ...prev, [key]: "error" }));
       }
@@ -430,7 +430,7 @@ export default function AllJobsPage() {
                   {formatDate(row)}
                 </td>
                 {/* Invoice # */}
-                <td className="px-3 py-2 min-w-[140px]">
+                <td className="px-3 py-2 min-w-[180px]">
                   <datalist id={`inv-list-${row.id}`}>
                     {allInvoiceNos.map((inv) => <option key={inv} value={inv} />)}
                   </datalist>
@@ -534,8 +534,7 @@ export default function AllJobsPage() {
                         }, "inHouseOrOutsourced");
                         const res = await fetch(`/api/bookings/${row.id}/reassign`, { method: "POST" });
                         if (res.ok) {
-                          const updated = await res.json();
-                          setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, ...updated } : r));
+                          await fetchRows();
                         }
                       }
                     };

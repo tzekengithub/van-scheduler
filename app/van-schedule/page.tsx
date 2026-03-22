@@ -575,6 +575,11 @@ export default function VanSchedulePage() {
                                       ? `${b.fromLocation}→${b.toLocation}`
                                       : b.details || "—"}
                                   </div>
+                                  {b.invoiceNo && (
+                                    <div className="font-mono text-[9px] leading-tight mt-0.5 opacity-70 whitespace-nowrap overflow-hidden" title={b.invoiceNo}>
+                                      {b.invoiceNo}
+                                    </div>
+                                  )}
                                   {isOutsourced && (
                                     <div className="text-[9px] leading-tight mt-0.5 text-purple-600 font-semibold">
                                       🟣 Outsourced
@@ -652,7 +657,7 @@ export default function VanSchedulePage() {
                                 <div className="truncate max-w-[84px] opacity-75 leading-tight mt-0.5">
                                   {b.details || `${b.fromLocation}→${b.toLocation}`}
                                 </div>
-                                <div className="truncate max-w-[84px] opacity-60 text-[10px] leading-tight mt-0.5">
+                                <div className="font-mono opacity-60 text-[9px] leading-tight mt-0.5 whitespace-nowrap overflow-hidden" title={b.invoiceNo ?? ""}>
                                   {b.invoiceNo}
                                 </div>
                               </div>
