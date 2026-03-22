@@ -192,6 +192,34 @@ export default function VanSchedulePage() {
     ...[...outsourcedCompanyNames].sort().map((name) => ({ plate: name, label: "Outsourced", isOutsourced: true })),
   ], [vans, extraPlates, outsourcedCompanyNames]);
 
+  // Multi-day invoice color stripes — assign a distinct color to each invoice
+  // that appears on 2+ different travel dates so they stand out in the calendar.
+  const INVOICE_STRIPE_COLORS = [
+    "#f59e0b", "#10b981", "#6366f1", "#f43f5e", "#0ea5e9",
+    "#8b5cf6", "#d97706", "#14b8a6", "#ec4899", "#06b6d4",
+    "#84cc16", "#ef4444", "#a855f7", "#3b82f6", "#f97316",
+  ];
+
+  const invoiceColorMap = useMemo(() => {
+    const dateSets = new Map<string, Set<string>>();
+    for (const b of bookings) {
+      if (!b.invoiceNo?.trim()) continue;
+      if (!dateSets.has(b.invoiceNo)) dateSets.set(b.invoiceNo, new Set());
+      dateSets.get(b.invoiceNo)!.add(b.travelDate);
+    }
+    const map = new Map<string, string>();
+    let idx = 0;
+    [...dateSets.entries()]
+      .filter(([, s]) => s.size > 1)
+      .map(([inv]) => inv)
+      .sort()
+      .forEach((inv) => {
+        map.set(inv, INVOICE_STRIPE_COLORS[idx % INVOICE_STRIPE_COLORS.length]);
+        idx++;
+      });
+    return map;
+  }, [bookings]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Detect conflicts and warnings — skip outsource company rows
   const { conflicts, warnings } = useMemo(() => {
     const conflicts: ConflictItem[] = [];
@@ -379,9 +407,16 @@ export default function VanSchedulePage() {
                   <span className="font-medium text-zinc-500 w-16 inline-block">Route:</span>
                   {b.details || (b.fromLocation && b.toLocation ? `${b.fromLocation} → ${b.toLocation}` : "—")}
                 </div>
-                <div>
-                  <span className="font-medium text-zinc-500 w-16 inline-block">Invoice:</span>
-                  {b.invoiceNo || "—"}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-zinc-500 w-16 inline-block flex-shrink-0">Invoice:</span>
+                  <span className="font-mono">{b.invoiceNo || "—"}</span>
+                  {b.invoiceNo && invoiceColorMap.has(b.invoiceNo) && (
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                      style={{ background: invoiceColorMap.get(b.invoiceNo) }}
+                      title="Multi-day trip"
+                    />
+                  )}
                 </div>
                 <div>
                   <span className="font-medium text-zinc-500 w-16 inline-block">Amount:</span>
@@ -466,6 +501,10 @@ export default function VanSchedulePage() {
               <span className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded-sm bg-red-200 border border-red-300 inline-block" />
                 Conflict / No van
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm bg-blue-200 border border-blue-300 inline-block" style={{ borderLeft: "3px solid #f59e0b" }} />
+                Multi-day trip (stripe = same invoice)
               </span>
             </div>
           )}
@@ -565,6 +604,7 @@ export default function VanSchedulePage() {
                                     setDragOverCell(null);
                                   }}
                                   className={`rounded border px-1.5 py-1 transition-opacity ${isOutsourced ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} hover:opacity-80 ${bi > 0 ? "mt-0.5" : ""} ${color} ${dragBookingId === b.id ? "opacity-40 scale-95" : ""}`}
+                                  style={b.invoiceNo && invoiceColorMap.has(b.invoiceNo) ? { borderLeft: `3px solid ${invoiceColorMap.get(b.invoiceNo)}` } : undefined}
                                   onClick={() => { if (!dragBookingId) setPopup({ bookings: [b], vanLabel: plate, dayNum: d }); }}
                                 >
                                   <div className="font-semibold truncate max-w-[84px] leading-tight">
@@ -649,6 +689,7 @@ export default function VanSchedulePage() {
                                   setDragOverCell(null);
                                 }}
                                 className={`rounded border px-1.5 py-1 mb-0.5 cursor-grab active:cursor-grabbing hover:opacity-80 transition-opacity bg-red-100 border-red-300 text-red-900 ${dragBookingId === b.id ? "opacity-40" : ""}`}
+                                style={b.invoiceNo && invoiceColorMap.has(b.invoiceNo) ? { borderLeft: `3px solid ${invoiceColorMap.get(b.invoiceNo)}` } : undefined}
                                 onClick={() => { if (!dragBookingId) setPopup({ bookings: [b], vanLabel: "No Van", dayNum: d }); }}
                               >
                                 <div className="font-semibold truncate max-w-[84px] leading-tight">
