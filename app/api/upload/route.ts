@@ -69,14 +69,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (allParsed.length === 0) {
+    if (fileErrors.length > 0 && allParsed.length === 0) {
+      // All files had hard errors (service down, bad response, etc.)
       return NextResponse.json(
-        {
-          error: "No bookings found in the uploaded PDF(s). Check the file format.",
-          details: fileErrors.length > 0 ? fileErrors : ["parseRawText returned 0 rows — check PDF format"],
-        },
+        { error: fileErrors[0], details: fileErrors },
         { status: 422 }
       );
+    }
+
+    if (allParsed.length === 0) {
+      // No bookings found but no hard errors — file just has no parseable rows (e.g. overtime-only)
+      return NextResponse.json({ inserted: 0 });
     }
 
     // Insert all parsed bookings without van assignment.
