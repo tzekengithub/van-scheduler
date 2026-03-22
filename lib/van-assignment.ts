@@ -89,10 +89,9 @@ export async function smartAssignVan(
           const blockerIsMultiDay = blockerInvoiceRows.length > 1;
 
           if (blockerIsMultiDay) {
-            // Cannot bump a multi-day blocker → outsource current booking
-            return { outsource: true };
-          }
-
+            // Cannot bump a multi-day blocker — preferred van is unavailable.
+            // Fall through to Priority 2/3 to find any other free van.
+          } else {
           // Single blocker → bump it to a free van
           const blockerBookingId = anyConflict[0].id;
           const freeVansForBump: typeof allVans = [];
@@ -127,6 +126,7 @@ export async function smartAssignVan(
 
           // Preferred van is now free on travelDate → assign to current booking.
           return preferredVanId;
+          } // end else (single blocker)
         }
       }
     }
@@ -146,7 +146,7 @@ export async function smartAssignVan(
   if (freeVans.length === 0) return { outsource: true };
 
   // Priority 3 — one-way: no continuity check, just first free van
-  if (tripType === "one_way") return freeVans[0].id;
+  if (tripType === "one_way_ride") return freeVans[0].id;
 
   // Priority 2 — trip: prefer continuity (van last ended at fromLocation)
   for (const van of freeVans) {
