@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useUploadContext } from "@/app/upload-context";
 
 const MONTHS_LIST = [
   "January","February","March","April","May","June",
@@ -45,22 +46,6 @@ interface BookingRow {
   tourGuide: string | null;
   vehicleIndex: number | null;
   numberOfVehicles: number | null;
-}
-
-interface PreviewBooking {
-  travelDate: string;
-  day: string;
-  month: string;
-  year: string;
-  invoiceNo: string;
-  clientDetails: string;
-  details: string;
-  fromLocation: string;
-  toLocation: string;
-  numberOfVehicles: number;
-  vehicleIndex: number;
-  amount: number;
-  tripType: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -128,20 +113,7 @@ export default function DailyJobsPage() {
   const [editValue, setEditValue] = useState("");
   const [cellStates, setCellStates] = useState<Record<string, "saving" | "saved" | "error">>({});
 
-  // Upload zone
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [previewRows, setPreviewRows] = useState<PreviewBooking[] | null>(null);
-  const [parsing, setParsing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-
-  const [serviceStatus, setServiceStatus] = useState<"unknown" | "cold" | "starting" | "ready" | "error">("unknown");
-  const [countdown, setCountdown] = useState(0);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const { uploadOpen, setUploadOpen, serviceStatus } = useUploadContext();
 
   // ── Date navigation ────────────────────────────────────────────────────────
   function navigateDay(delta: number) {
@@ -170,27 +142,30 @@ export default function DailyJobsPage() {
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
+  // Refresh data and navigate to first inserted date after PDF upload
   useEffect(() => {
-    const checkIfWarm = async () => {
-      const serviceUrl = process.env.NEXT_PUBLIC_PDF_SERVICE_URL;
-      if (!serviceUrl) { setServiceStatus("cold"); return; }
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
-      try {
-        const res = await fetch(`${serviceUrl}/health`, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        setServiceStatus(res.ok ? "ready" : "cold");
-      } catch {
-        clearTimeout(timeoutId);
-        setServiceStatus("cold");
+    const handler = async (e: Event) => {
+      const count = (e as CustomEvent<{ count: number }>).detail?.count ?? 0;
+      if (count > 0) {
+        const navRes = await fetch(`/api/bookings?recentCount=${count}`);
+        if (navRes.ok) {
+          const recent: BookingRow[] = await navRes.json();
+          const first = recent
+            .filter((r) => r.day && r.month && r.year)
+            .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""))[0];
+          if (first?.day && first?.month && first?.year) {
+            setDay(first.day);
+            setMonth(first.month);
+            setYear(first.year);
+            return;
+          }
+        }
       }
+      await fetchRows();
     };
-    checkIfWarm();
-  }, []);
-
-  useEffect(() => {
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, []);
+    window.addEventListener("bookings-uploaded", handler);
+    return () => window.removeEventListener("bookings-uploaded", handler);
+  }, [fetchRows]);
 
   // ── Cell editing ───────────────────────────────────────────────────────────
   async function patchRow(id: number, field: string, value: unknown) {
@@ -271,113 +246,6 @@ export default function DailyJobsPage() {
     }
   }
 
-  // ── Upload ─────────────────────────────────────────────────────────────────
-  async function handleFilesSelected(files: File[]) {
-    setUploadFiles(files);
-    setPreviewRows(null);
-    setUploadError(null);
-    if (files.length === 0) return;
-    setParsing(true);
-    try {
-      const allBookings: PreviewBooking[] = [];
-      for (const file of files) {
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await fetch("/api/preview", { method: "POST", body: formData });
-        if (res.ok) {
-          const { bookings } = await res.json();
-          allBookings.push(...bookings);
-        } else {
-          const err = await res.json().catch(() => ({}));
-          setUploadError(err.error ?? `Failed to parse ${file.name}`);
-          return;
-        }
-      }
-      setPreviewRows(allBookings);
-    } finally {
-      setParsing(false);
-    }
-  }
-
-  async function handleConfirmUpload() {
-    if (uploadFiles.length === 0) return;
-    setConfirming(true);
-    try {
-      let totalCount = 0;
-      for (const file of uploadFiles) {
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await fetch("/api/upload", { method: "POST", body: formData });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          setUploadError(err.error ?? `Upload failed for ${file.name}`);
-          return;
-        }
-        const data = await res.json();
-        totalCount += data.inserted ?? 0;
-      }
-      setUploadOpen(false);
-      setUploadFiles([]);
-      setPreviewRows(null);
-      setUploadError(null);
-      // Navigate to first inserted booking's date
-      const navRes = await fetch(`/api/bookings?recentCount=${totalCount}`);
-      if (navRes.ok) {
-        const recent: BookingRow[] = await navRes.json();
-        const first = recent
-          .filter((r) => r.day && r.month && r.year)
-          .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""))[0];
-        if (first?.day && first?.month && first?.year) {
-          setDay(first.day);
-          setMonth(first.month);
-          setYear(first.year);
-          return;
-        }
-      }
-      await fetchRows();
-    } finally {
-      setConfirming(false);
-    }
-  }
-
-  function handleCancelUpload() {
-    setUploadFiles([]);
-    setPreviewRows(null);
-    setUploadError(null);
-    setUploadOpen(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
-
-  const startService = async () => {
-    setServiceStatus("starting");
-    setCountdown(60);
-    const serviceUrl = process.env.NEXT_PUBLIC_PDF_SERVICE_URL;
-    if (!serviceUrl) { setServiceStatus("error"); return; }
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) { if (timerRef.current) clearInterval(timerRef.current); return 0; }
-        return prev - 1;
-      });
-    }, 1000);
-    for (let attempts = 0; attempts < 20; attempts++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      try {
-        const res = await fetch(`${serviceUrl}/health`, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          setCountdown(0);
-          setServiceStatus("ready");
-          return;
-        }
-      } catch { clearTimeout(timeoutId); }
-    }
-    if (timerRef.current) clearInterval(timerRef.current);
-    setServiceStatus("error");
-  };
 
   // ── Computed ───────────────────────────────────────────────────────────────
   const totalAmount = rows.reduce((sum, r) => sum + parseFloat(r.amount ?? "0"), 0);
@@ -764,162 +632,6 @@ export default function DailyJobsPage() {
           Daily Jobs Record — {fullDateLabel}
         </div>
 
-        {/* PDF Service status bar */}
-        <div className="no-print">
-          {serviceStatus === "unknown" && (
-            <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <div className="w-2 h-2 rounded-full bg-gray-400" />
-              <span className="text-sm text-gray-500">Checking PDF service...</span>
-            </div>
-          )}
-          {serviceStatus === "cold" && (
-            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <div className="w-2 h-2 rounded-full bg-amber-400" />
-              <span className="text-sm text-amber-700">PDF service is sleeping</span>
-              <button
-                onClick={startService}
-                className="ml-auto px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-              >
-                Start PDF Service
-              </button>
-            </div>
-          )}
-          {serviceStatus === "starting" && (
-            <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-sm text-amber-700">Starting PDF service...</span>
-              <span className="ml-auto text-sm font-mono text-amber-600">{countdown}s</span>
-            </div>
-          )}
-          {serviceStatus === "ready" && (
-            <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="w-2 h-2 rounded-full bg-green-500" />
-              <span className="text-sm text-green-700">PDF service ready — you can upload invoices</span>
-            </div>
-          )}
-          {serviceStatus === "error" && (
-            <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="w-2 h-2 rounded-full bg-red-500" />
-              <span className="text-sm text-red-700">PDF service failed to start — try again</span>
-              <button
-                onClick={startService}
-                className="ml-auto px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
-              >
-                Retry
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Upload zone */}
-        {uploadOpen && (
-          <div className="no-print bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-zinc-900">Upload Invoice PDF</h2>
-              <button onClick={handleCancelUpload} className="text-zinc-400 hover:text-zinc-700 text-lg font-bold">×</button>
-            </div>
-
-            {uploadFiles.length === 0 && (
-              <div
-                className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors ${
-                  dragOver ? "border-zinc-500 bg-zinc-50" : "border-zinc-300 hover:border-zinc-400"
-                }`}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOver(false);
-                  const files = Array.from(e.dataTransfer.files).filter((f) => f.type === "application/pdf");
-                  if (files.length > 0) handleFilesSelected(files);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files ?? []);
-                    if (files.length > 0) handleFilesSelected(files);
-                  }}
-                />
-                <p className="text-sm text-zinc-500">Drop one or more PDFs here, or click to select</p>
-                <p className="text-xs text-zinc-400 mt-1">Invoice PDFs only</p>
-              </div>
-            )}
-
-            {parsing && (
-              <div className="flex items-center gap-3 py-6 justify-center text-zinc-500 text-sm">
-                <svg className="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-                Parsing PDF…
-              </div>
-            )}
-
-            {uploadError && (
-              <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800 mt-3">
-                {uploadError}
-              </div>
-            )}
-
-            {previewRows && previewRows.length > 0 && (
-              <div className="mt-4">
-                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
-                  Preview — {previewRows.length} row{previewRows.length !== 1 ? "s" : ""} found
-                </p>
-                <div className="overflow-auto rounded-lg border border-zinc-200">
-                  <table className="w-full text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-zinc-50 border-b border-zinc-200">
-                        {["Date", "Invoice #", "Client", "Route", "Type", "Veh", "Amount (MYR)"].map((h) => (
-                          <th key={h} className="px-3 py-2 text-left font-semibold text-zinc-600 whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previewRows.map((r, i) => (
-                        <tr key={i} className="border-b border-zinc-100">
-                          <td className="px-3 py-1.5 text-zinc-900 whitespace-nowrap">{r.day} {r.month} {r.year}</td>
-                          <td className="px-3 py-1.5 text-zinc-500 font-mono whitespace-nowrap">{r.invoiceNo}</td>
-                          <td className="px-3 py-1.5 text-zinc-900">{(r.clientDetails ?? "").split("\n")[0]}</td>
-                          <td className="px-3 py-1.5 text-zinc-900 whitespace-nowrap">{r.fromLocation} → {r.toLocation}</td>
-                          <td className="px-3 py-1.5">{tripTypeBadge(r.tripType as TripType)}</td>
-                          <td className="px-3 py-1.5 text-zinc-500 text-center">
-                            {(r.numberOfVehicles ?? 1) > 1 ? `v${r.vehicleIndex}/${r.numberOfVehicles}` : "1"}
-                          </td>
-                          <td className="px-3 py-1.5 text-zinc-900 font-mono">{Number(r.amount).toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="flex gap-2 mt-4">
-                  <button
-                    onClick={handleConfirmUpload}
-                    disabled={confirming}
-                    className="h-9 px-5 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50"
-                  >
-                    {confirming ? "Inserting…" : `Confirm — Insert ${previewRows.length} row${previewRows.length !== 1 ? "s" : ""}`}
-                  </button>
-                  <button
-                    onClick={handleCancelUpload}
-                    className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {previewRows && previewRows.length === 0 && !parsing && (
-              <div className="mt-3 text-sm text-zinc-500">No bookings found in this PDF. Check the file format.</div>
-            )}
-          </div>
-        )}
 
         {/* Conflict banner */}
         {!loading && (noVanRows.length > 0 || doubleBookedRows.length > 0) && (
