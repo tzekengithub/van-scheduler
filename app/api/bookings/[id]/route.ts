@@ -50,8 +50,12 @@ export async function PATCH(
       updates.driverContact = null;
     }
 
-    // Double-booking check: if vanId is being set, ensure the van is free on travelDate
-    if ("vanId" in updates && updates.vanId != null) {
+    const isManual = updates.manualChange === 1;
+
+    // Double-booking check — only for non-manual changes.
+    // Manual drag-and-drop is the user's explicit decision; let them place it
+    // wherever they want without a 409 rejection.
+    if (!isManual && "vanId" in updates && updates.vanId != null) {
       const newVanId = updates.vanId as number;
 
       const [current] = await db
@@ -61,7 +65,6 @@ export async function PATCH(
         .limit(1);
 
       if (current) {
-        // If travelDate is also being updated in this request, check against the new date
         const checkDate = ("travelDate" in updates && typeof updates.travelDate === "string")
           ? updates.travelDate
           : current.travelDate;
@@ -103,12 +106,9 @@ export async function PATCH(
       return NextResponse.json({ error: "Booking not found" }, { status: 404 });
     }
 
-    // Re-evaluate the full schedule when a manual van assignment is made.
-    // manualChange=1 means the user explicitly chose a van — recheck all
-    // auto-managed bookings so priorities stay correct after the change.
-    if (updates.manualChange === 1) {
-      await recheckAllVans();
-    }
+    // Manual drag-and-drop: just save this one booking, leave everything else alone.
+    // The user explicitly chose where to put it — do not cascade a full recheck.
+    // (Use the Recheck button on the dashboard if a full reassignment is needed.)
 
     return NextResponse.json(updated);
   } catch (error) {
