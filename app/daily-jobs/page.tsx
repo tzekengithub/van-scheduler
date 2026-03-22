@@ -122,6 +122,7 @@ export default function DailyJobsPage() {
   const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [cellStates, setCellStates] = useState<Record<string, "saving" | "saved" | "error">>({});
+  const [patchError, setPatchError] = useState<string | null>(null);
 
   const { uploadOpen, setUploadOpen, serviceStatus } = useUploadContext();
 
@@ -193,6 +194,10 @@ export default function DailyJobsPage() {
         setTimeout(() => setCellStates((prev) => {
           const next = { ...prev }; delete next[key]; return next;
         }), 1000);
+      } else if (res.status === 409) {
+        const data = await res.json();
+        setPatchError(data.error ?? "Double booking conflict — please choose another van.");
+        setCellStates((prev) => ({ ...prev, [key]: "error" }));
       } else {
         setCellStates((prev) => ({ ...prev, [key]: "error" }));
       }
@@ -642,6 +647,17 @@ export default function DailyJobsPage() {
           Daily Jobs Record — {fullDateLabel}
         </div>
 
+
+        {/* Inline patch error (e.g. double-booking on manual van change) */}
+        {patchError && (
+          <div className="rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 flex items-center justify-between">
+            <span className="text-sm text-orange-800">⚠️ {patchError}</span>
+            <button
+              onClick={() => setPatchError(null)}
+              className="text-orange-400 hover:text-orange-600 font-bold text-base leading-none px-1 ml-4"
+            >×</button>
+          </div>
+        )}
 
         {/* Conflict banner */}
         {!loading && (noVanRows.length > 0 || doubleBookedRows.length > 0) && (

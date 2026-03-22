@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     let totalInserted = 0;
 
     for (const booking of allParsed) {
-      const vanId = await smartAssignVan(
+      const assignResult = await smartAssignVan(
         booking.travelDate,
         booking.fromLocation,
         booking.invoiceNo,
@@ -47,10 +47,15 @@ export async function POST(request: NextRequest) {
         booking.tripType,
       );
 
-      let vehiclePlate = booking.vehiclePlate;
-      let driverName = booking.driverName;
-      let driverContact = "";
-      if (vanId != null) {
+      // Determine if this booking should be outsourced
+      const isOutsourced = typeof assignResult === "object" && "outsource" in assignResult;
+      const vanId = isOutsourced ? null : (assignResult as number);
+
+      let vehiclePlate: string | null = null;
+      let driverName: string | null = null;
+      let driverContact: string | null = null;
+
+      if (!isOutsourced && vanId != null) {
         const [van] = await db.select().from(vans).where(eq(vans.id, vanId)).limit(1);
         if (van) {
           vehiclePlate = van.vanNumber;
@@ -74,14 +79,15 @@ export async function POST(request: NextRequest) {
         year: booking.year,
         passengerCount: booking.numberOfVehicles,
         myrPerVehicle: String(booking.myrPerVehicle),
-        amount: String(booking.amount),
+        // Store per-vehicle price as the row amount (not the invoice total)
+        amount: String(booking.myrPerVehicle),
         vehiclePlate,
         driverName,
         driverContact,
         paidStatus: booking.paidStatus,
         overtime: booking.overtime,
         introducer: booking.introducer,
-        inHouseOrOutsourced: booking.inHouseOrOutsourced,
+        inHouseOrOutsourced: isOutsourced ? "O" : (booking.inHouseOrOutsourced ?? "I"),
         outsourcedCompany: booking.outsourcedCompany,
         tripType: booking.tripType,
         vehicleIndex: booking.vehicleIndex,

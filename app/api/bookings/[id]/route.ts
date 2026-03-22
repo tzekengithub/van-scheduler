@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { bookings } from "@/drizzle/schema";
-import { eq } from "drizzle-orm";
+import { bookings, vans } from "@/drizzle/schema";
+import { eq, and, ne } from "drizzle-orm";
 
 export async function PATCH(
   request: NextRequest,
@@ -46,6 +46,44 @@ export async function PATCH(
       updates.vehiclePlate = null;
       updates.driverName = null;
       updates.driverContact = null;
+    }
+
+    // Double-booking check: if vanId is being set, ensure the van is free on travelDate
+    if ("vanId" in updates && updates.vanId != null) {
+      const newVanId = updates.vanId as number;
+
+      const [current] = await db
+        .select({ travelDate: bookings.travelDate })
+        .from(bookings)
+        .where(eq(bookings.id, id))
+        .limit(1);
+
+      if (current) {
+        const conflict = await db
+          .select({ id: bookings.id })
+          .from(bookings)
+          .where(
+            and(
+              eq(bookings.vanId, newVanId),
+              eq(bookings.travelDate, current.travelDate),
+              ne(bookings.id, id),
+            )
+          )
+          .limit(1);
+
+        if (conflict.length > 0) {
+          const [van] = await db
+            .select({ vanNumber: vans.vanNumber })
+            .from(vans)
+            .where(eq(vans.id, newVanId))
+            .limit(1);
+          const plate = van?.vanNumber ?? `#${newVanId}`;
+          return NextResponse.json(
+            { error: `Van ${plate} is already booked on ${current.travelDate}. Please choose another van.` },
+            { status: 409 }
+          );
+        }
+      }
     }
 
     const [updated] = await db

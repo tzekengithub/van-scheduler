@@ -299,7 +299,7 @@ export function parseRawText(text: string): ParsedBooking[] {
       if (!numTokens[0].includes(".") && n0 <= 20) {
         numberOfVehicles = n0;
         amount           = parseAmt(numTokens[1]);
-        myrPerVehicle    = amount / numberOfVehicles;
+        // myrPerVehicle stays 0 — cannot read it directly when only 2 tokens present
       } else {
         myrPerVehicle = n0;
         amount        = parseAmt(numTokens[1]);

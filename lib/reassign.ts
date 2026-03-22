@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, isNull, isNotNull, inArray, asc, ne } from "drizzle-orm";
-import { smartAssignVan } from "@/lib/van-assignment";
+import { smartAssignVan, AssignResult } from "@/lib/van-assignment";
 
 /**
  * Priority rank for processing order and bumping.
@@ -73,7 +73,7 @@ export async function runReassign(
   for (const b of targetBookings) {
     if (b.manualChange === 1) continue;
 
-    const vanId = await smartAssignVan(
+    const assignResult: AssignResult = await smartAssignVan(
       b.travelDate,
       b.fromLocation,
       b.invoiceNo ?? "",
@@ -81,6 +81,7 @@ export async function runReassign(
       b.numberOfVehicles ?? 1,
       b.tripType,
     );
+    const vanId = typeof assignResult === "number" ? assignResult : null;
 
     if (vanId != null) {
       // ── Normal assignment ──────────────────────────────────────────────────
@@ -192,7 +193,7 @@ export async function runReassign(
       // Skip if already reassigned, manual, or missing
       if (!b || b.manualChange === 1 || b.vanId != null) continue;
 
-      const vanId = await smartAssignVan(
+      const retryResult: AssignResult = await smartAssignVan(
         b.travelDate,
         b.fromLocation,
         b.invoiceNo ?? "",
@@ -200,6 +201,7 @@ export async function runReassign(
         b.numberOfVehicles ?? 1,
         b.tripType,
       );
+      const vanId = typeof retryResult === "number" ? retryResult : null;
 
       if (vanId != null) {
         const van = vanMap.get(vanId);
