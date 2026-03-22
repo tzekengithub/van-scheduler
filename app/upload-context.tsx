@@ -54,6 +54,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [serviceStatus, setServiceStatus] = useState<"unknown" | "cold" | "starting" | "ready" | "error">("unknown");
   const [countdown, setCountdown] = useState(0);
+  const [minimised, setMinimised] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -145,6 +147,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setPreviewRows(null);
     setUploadError(null);
     setUploadOpen(false);
+    setMinimised(false);
+    setFullscreen(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -187,10 +191,17 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
       {/* ── Floating upload panel (persists across page navigation) ── */}
       {showPanel && (
-        <div className="fixed bottom-4 right-4 z-50 w-[640px] max-h-[82vh] flex flex-col bg-white rounded-xl shadow-2xl border border-zinc-200 overflow-hidden no-print">
+        <div className={`fixed z-50 flex flex-col bg-white shadow-2xl border border-zinc-200 overflow-hidden no-print transition-all duration-200 ${
+          fullscreen
+            ? "inset-0 rounded-none"
+            : `bottom-4 right-4 w-[640px] rounded-xl${minimised ? "" : " max-h-[82vh]"}`
+        }`}>
 
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-zinc-50 border-b border-zinc-200 shrink-0">
+          <div
+            className="flex items-center justify-between px-4 py-3 bg-zinc-50 border-b border-zinc-200 shrink-0 select-none"
+            onDoubleClick={() => { setMinimised((m) => !m); setFullscreen(false); }}
+          >
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-zinc-900">Upload Invoice PDF</span>
               {parsing && (
@@ -204,15 +215,54 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               )}
               {confirming && <span className="text-xs text-blue-600">Inserting rows…</span>}
             </div>
-            <button
-              onClick={handleCancelUpload}
-              disabled={confirming}
-              className="text-zinc-400 hover:text-zinc-700 text-xl font-bold leading-none disabled:opacity-30 px-1"
-              title="Close"
-            >
-              ×
-            </button>
+            <div className="flex items-center gap-1">
+              {/* Minimise / restore */}
+              <button
+                onClick={() => { setMinimised((m) => !m); setFullscreen(false); }}
+                className="text-zinc-400 hover:text-zinc-700 px-1.5 py-0.5 rounded hover:bg-zinc-200 transition-colors"
+                title={minimised ? "Restore" : "Minimise"}
+              >
+                {minimised ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L10 15.586l3.293-3.293a1 1 0 011.414 0z" clipRule="evenodd"/>
+                    <path fillRule="evenodd" d="M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L10 4.414 6.707 7.707a1 1 0 01-1.414 0z" clipRule="evenodd"/>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd"/>
+                  </svg>
+                )}
+              </button>
+              {/* Fullscreen / exit fullscreen */}
+              <button
+                onClick={() => { setFullscreen((f) => !f); setMinimised(false); }}
+                className="text-zinc-400 hover:text-zinc-700 px-1.5 py-0.5 rounded hover:bg-zinc-200 transition-colors"
+                title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+              >
+                {fullscreen ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M5 4a1 1 0 00-1 1v3a1 1 0 01-2 0V5a3 3 0 013-3h3a1 1 0 010 2H5zm10 0h-3a1 1 0 010-2h3a3 3 0 013 3v3a1 1 0 01-2 0V5a1 1 0 00-1-1zM4 15a1 1 0 001 1h3a1 1 0 010 2H5a3 3 0 01-3-3v-3a1 1 0 012 0v3zm12 0v-3a1 1 0 012 0v3a3 3 0 01-3 3h-3a1 1 0 010-2h3a1 1 0 001-1z" clipRule="evenodd"/>
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 11-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12zm-9 7a1 1 0 012 0v1.586l2.293-2.293a1 1 0 111.414 1.414L6.414 15H8a1 1 0 010 2H4a1 1 0 01-1-1v-4zm13-1a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 010-2h1.586l-2.293-2.293a1 1 0 111.414-1.414L15 13.586V12a1 1 0 011-1z" clipRule="evenodd"/>
+                  </svg>
+                )}
+              </button>
+              {/* Close */}
+              <button
+                onClick={handleCancelUpload}
+                disabled={confirming}
+                className="text-zinc-400 hover:text-zinc-700 text-xl font-bold leading-none disabled:opacity-30 px-1.5 py-0.5 rounded hover:bg-zinc-200 transition-colors"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
           </div>
+
+          {/* Body — hidden when minimised */}
+          {!minimised && <>
 
           {/* Service status bar */}
           <div className="px-4 pt-3 shrink-0">
@@ -364,6 +414,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               <div className="mt-3 text-sm text-zinc-500">No bookings found in this PDF. Check the file format.</div>
             )}
           </div>
+
+          </>}
         </div>
       )}
     </UploadContext.Provider>
