@@ -279,7 +279,7 @@ export default function VanSchedulePage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          inHouseOrOutsourced: "outsourced",
+          inHouseOrOutsourced: "O",
           outsourcedCompany: companyName,
         }),
       });

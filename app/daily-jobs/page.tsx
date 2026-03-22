@@ -558,7 +558,7 @@ export default function DailyJobsPage() {
                       cellStates[`${row.id}-inHouseOrOutsourced`] === "saving" ? "border-zinc-300 animate-pulse" :
                       cellStates[`${row.id}-inHouseOrOutsourced`] === "saved"  ? "border-green-400" : "border-zinc-300"
                     }`}
-                    value={row.inHouseOrOutsourced ?? "I"}
+                    value={row.inHouseOrOutsourced === "outsourced" ? "O" : (row.inHouseOrOutsourced ?? "I")}
                     onChange={async (e) => {
                       const val = e.target.value;
                       if (val === "O") {
@@ -582,7 +582,7 @@ export default function DailyJobsPage() {
                 </td>
                 {/* Outsourced Company */}
                 <td className="px-2 py-1.5 min-w-[100px]">
-                  {row.inHouseOrOutsourced === "O" ? (
+                  {(row.inHouseOrOutsourced === "O" || row.inHouseOrOutsourced === "outsourced") ? (
                     <input
                       className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
                         cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
