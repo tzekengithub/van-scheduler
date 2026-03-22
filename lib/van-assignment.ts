@@ -9,11 +9,13 @@ import { eq, and, ne, desc } from "drizzle-orm";
  *
  * RULE 1 — Same invoice → same van.
  *   Find the van already assigned to any in-house booking with this invoiceNo.
- *   If found and free on travelDate → reuse it.
- *   If found but blocked by a different invoiceNo:
- *     - Blocker is multi-day trip (invoiceNo appears > 1 time) → outsource current.
- *     - Blocker is single booking → bump it to a free van (or outsource blocker),
- *       then assign preferred van to current booking.
+ *   Step A: Does the preferred van have ANY booking on this travelDate?
+ *     - No conflict → assign preferred van.
+ *     - Same-invoice conflict (multi-vehicle) → fall through to Rule 2.
+ *     - Different-invoice conflict → bump logic:
+ *         Blocker is multi-day (invoiceNo appears > 1 time) → outsource current.
+ *         Blocker is single → bump to free van (or outsource blocker),
+ *         then assign preferred van to current booking.
  *
  * RULE 2 — Find any van with zero bookings on travelDate (strict — no exclusions).
  *   Among free vans, prefer route continuity for non-day-trip bookings.
@@ -34,7 +36,7 @@ export async function smartAssignVan(
   if (allVans.length === 0) return { outsource: true };
 
   // ── RULE 1 ───────────────────────────────────────────────────────────────────
-  // Match by invoiceNo only (not vehicleIndex). Exclude outsourced bookings.
+  // Match by invoiceNo only. Exclude outsourced bookings.
   if (invoiceNo && invoiceNo.trim() !== "") {
     const existing = await db
       .select({ vanId: bookings.vanId })
@@ -50,76 +52,81 @@ export async function smartAssignVan(
     if (existing.length > 0 && existing[0].vanId != null) {
       const preferredVanId = existing[0].vanId;
 
-      // Any booking from a DIFFERENT invoice on this travelDate for this van?
-      const blockerRows = await db
+      // Step A: Does the preferred van have ANY booking on this travelDate?
+      const anyConflict = await db
         .select({ id: bookings.id, invoiceNo: bookings.invoiceNo })
         .from(bookings)
         .where(
           and(
             eq(bookings.vanId, preferredVanId),
             eq(bookings.travelDate, travelDate),
-            ne(bookings.invoiceNo, invoiceNo),
           )
         )
         .limit(1);
 
-      if (blockerRows.length === 0) {
-        // Preferred van is free on this date → assign it.
+      if (anyConflict.length === 0) {
+        // Van is completely free on this date → assign it.
         return preferredVanId;
       }
 
-      // Preferred van is busy. Check if the blocker is a multi-day trip.
-      const blockerBookingId = blockerRows[0].id;
-      const blockerInvoiceNo = blockerRows[0].invoiceNo ?? "";
+      // Step B: Identify conflict type.
+      if (anyConflict[0].invoiceNo === invoiceNo) {
+        // Same invoice + same date = multi-vehicle booking.
+        // Each vehicle needs its own van → fall through to Rule 2.
+      } else {
+        // Different invoice is blocking → apply bump logic.
+        const blockerBookingId = anyConflict[0].id;
+        const blockerInvoiceNo = anyConflict[0].invoiceNo ?? "";
 
-      // Fetch up to 2 rows for the blocker invoice to determine multi-day.
-      const blockerInvoiceRows = await db
-        .select({ id: bookings.id })
-        .from(bookings)
-        .where(eq(bookings.invoiceNo, blockerInvoiceNo))
-        .limit(2);
-      const isMultiDay = blockerInvoiceRows.length > 1;
-
-      if (isMultiDay) {
-        // Do NOT bump a multi-day trip — outsource the current booking instead.
-        return { outsource: true };
-      }
-
-      // Single blocking booking — bump it.
-      // Find any other van free on travelDate (excluding the preferred van).
-      const freeVansForBump: typeof allVans = [];
-      for (const van of allVans) {
-        if (van.id === preferredVanId) continue;
-        const conflict = await db
+        // Fetch up to 2 rows for the blocker invoice to determine multi-day.
+        const blockerInvoiceRows = await db
           .select({ id: bookings.id })
           .from(bookings)
-          .where(and(eq(bookings.vanId, van.id), eq(bookings.travelDate, travelDate)))
-          .limit(1);
-        if (conflict.length === 0) freeVansForBump.push(van);
-      }
+          .where(eq(bookings.invoiceNo, blockerInvoiceNo))
+          .limit(2);
+        const isMultiDay = blockerInvoiceRows.length > 1;
 
-      if (freeVansForBump.length > 0) {
-        // Reassign blocker to a free van.
-        const newVan = freeVansForBump[0];
-        await db.update(bookings).set({
-          vanId: newVan.id,
-          vehiclePlate: newVan.vanNumber,
-          driverName: newVan.driverName ?? "",
-          driverContact: newVan.driverContact ?? "",
-        }).where(eq(bookings.id, blockerBookingId));
-      } else {
-        // No free van — outsource the blocker.
-        await db.update(bookings).set({
-          inHouseOrOutsourced: "O",
-          vanId: null,
-          vehiclePlate: null,
-          driverName: null,
-          driverContact: null,
-        }).where(eq(bookings.id, blockerBookingId));
-      }
+        if (isMultiDay) {
+          // Do NOT bump a multi-day trip — outsource the current booking instead.
+          return { outsource: true };
+        }
 
-      // Preferred van is now free on travelDate → assign to current booking.
-      return preferredVanId;
+        // Single blocking booking — bump it.
+        // Find any other van free on travelDate (excluding the preferred van).
+        const freeVansForBump: typeof allVans = [];
+        for (const van of allVans) {
+          if (van.id === preferredVanId) continue;
+          const conflict = await db
+            .select({ id: bookings.id })
+            .from(bookings)
+            .where(and(eq(bookings.vanId, van.id), eq(bookings.travelDate, travelDate)))
+            .limit(1);
+          if (conflict.length === 0) freeVansForBump.push(van);
+        }
+
+        if (freeVansForBump.length > 0) {
+          // Reassign blocker to a free van.
+          const newVan = freeVansForBump[0];
+          await db.update(bookings).set({
+            vanId: newVan.id,
+            vehiclePlate: newVan.vanNumber,
+            driverName: newVan.driverName ?? "",
+            driverContact: newVan.driverContact ?? "",
+          }).where(eq(bookings.id, blockerBookingId));
+        } else {
+          // No free van — outsource the blocker.
+          await db.update(bookings).set({
+            inHouseOrOutsourced: "O",
+            vanId: null,
+            vehiclePlate: null,
+            driverName: null,
+            driverContact: null,
+          }).where(eq(bookings.id, blockerBookingId));
+        }
+
+        // Preferred van is now free on travelDate → assign to current booking.
+        return preferredVanId;
+      }
     }
   }
 
