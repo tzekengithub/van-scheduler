@@ -306,28 +306,19 @@ export default function VanSchedulePage() {
 
     const isSameVan = dragSourcePlate === targetPlate;
     const isSameDay = dragSourceDay === targetDay;
-    if (isSameVan && isSameDay) return;
+    if (isSameVan || !isSameDay) return; // only allow van changes on the same day
 
-    const updates: Record<string, unknown> = { manualChange: 1 };
+    const targetVan = vans.find((v) => v.vanNumber === targetPlate);
+    if (!targetVan) return;
 
-    if (!isSameVan) {
-      const targetVan = vans.find((v) => v.vanNumber === targetPlate);
-      if (!targetVan) return; // only registered vans are valid drop targets
-      updates.vanId = targetVan.id;
-      updates.vehiclePlate = targetVan.vanNumber;
-      updates.driverName = targetVan.driverName;
-      updates.driverContact = targetVan.driverContact;
-      updates.inHouseOrOutsourced = "I";
-    }
-
-    if (!isSameDay) {
-      const monthPadded = String(viewMonth + 1).padStart(2, "0");
-      const dayPadded = String(targetDay).padStart(2, "0");
-      updates.travelDate = `${viewYear}-${monthPadded}-${dayPadded}`;
-      updates.day = String(targetDay);
-      updates.month = MONTH_NAMES[viewMonth];
-      updates.year = String(viewYear);
-    }
+    const updates: Record<string, unknown> = {
+      manualChange: 1,
+      vanId: targetVan.id,
+      vehiclePlate: targetVan.vanNumber,
+      driverName: targetVan.driverName,
+      driverContact: targetVan.driverContact,
+      inHouseOrOutsourced: "I",
+    };
 
     // Clear drag state before the request so UI snaps back immediately
     setDragBookingId(null);
@@ -532,7 +523,7 @@ export default function VanSchedulePage() {
                             return (
                               <td
                                 key={d}
-                                onDragOver={(e) => { if (!dragBookingId || isOutsourced) return; e.preventDefault(); setDragOverCell({ plate, day: d }); }}
+                                onDragOver={(e) => { if (!dragBookingId || isOutsourced || dragSourceDay !== d) return; e.preventDefault(); setDragOverCell({ plate, day: d }); }}
                                 onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverCell(null); }}
                                 onDrop={(e) => { e.preventDefault(); handleDrop(plate, d); setDragOverCell(null); }}
                                 className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top transition-colors ${isToday ? "bg-blue-50/20" : ""} ${isOutsourced ? "bg-purple-50/20" : ""} ${isDropTarget ? "ring-2 ring-inset ring-blue-400 bg-blue-100/60" : ""}`}
@@ -544,7 +535,7 @@ export default function VanSchedulePage() {
                           return (
                             <td
                               key={d}
-                              onDragOver={(e) => { if (!dragBookingId || isOutsourced) return; e.preventDefault(); setDragOverCell({ plate, day: d }); }}
+                              onDragOver={(e) => { if (!dragBookingId || isOutsourced || dragSourceDay !== d) return; e.preventDefault(); setDragOverCell({ plate, day: d }); }}
                               onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverCell(null); }}
                               onDrop={(e) => { e.preventDefault(); handleDrop(plate, d); setDragOverCell(null); }}
                               className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top transition-colors ${isToday ? "bg-blue-50/20" : ""} ${isDropTarget ? "ring-2 ring-inset ring-blue-400 bg-blue-100/40" : ""}`}
