@@ -119,7 +119,6 @@ export default function DailyJobsPage() {
 
   const [rows, setRows] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [allInvoiceNos, setAllInvoiceNos] = useState<string[]>([]);
   const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [cellStates, setCellStates] = useState<Record<string, "saving" | "saved" | "error">>({});
@@ -155,17 +154,6 @@ export default function DailyJobsPage() {
   }, [day, month, year]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
-
-  // Fetch all invoice numbers once for the dropdown datalist
-  useEffect(() => {
-    fetch("/api/bookings")
-      .then((r) => r.json())
-      .then((data: BookingRow[]) => {
-        const unique = [...new Set(data.map((r) => r.invoiceNo).filter(Boolean) as string[])].sort();
-        setAllInvoiceNos(unique);
-      })
-      .catch(() => {});
-  }, []);
 
   // Refresh data and navigate to first inserted date after PDF upload
   useEffect(() => {
@@ -414,27 +402,10 @@ export default function DailyJobsPage() {
             {groupRows.map((row) => (
               <tr key={row.id} className="border-b border-zinc-100 hover:bg-zinc-50">
                 {/* Invoice # */}
-                <td className="px-3 py-2 min-w-[140px]">
-                  <datalist id={`inv-list-${row.id}`}>
-                    {allInvoiceNos.map((inv) => <option key={inv} value={inv} />)}
-                  </datalist>
-                  <input
-                    type="text"
-                    list={`inv-list-${row.id}`}
-                    defaultValue={row.invoiceNo ?? ""}
-                    placeholder="Invoice #"
-                    className={`w-full font-mono text-xs border rounded px-1.5 py-0.5 bg-white text-zinc-900 focus:outline-none focus:ring-1 focus:ring-blue-400 ${
-                      cellStates[`${row.id}-invoiceNo`] === "saving" ? "border-zinc-300 animate-pulse" :
-                      cellStates[`${row.id}-invoiceNo`] === "saved"  ? "border-green-400" :
-                      cellStates[`${row.id}-invoiceNo`] === "error"  ? "border-red-400" : "border-zinc-200"
-                    }`}
-                    onBlur={(e) => {
-                      const val = e.target.value.trim();
-                      if (val !== (row.invoiceNo ?? "")) patchRow(row.id, "invoiceNo", val || null);
-                    }}
-                  />
+                <td className="px-3 py-2 font-mono whitespace-nowrap text-zinc-700 min-w-[110px]">
+                  {row.invoiceNo || <span className="text-zinc-300">—</span>}
                   {(row.numberOfVehicles ?? 1) > 1 && (
-                    <span className="text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
+                    <span className="ml-1 text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
                   )}
                 </td>
                 {/* Client Name */}
@@ -693,9 +664,13 @@ export default function DailyJobsPage() {
             </button>
             {/* Delete by invoice number */}
             <div className="flex items-center gap-1 border border-red-200 rounded-lg overflow-hidden bg-white">
+              <datalist id="delete-inv-list">
+                {allInvoiceNos.map((inv) => <option key={inv} value={inv} />)}
+              </datalist>
               <input
                 type="text"
-                placeholder="Invoice # (e.g. INV001)"
+                list="delete-inv-list"
+                placeholder="Invoice # to delete"
                 value={deleteInvoiceInput}
                 onChange={(e) => { setDeleteInvoiceInput(e.target.value); setDeleteInvoiceState("idle"); }}
                 onKeyDown={(e) => { if (e.key === "Enter") handleDeleteByInvoice(); if (e.key === "Escape") { setDeleteInvoiceInput(""); setDeleteInvoiceState("idle"); } }}

@@ -140,7 +140,7 @@ export default function AllJobsPage() {
     return () => window.removeEventListener("bookings-uploaded", handler);
   }, [fetchRows]);
 
-  // All unique invoice numbers (for dropdown datalist)
+  // All unique invoice numbers (for dropdown datalists)
   const allInvoiceNos = useMemo(
     () => [...new Set(rows.map((r) => r.invoiceNo).filter(Boolean) as string[])].sort(),
     [rows]
@@ -662,8 +662,12 @@ export default function AllJobsPage() {
           </div>
           {/* Delete by invoice */}
           <div className="flex items-center gap-2">
+            <datalist id="delete-inv-list">
+              {allInvoiceNos.map((inv) => <option key={inv} value={inv} />)}
+            </datalist>
             <input
               type="text"
+              list="delete-inv-list"
               placeholder="Invoice # to delete"
               value={deleteInvoiceInput}
               onChange={(e) => { setDeleteInvoiceInput(e.target.value); setDeleteInvoiceState("idle"); }}
