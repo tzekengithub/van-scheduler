@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 
 interface Van {
@@ -33,6 +33,12 @@ export default function DashboardPage() {
   const [showClearDuplicatesModal, setShowClearDuplicatesModal] = useState(false);
   const [actionMessage, setActionMessage] = useState('');
   const [rechecking, setRechecking] = useState(false);
+  const [recheckLogs, setRecheckLogs] = useState<string[]>([]);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [recheckLogs]);
 
   const fetchVans = useCallback(async () => {
     try {
@@ -114,13 +120,35 @@ export default function DashboardPage() {
   const handleRecheck = async () => {
     setRechecking(true);
     setActionMessage('');
+    setRecheckLogs([]);
     try {
       const res = await fetch('/api/reassign', { method: 'POST' });
-      if (res.ok) {
-        setActionMessage('✅ Van assignments rechecked — same invoice = same van enforced, no double-bookings.');
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setActionMessage(`❌ Recheck failed: ${data.error ?? 'unknown error'}`);
+      if (!res.ok || !res.body) {
+        setActionMessage('❌ Recheck failed: network error');
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data: ')) continue;
+          let payload: string;
+          try { payload = JSON.parse(line.slice(6)); } catch { continue; }
+          if (payload === '[DONE]') {
+            setActionMessage('✅ Van assignments rechecked — same invoice = same van enforced, no double-bookings.');
+          } else if (payload.startsWith('[ERROR]')) {
+            setActionMessage(`❌ Recheck failed: ${payload.slice(7).trim()}`);
+          } else {
+            setRecheckLogs(prev => [...prev, payload]);
+          }
+        }
       }
     } catch {
       setActionMessage('❌ Recheck failed: network error');
@@ -254,6 +282,46 @@ export default function DashboardPage() {
               </>
             )}
           </button>
+
+          {/* Terminal log panel */}
+          {recheckLogs.length > 0 && (
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-mono text-zinc-500">recheck log</span>
+                <button
+                  onClick={() => setRecheckLogs([])}
+                  className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+                >
+                  clear
+                </button>
+              </div>
+              <div className="bg-zinc-900 rounded-lg p-3 h-64 overflow-y-auto font-mono text-xs leading-relaxed">
+                {recheckLogs.map((line, i) => {
+                  const isStep = line.startsWith("Step ") || line.startsWith("━━━");
+                  const isOk = line.includes("OK ") || line.includes("✓") || line.includes("done") || line.includes("COMPLETE");
+                  const isConflict = line.includes("CONFLICT") || line.includes("outsourced") || line.includes("❌");
+                  const isBump = line.includes("BUMP") || line.includes("displaced") || line.includes("swapped");
+                  const isEnforce = line.includes("[enforceInvoice]");
+                  const isDouble = line.includes("[eliminateDoubleBookings]");
+                  let color = "text-zinc-400";
+                  if (isStep) color = "text-cyan-400 font-semibold";
+                  else if (isOk) color = "text-green-400";
+                  else if (isConflict) color = "text-red-400";
+                  else if (isBump) color = "text-yellow-400";
+                  else if (isEnforce || isDouble) color = "text-purple-400";
+                  return (
+                    <div key={i} className={`${color} whitespace-pre-wrap break-all`}>
+                      {line}
+                    </div>
+                  );
+                })}
+                {rechecking && (
+                  <div className="text-zinc-500 animate-pulse">▋</div>
+                )}
+                <div ref={logEndRef} />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Danger Zone */}

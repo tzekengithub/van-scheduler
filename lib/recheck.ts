@@ -17,9 +17,16 @@ import { runReassign } from "@/lib/reassign";
  * inHouseOrOutsourced = 'O' with no company name — this creates a visible
  * conflict in the UI ("OUTSOURCE COMPANY NEEDED") until the user fills in
  * the outsourced company name.
+ *
+ * @param logger - Optional callback to receive real-time log lines (for SSE streaming).
  */
-export async function recheckAllVans(): Promise<void> {
+export async function recheckAllVans(logger?: (msg: string) => void): Promise<void> {
+  const log = (msg: string) => { console.log(msg); logger?.(msg); };
+
+  log("━━━ RECHECK STARTED ━━━");
+
   // ── Step 1: Find all auto-managed bookings ───────────────────────────────────
+  log("Step 1/6 — scanning auto-managed bookings…");
   const allAuto = await db
     .select({
       id: bookings.id,
@@ -29,10 +36,19 @@ export async function recheckAllVans(): Promise<void> {
     .from(bookings)
     .where(eq(bookings.manualChange, 0));
 
-  if (allAuto.length === 0) return;
+  log(`  found ${allAuto.length} auto-managed booking(s)`);
+
+  if (allAuto.length === 0) {
+    log("  nothing to do — all bookings are manual.");
+    log("━━━ RECHECK COMPLETE ━━━");
+    return;
+  }
 
   // User-confirmed outsourced = I/O is 'O' AND company name is filled in.
   // These are a deliberate user choice — leave them alone.
+  const userConfirmedCount = allAuto.filter(
+    (b) => b.inHouseOrOutsourced === "O" && (b.outsourcedCompany ?? "").trim() !== ""
+  ).length;
   const toResetIds = allAuto
     .filter((b) => {
       const userConfirmed =
@@ -42,9 +58,17 @@ export async function recheckAllVans(): Promise<void> {
     })
     .map((b) => b.id);
 
-  if (toResetIds.length === 0) return;
+  log(`  skipping ${userConfirmedCount} user-confirmed outsourced booking(s)`);
+  log(`  will reset ${toResetIds.length} booking(s)`);
+
+  if (toResetIds.length === 0) {
+    log("  nothing to reset.");
+    log("━━━ RECHECK COMPLETE ━━━");
+    return;
+  }
 
   // ── Step 2: Batch-reset — clear van + restore to in-house ───────────────────
+  log("Step 2/6 — resetting van assignments (clearing vanId, plate, driver)…");
   await db
     .update(bookings)
     .set({
@@ -55,23 +79,23 @@ export async function recheckAllVans(): Promise<void> {
       inHouseOrOutsourced: "I",
     })
     .where(inArray(bookings.id, toResetIds));
+  log(`  cleared ${toResetIds.length} booking(s)`);
 
   // ── Step 3: Reassign all cleared bookings ────────────────────────────────────
-  // runReassign() with no args picks up all vanId=null, manualChange=0 rows.
-  await runReassign();
+  log("Step 3/6 — running van reassignment (priority: day_trip > one_way_ride > round_trip > trip)…");
+  const { assigned, conflicts } = await runReassign(undefined, log);
+  log(`  reassignment done — assigned=${assigned} conflicts=${conflicts}`);
 
   // ── Step 4: Enforce same-invoice-same-van ────────────────────────────────────
-  // After the main pass, consolidate any invoice whose bookings ended up split
-  // across multiple vans (e.g. because the preferred van was blocked mid-pass).
-  await enforceInvoiceVanConsistency();
+  log("Step 4/6 — enforcing same invoice = same van per (invoiceNo, vehicleIndex)…");
+  await enforceInvoiceVanConsistency(log);
 
   // ── Step 5: HARD GUARANTEE — eliminate every double-booking ─────────────────
-  // No matter what the earlier passes did, this final sweep finds every
-  // (van, date) pair with 2+ bookings and displaces the lower-priority one.
-  await eliminateDoubleBookings();
+  log("Step 5/6 — scanning for double-bookings (same van, same date)…");
+  await eliminateDoubleBookings(log);
 
   // ── Step 6: Any still-unassigned → mark as outsourced ───────────────────────
-  // Catches bookings displaced in step 5 that could not find a free van.
+  log("Step 6/6 — marking any still-unassigned bookings as outsourced…");
   const stillUnassigned = await db
     .select({ id: bookings.id })
     .from(bookings)
@@ -88,26 +112,19 @@ export async function recheckAllVans(): Promise<void> {
       .update(bookings)
       .set({ inHouseOrOutsourced: "O" })
       .where(inArray(bookings.id, stillUnassigned.map((b) => b.id)));
+    log(`  marked ${stillUnassigned.length} booking(s) as outsourced (no van available)`);
+  } else {
+    log("  all bookings have a van assigned ✓");
   }
+
+  log("━━━ RECHECK COMPLETE ━━━");
 }
 
 /**
  * Sweep all auto-managed bookings and ensure that every (invoiceNo, vehicleIndex)
  * group uses the SAME van across all its travel dates.
- *
- * Strategy per mismatched booking:
- *   1. If canonical van is free on that date → directly reassign.
- *   2. If canonical van is blocked by a single-booking auto-managed invoice →
- *      swap: blocker takes the mismatched booking's current van, mismatched
- *      booking moves to canonical van.  No van is lost — just shuffled.
- *   3. If blocker is manual or belongs to another multi-booking invoice →
- *      skip (can't safely displace it).
- *
- * Grouping by (invoiceNo, vehicleIndex) ensures multi-vehicle same-day invoices
- * (e.g. 2 vans needed) correctly get different vans per vehicleIndex slot while
- * each slot stays on the same van across multiple dates.
  */
-async function enforceInvoiceVanConsistency(): Promise<void> {
+async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise<void> {
   // Snapshot: all auto-managed bookings that already have a van
   const assigned = await db
     .select({
@@ -133,11 +150,16 @@ async function enforceInvoiceVanConsistency(): Promise<void> {
     bySlot.get(key)!.push(b);
   }
 
+  let inconsistent = 0;
+  let fixed = 0;
+
   for (const [slotKey, rows] of bySlot) {
     if (rows.length <= 1) continue;
 
     const vanSet = new Set(rows.map((r) => r.vanId!));
     if (vanSet.size <= 1) continue; // already consistent ✓
+
+    inconsistent++;
 
     // Canonical van = van of the earliest-date booking for this slot
     const sorted = [...rows].sort((a, b) => a.travelDate.localeCompare(b.travelDate));
@@ -145,8 +167,8 @@ async function enforceInvoiceVanConsistency(): Promise<void> {
     const canonicalVan = vanMap.get(canonicalVanId);
     const invoiceNo = rows[0].invoiceNo ?? "";
 
-    console.log(
-      `[enforceInvoice] ${slotKey}: vans [${[...vanSet].join(",")}] → consolidating to van ${canonicalVanId}`
+    log(
+      `[enforceInvoice] ${slotKey}: vans split across [${[...vanSet].join(",")}] → consolidating to van ${canonicalVanId}`
     );
 
     for (const b of rows) {
@@ -180,21 +202,28 @@ async function enforceInvoiceVanConsistency(): Promise<void> {
             driverContact: canonicalVan?.driverContact ?? "",
           })
           .where(eq(bookings.id, b.id));
-        console.log(
+        log(
           `[enforceInvoice] id=${b.id} date=${b.travelDate} → van ${canonicalVanId} (free)`
         );
+        fixed++;
         continue;
       }
 
       // Skip manual or multi-booking-invoice blockers (can't safely displace)
-      if (blocker.manualChange === 1) continue;
+      if (blocker.manualChange === 1) {
+        log(`[enforceInvoice] id=${b.id} date=${b.travelDate} — blocked by manual booking id=${blocker.id}, skipping`);
+        continue;
+      }
 
       const [, blockerExtra] = await db
         .select({ id: bookings.id })
         .from(bookings)
         .where(eq(bookings.invoiceNo, blocker.invoiceNo ?? ""))
         .limit(2);
-      if (blockerExtra) continue; // blocker invoice has >1 booking — leave it
+      if (blockerExtra) {
+        log(`[enforceInvoice] id=${b.id} date=${b.travelDate} — blocker id=${blocker.id} is multi-booking invoice, skipping`);
+        continue; // blocker invoice has >1 booking — leave it
+      }
 
       // Guard: b's current van must only have b on this date — otherwise
       // sending the blocker there would create a double-booking.
@@ -209,7 +238,10 @@ async function enforceInvoiceVanConsistency(): Promise<void> {
           )
         )
         .limit(1);
-      if (otherOnBVan) continue; // can't safely swap — b's van is shared
+      if (otherOnBVan) {
+        log(`[enforceInvoice] id=${b.id} date=${b.travelDate} — can't swap, current van is shared`);
+        continue; // can't safely swap — b's van is shared
+      }
 
       // Safe to swap: blocker takes b's current van, b takes canonical van
       const bVan = vanMap.get(b.vanId!);
@@ -233,26 +265,25 @@ async function enforceInvoiceVanConsistency(): Promise<void> {
         })
         .where(eq(bookings.id, b.id));
 
-      console.log(
+      log(
         `[enforceInvoice] ${slotKey} date=${b.travelDate}: swapped blocker id=${blocker.id} → van ${b.vanId}, booking id=${b.id} → van ${canonicalVanId}`
       );
+      fixed++;
     }
+  }
+
+  if (inconsistent === 0) {
+    log("  all invoice slots consistent ✓");
+  } else {
+    log(`  checked ${inconsistent} inconsistent slot(s), fixed ${fixed} booking(s)`);
   }
 }
 
 /**
  * HARD GUARANTEE: scan every (vanId, travelDate) pair in the DB and fix any
- * that have more than one booking assigned.  This runs last, after all other
- * passes, so it catches any double-booking that slipped through earlier logic.
- *
- * For each conflicting group:
- *   • Sort by priority: manual > day_trip > one_way_ride > round_trip > trip,
- *     then by booking id ascending (older booking wins ties).
- *   • The highest-priority booking keeps the van.
- *   • Every other booking is displaced: moved to any other free van on that
- *     date, or outsourced (vanId=null, inHouseOrOutsourced='O') if none exists.
+ * that have more than one booking assigned.
  */
-async function eliminateDoubleBookings(): Promise<void> {
+async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void> {
   function slotPriority(tripType: string | null | undefined, manualChange: number): number {
     if (manualChange === 1) return -1; // manual always wins
     switch (tripType) {
@@ -293,7 +324,7 @@ async function eliminateDoubleBookings(): Promise<void> {
     if (entries.length <= 1) continue;
 
     const [vanIdStr, date] = key.split("::");
-    console.error(
+    log(
       `[eliminateDoubleBookings] CONFLICT van=${vanIdStr} date=${date} ids=[${entries.map((e) => e.id).join(",")}]`
     );
 
@@ -337,7 +368,7 @@ async function eliminateDoubleBookings(): Promise<void> {
             driverContact: freeVan.driverContact ?? "",
           })
           .where(eq(bookings.id, victim.id));
-        console.log(
+        log(
           `[eliminateDoubleBookings] displaced id=${victim.id} date=${date} → van ${freeVan.id} (${freeVan.vanNumber})`
         );
       } else {
@@ -352,7 +383,7 @@ async function eliminateDoubleBookings(): Promise<void> {
             inHouseOrOutsourced: "O",
           })
           .where(eq(bookings.id, victim.id));
-        console.log(
+        log(
           `[eliminateDoubleBookings] outsourced id=${victim.id} date=${date} (no free van)`
         );
       }
@@ -362,8 +393,8 @@ async function eliminateDoubleBookings(): Promise<void> {
   }
 
   if (fixed > 0) {
-    console.error(`[eliminateDoubleBookings] resolved ${fixed} double-booking violation(s)`);
+    log(`[eliminateDoubleBookings] resolved ${fixed} double-booking violation(s)`);
   } else {
-    console.log(`[eliminateDoubleBookings] ✓ no double bookings`);
+    log("  no double-bookings found ✓");
   }
 }

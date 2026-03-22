@@ -36,8 +36,10 @@ const BUMP_TYPES = ["trip", "round_trip", "one_way_ride"] as const;
  * Rows with manualChange = 1 are never touched (neither bumped nor reassigned).
  */
 export async function runReassign(
-  bookingIds?: number[]
+  bookingIds?: number[],
+  logger?: (msg: string) => void,
 ): Promise<{ assigned: number; conflicts: number }> {
+  const log = (msg: string) => { console.log(msg); logger?.(msg); };
   const allVans = await db.select().from(vans);
   const vanMap = new Map(allVans.map((v) => [v.id, v]));
 
@@ -96,7 +98,7 @@ export async function runReassign(
         })
         .where(eq(bookings.id, b.id));
 
-      console.log(
+      log(
         `[runReassign] OK      id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → van ${vanId} (${van?.vanNumber ?? "?"})`
       );
       assigned++;
@@ -140,7 +142,7 @@ export async function runReassign(
             })
             .where(eq(bookings.id, b.id));
 
-          console.log(
+          log(
             `[runReassign] BUMP    day_trip id=${b.id} date=${b.travelDate} displaced ${bumpType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`
           );
 
@@ -158,7 +160,7 @@ export async function runReassign(
           .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
           .where(eq(bookings.id, b.id));
 
-        console.log(
+        log(
           `[runReassign] CONFLICT day_trip id=${b.id} date=${b.travelDate} → no bumpable booking found`
         );
         conflicts++;
@@ -170,7 +172,7 @@ export async function runReassign(
         .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
         .where(eq(bookings.id, b.id));
 
-      console.log(
+      log(
         `[runReassign] CONFLICT id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → no free van`
       );
       conflicts++;
@@ -179,7 +181,7 @@ export async function runReassign(
 
   // ── Second pass: retry bumped bookings (no bumping rights) ──────────────────
   if (bumpedIds.length > 0) {
-    console.log(
+    log(
       `[runReassign] second pass: retrying ${bumpedIds.length} bumped booking(s)`
     );
 
@@ -215,12 +217,12 @@ export async function runReassign(
           })
           .where(eq(bookings.id, b.id));
 
-        console.log(
+        log(
           `[runReassign] RETRY-OK id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} → van ${vanId} (${van?.vanNumber ?? "?"})`
         );
         assigned++;
       } else {
-        console.log(
+        log(
           `[runReassign] RETRY-CONFLICT id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} → no free van (outsourced)`
         );
         conflicts++;
@@ -228,5 +230,6 @@ export async function runReassign(
     }
   }
 
+  log(`[runReassign] done — assigned=${assigned} conflicts=${conflicts}`);
   return { assigned, conflicts };
 }
