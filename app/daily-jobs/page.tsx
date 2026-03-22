@@ -360,8 +360,26 @@ export default function DailyJobsPage() {
   const unpaidCount = rows.filter((r) => r.paidStatus !== "P").length;
 
 
-  // Conflict rows: vanId is null (unassigned due to insufficient vans)
-  const conflictRows = rows.filter((r) => r.vanId === null && r.invoiceNo);
+  // No-van conflicts: vanId is null (unassigned due to insufficient vans)
+  const noVanRows = rows.filter((r) =>
+    r.vanId === null &&
+    r.invoiceNo &&
+    r.inHouseOrOutsourced !== "O" &&
+    r.inHouseOrOutsourced !== "outsourced"
+  );
+
+  // Double-booked conflicts: same van assigned to multiple bookings on this day
+  const doubleBookedRows = (() => {
+    const groups = new Map<number, BookingRow[]>();
+    for (const r of rows) {
+      if (r.vanId == null) continue;
+      if (r.inHouseOrOutsourced === "O" || r.inHouseOrOutsourced === "outsourced") continue;
+      if (!groups.has(r.vanId)) groups.set(r.vanId, []);
+      groups.get(r.vanId)!.push(r);
+    }
+    return [...groups.values()].filter((g) => g.length > 1).flat();
+  })();
+
 
   // ── Editable cell components ───────────────────────────────────────────────
   function EditableText({ id, field, value, placeholder }: {
@@ -852,14 +870,19 @@ export default function DailyJobsPage() {
         )}
 
         {/* Conflict banner */}
-        {!loading && conflictRows.length > 0 && (
+        {!loading && (noVanRows.length > 0 || doubleBookedRows.length > 0) && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 space-y-1">
             <div className="font-bold text-red-800 text-sm">
-              ⚠️ CONFLICT — Insufficient vans for:
+              ⚠️ CONFLICT — {noVanRows.length + doubleBookedRows.length} issue{noVanRows.length + doubleBookedRows.length !== 1 ? "s" : ""} found
             </div>
-            {conflictRows.map((r) => (
+            {noVanRows.map((r) => (
               <div key={r.id} className="text-xs text-red-700 pl-4">
-                • {r.travelDate} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>REQUIRES OUTSOURCED COMPANY</strong>
+                • {r.travelDate} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>NO VAN ASSIGNED — REQUIRES OUTSOURCED COMPANY</strong>
+              </div>
+            ))}
+            {doubleBookedRows.map((r) => (
+              <div key={`db-${r.id}`} className="text-xs text-red-700 pl-4">
+                • {r.travelDate} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>DOUBLE-BOOKED — {r.vehiclePlate ?? `Van #${r.vanId}`}</strong>
               </div>
             ))}
           </div>

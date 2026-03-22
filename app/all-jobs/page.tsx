@@ -211,11 +211,30 @@ export default function AllJobsPage() {
   }
 
 
-  // Conflict rows: vanId=null with an invoice (means conflict, not just manual blanks)
-  const conflictRows = useMemo(
-    () => rows.filter((r) => r.vanId === null && r.invoiceNo),
+  // No-van conflicts: vanId=null with an invoice (means conflict, not just manual blanks)
+  const noVanRows = useMemo(
+    () => rows.filter((r) =>
+      r.vanId === null &&
+      r.invoiceNo &&
+      r.inHouseOrOutsourced !== "O" &&
+      r.inHouseOrOutsourced !== "outsourced"
+    ),
     [rows]
   );
+
+  // Double-booked conflicts: same van assigned to multiple bookings on the same date
+  const doubleBookedRows = useMemo(() => {
+    const groups = new Map<string, BookingRow[]>();
+    for (const r of rows) {
+      if (r.vanId == null) continue;
+      if (r.inHouseOrOutsourced === "O" || r.inHouseOrOutsourced === "outsourced") continue;
+      const key = `${r.vanId}-${r.travelDate}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
+    }
+    return [...groups.values()].filter((g) => g.length > 1).flat();
+  }, [rows]);
+
 
   // ── Patch / edit ──────────────────────────────────────────────────────────
   async function patchRow(id: number, field: string, value: unknown) {
@@ -822,14 +841,19 @@ export default function AllJobsPage() {
         )}
 
         {/* Conflict banner */}
-        {!loading && conflictRows.length > 0 && (
+        {!loading && (noVanRows.length > 0 || doubleBookedRows.length > 0) && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 space-y-1">
             <div className="font-bold text-red-800 text-sm">
-              ⚠️ CONFLICT — Insufficient vans for:
+              ⚠️ CONFLICT — {noVanRows.length + doubleBookedRows.length} issue{noVanRows.length + doubleBookedRows.length !== 1 ? "s" : ""} found
             </div>
-            {conflictRows.map((r) => (
+            {noVanRows.map((r) => (
               <div key={r.id} className="text-xs text-red-700 pl-4">
-                • {formatDate(r)} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>REQUIRES OUTSOURCED COMPANY</strong>
+                • {formatDate(r)} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>NO VAN ASSIGNED — REQUIRES OUTSOURCED COMPANY</strong>
+              </div>
+            ))}
+            {doubleBookedRows.map((r) => (
+              <div key={`db-${r.id}`} className="text-xs text-red-700 pl-4">
+                • {formatDate(r)} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>DOUBLE-BOOKED — {r.vehiclePlate ?? `Van #${r.vanId}`}</strong>
               </div>
             ))}
           </div>
