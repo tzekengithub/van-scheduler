@@ -1,4 +1,4 @@
-export type TripType = "one_way_ride" | "round_trip" | "day_trip" | "trip" | "one_way";
+export type TripType = "one_way_ride" | "round_trip" | "day_trip" | "trip";
 
 export interface ParsedBooking {
   // existing fields (for van-assignment compatibility)
@@ -115,7 +115,7 @@ function detectTripType(
     lower.includes("one-way") || lower.includes("one way") ||
     annotLower.includes("one-way") || annotLower.includes("one way")
   ) {
-    return "one_way";
+    return "one_way_ride";
   }
   return "trip";
 }
