@@ -170,6 +170,17 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
     const dates = rows.map((r) => r.travelDate);
     const bookingIds = rows.map((r) => r.id);
 
+    // Detect same-day duplicates within this group: two bookings on the same date
+    // means the invoice genuinely needs 2 vans that day (multi-vehicle same-day).
+    // We cannot put them on the same van, so skip consolidation for this group.
+    const dateSet = new Set(dates);
+    if (dateSet.size < dates.length) {
+      log(
+        `[enforceInvoice] ${slotKey}: SKIP — group has ${dates.length - dateSet.size} same-day duplicate(s) (multi-vehicle same-day booking, cannot consolidate)`
+      );
+      continue;
+    }
+
     log(
       `[enforceInvoice] ${slotKey}: ${rows.length} bookings split across vans [${[...vanSet].join(",")}] on dates [${dates.join(",")}]`
     );
