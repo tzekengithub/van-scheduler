@@ -85,6 +85,12 @@ export default function VanSchedulePage() {
   const [actionLoading, setActionLoading] = useState<Record<number, boolean>>({});
   const [actionDone, setActionDone] = useState<Record<number, boolean>>({});
 
+  // Drag-and-drop state
+  const [dragBookingId, setDragBookingId] = useState<number | null>(null);
+  const [dragSourcePlate, setDragSourcePlate] = useState<string | null>(null);
+  const [dragSourceDay, setDragSourceDay] = useState<number | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<{ plate: string; day: number } | null>(null);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -292,6 +298,55 @@ export default function VanSchedulePage() {
     }
   }
 
+  // ── Drag-and-drop handler ─────────────────────────────────────────────────
+  async function handleDrop(targetPlate: string, targetDay: number) {
+    if (!dragBookingId || !targetPlate) return; // reject drop on UNASSIGNED row
+    const booking = bookings.find((b) => b.id === dragBookingId);
+    if (!booking) return;
+
+    const isSameVan = dragSourcePlate === targetPlate;
+    const isSameDay = dragSourceDay === targetDay;
+    if (isSameVan && isSameDay) return;
+
+    const updates: Record<string, unknown> = { manualChange: 1 };
+
+    if (!isSameVan) {
+      const targetVan = vans.find((v) => v.vanNumber === targetPlate);
+      if (!targetVan) return; // only registered vans are valid drop targets
+      updates.vanId = targetVan.id;
+      updates.vehiclePlate = targetVan.vanNumber;
+      updates.driverName = targetVan.driverName;
+      updates.driverContact = targetVan.driverContact;
+      updates.inHouseOrOutsourced = "I";
+    }
+
+    if (!isSameDay) {
+      const monthPadded = String(viewMonth + 1).padStart(2, "0");
+      const dayPadded = String(targetDay).padStart(2, "0");
+      updates.travelDate = `${viewYear}-${monthPadded}-${dayPadded}`;
+      updates.day = String(targetDay);
+      updates.month = MONTH_NAMES[viewMonth];
+      updates.year = String(viewYear);
+    }
+
+    // Clear drag state before the request so UI snaps back immediately
+    setDragBookingId(null);
+    setDragSourcePlate(null);
+    setDragSourceDay(null);
+    setDragOverCell(null);
+
+    const res = await fetch(`/api/bookings/${booking.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error ?? "Move failed");
+    }
+    await fetchData();
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50 font-sans">
       {/* Popup overlay */}
@@ -473,24 +528,47 @@ export default function VanSchedulePage() {
                           const isToday = isCurrentMonth && d === today.getDate();
                           const bks = dayMap.get(d);
                           if (!bks || bks.length === 0) {
+                            const isDropTarget = !isOutsourced && dragOverCell?.plate === plate && dragOverCell?.day === d;
                             return (
                               <td
                                 key={d}
-                                className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top ${isToday ? "bg-blue-50/20" : ""} ${isOutsourced ? "bg-purple-50/20" : ""}`}
+                                onDragOver={(e) => { if (!dragBookingId || isOutsourced) return; e.preventDefault(); setDragOverCell({ plate, day: d }); }}
+                                onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverCell(null); }}
+                                onDrop={(e) => { e.preventDefault(); handleDrop(plate, d); setDragOverCell(null); }}
+                                className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top transition-colors ${isToday ? "bg-blue-50/20" : ""} ${isOutsourced ? "bg-purple-50/20" : ""} ${isDropTarget ? "ring-2 ring-inset ring-blue-400 bg-blue-100/60" : ""}`}
                               />
                             );
                           }
                           const color = cellBg(bks, false);
+                          const isDropTarget = !isOutsourced && dragOverCell?.plate === plate && dragOverCell?.day === d;
                           return (
                             <td
                               key={d}
-                              className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top ${isToday ? "bg-blue-50/20" : ""}`}
+                              onDragOver={(e) => { if (!dragBookingId || isOutsourced) return; e.preventDefault(); setDragOverCell({ plate, day: d }); }}
+                              onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragOverCell(null); }}
+                              onDrop={(e) => { e.preventDefault(); handleDrop(plate, d); setDragOverCell(null); }}
+                              className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top transition-colors ${isToday ? "bg-blue-50/20" : ""} ${isDropTarget ? "ring-2 ring-inset ring-blue-400 bg-blue-100/40" : ""}`}
                             >
                               {bks.map((b, bi) => (
                                 <div
                                   key={b.id}
-                                  className={`rounded border px-1.5 py-1 cursor-pointer hover:opacity-80 transition-opacity ${bi > 0 ? "mt-0.5" : ""} ${color}`}
-                                  onClick={() => setPopup({ bookings: [b], vanLabel: plate, dayNum: d })}
+                                  draggable={!isOutsourced}
+                                  onDragStart={(e) => {
+                                    if (isOutsourced) return;
+                                    setDragBookingId(b.id);
+                                    setDragSourcePlate(plate);
+                                    setDragSourceDay(d);
+                                    e.dataTransfer.effectAllowed = "move";
+                                    e.stopPropagation();
+                                  }}
+                                  onDragEnd={() => {
+                                    setDragBookingId(null);
+                                    setDragSourcePlate(null);
+                                    setDragSourceDay(null);
+                                    setDragOverCell(null);
+                                  }}
+                                  className={`rounded border px-1.5 py-1 transition-opacity ${isOutsourced ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} hover:opacity-80 ${bi > 0 ? "mt-0.5" : ""} ${color} ${dragBookingId === b.id ? "opacity-40 scale-95" : ""}`}
+                                  onClick={() => { if (!dragBookingId) setPopup({ bookings: [b], vanLabel: plate, dayNum: d }); }}
                                 >
                                   <div className="font-semibold truncate max-w-[84px] leading-tight">
                                     {clientFirstLine(b) || "—"}
@@ -554,8 +632,22 @@ export default function VanSchedulePage() {
                             {bks.map((b) => (
                               <div
                                 key={b.id}
-                                className="rounded border px-1.5 py-1 mb-0.5 cursor-pointer hover:opacity-80 transition-opacity bg-red-100 border-red-300 text-red-900"
-                                onClick={() => setPopup({ bookings: [b], vanLabel: "No Van", dayNum: d })}
+                                draggable
+                                onDragStart={(e) => {
+                                  setDragBookingId(b.id);
+                                  setDragSourcePlate("");
+                                  setDragSourceDay(d);
+                                  e.dataTransfer.effectAllowed = "move";
+                                  e.stopPropagation();
+                                }}
+                                onDragEnd={() => {
+                                  setDragBookingId(null);
+                                  setDragSourcePlate(null);
+                                  setDragSourceDay(null);
+                                  setDragOverCell(null);
+                                }}
+                                className={`rounded border px-1.5 py-1 mb-0.5 cursor-grab active:cursor-grabbing hover:opacity-80 transition-opacity bg-red-100 border-red-300 text-red-900 ${dragBookingId === b.id ? "opacity-40" : ""}`}
+                                onClick={() => { if (!dragBookingId) setPopup({ bookings: [b], vanLabel: "No Van", dayNum: d }); }}
                               >
                                 <div className="font-semibold truncate max-w-[84px] leading-tight">
                                   {clientFirstLine(b) || "—"}

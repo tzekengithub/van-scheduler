@@ -24,6 +24,7 @@ export async function PATCH(
       "amount", "clientDetails", "invoiceNo", "details", "passengerCount",
       "myrPerVehicle", "vanId", "manualChange",
       "tripType", "tourGuide", "vehicleIndex", "numberOfVehicles",
+      "travelDate", "month", "year",
     ] as const;
 
     const updates: Record<string, unknown> = {};
@@ -60,13 +61,18 @@ export async function PATCH(
         .limit(1);
 
       if (current) {
+        // If travelDate is also being updated in this request, check against the new date
+        const checkDate = ("travelDate" in updates && typeof updates.travelDate === "string")
+          ? updates.travelDate
+          : current.travelDate;
+
         const conflict = await db
           .select({ id: bookings.id })
           .from(bookings)
           .where(
             and(
               eq(bookings.vanId, newVanId),
-              eq(bookings.travelDate, current.travelDate),
+              eq(bookings.travelDate, checkDate),
               ne(bookings.id, id),
             )
           )
@@ -80,7 +86,7 @@ export async function PATCH(
             .limit(1);
           const plate = van?.vanNumber ?? `#${newVanId}`;
           return NextResponse.json(
-            { error: `Van ${plate} is already booked on ${current.travelDate}. Please choose another van.` },
+            { error: `Van ${plate} is already booked on ${checkDate}. Please choose another van.` },
             { status: 409 }
           );
         }
