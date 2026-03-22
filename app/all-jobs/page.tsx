@@ -468,8 +468,8 @@ export default function AllJobsPage() {
   }
 
   // ── Trip-type table ───────────────────────────────────────────────────────
-  const thSort = "px-2 py-2 text-left font-semibold text-zinc-700 whitespace-nowrap cursor-pointer select-none hover:bg-zinc-100 text-xs";
-  const thPlain = "px-2 py-2 text-left font-semibold text-zinc-700 whitespace-nowrap text-xs";
+  const thSort = "px-3 py-2.5 text-left font-semibold text-zinc-700 whitespace-nowrap cursor-pointer select-none hover:bg-zinc-100 text-xs";
+  const thPlain = "px-3 py-2.5 text-left font-semibold text-zinc-700 whitespace-nowrap text-xs";
 
   function TripTable({ groupRows }: { groupRows: BookingRow[] }) {
     if (groupRows.length === 0) return null;
@@ -508,56 +508,56 @@ export default function AllJobsPage() {
             {groupRows.map((row) => (
               <tr key={row.id} className="border-b border-zinc-100 hover:bg-zinc-50">
                 {/* Date */}
-                <td className="px-2 py-1.5 whitespace-nowrap text-zinc-600 text-xs">
+                <td className="px-3 py-2 whitespace-nowrap text-zinc-600 text-xs min-w-[100px]">
                   {formatDate(row)}
                 </td>
                 {/* Invoice # */}
-                <td className="px-2 py-1.5 font-mono whitespace-nowrap text-zinc-700">
+                <td className="px-3 py-2 font-mono whitespace-nowrap text-zinc-700 min-w-[110px]">
                   {row.invoiceNo || <span className="text-zinc-300">—</span>}
                   {(row.numberOfVehicles ?? 1) > 1 && (
                     <span className="ml-1 text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
                   )}
                 </td>
                 {/* Client Name */}
-                <td className="px-2 py-1.5 min-w-[110px]">
+                <td className="px-3 py-2 min-w-[140px]">
                   <EditableText id={row.id} field="clientDetails" value={clientName(row)} placeholder="Client name" />
                 </td>
                 {/* Client Phone */}
-                <td className="px-2 py-1.5 min-w-[100px] text-zinc-600">
+                <td className="px-3 py-2 min-w-[130px] text-zinc-600 whitespace-nowrap">
                   {clientPhone(row) || <span className="text-zinc-300">—</span>}
                 </td>
                 {/* Location */}
-                <td className="px-2 py-1.5 min-w-[160px] whitespace-nowrap text-zinc-800">
+                <td className="px-3 py-2 min-w-[200px] whitespace-nowrap text-zinc-800">
                   {row.toLocation
                     ? `${row.fromLocation} → ${row.toLocation}`
                     : row.fromLocation || "—"}
                 </td>
                 {/* Trip Type badge */}
-                <td className="px-2 py-1.5 whitespace-nowrap">
+                <td className="px-3 py-2 whitespace-nowrap min-w-[110px]">
                   {tripTypeBadge(row.tripType)}
                 </td>
                 {/* Description */}
-                <td className="px-2 py-1.5 whitespace-nowrap text-zinc-600 text-[10px]">
+                <td className="px-3 py-2 whitespace-nowrap text-zinc-600 text-xs min-w-[90px]">
                   {tripTypeLabel(row.tripType)}
                 </td>
                 {/* Van Plate */}
-                <td className="px-2 py-1.5 min-w-[80px]">
+                <td className="px-3 py-2 min-w-[110px]">
                   <EditableText id={row.id} field="vehiclePlate" value={row.vehiclePlate} placeholder="—" />
                 </td>
                 {/* Driver Name */}
-                <td className="px-2 py-1.5 min-w-[90px]">
+                <td className="px-3 py-2 min-w-[140px]">
                   <EditableText id={row.id} field="driverName" value={row.driverName} placeholder="—" />
                 </td>
                 {/* Driver Contact */}
-                <td className="px-2 py-1.5 min-w-[90px]">
+                <td className="px-3 py-2 min-w-[130px]">
                   <EditableText id={row.id} field="driverContact" value={row.driverContact} placeholder="—" />
                 </td>
                 {/* Tour Guide */}
-                <td className="px-2 py-1.5 min-w-[90px]">
+                <td className="px-3 py-2 min-w-[120px]">
                   <EditableText id={row.id} field="tourGuide" value={row.tourGuide} placeholder="—" />
                 </td>
                 {/* Pax */}
-                <td className="px-2 py-1.5 w-12">
+                <td className="px-3 py-2 min-w-[72px]">
                   <input
                     type="number"
                     min="0"
@@ -572,11 +572,11 @@ export default function AllJobsPage() {
                   />
                 </td>
                 {/* Overtime */}
-                <td className="px-2 py-1.5 w-20">
+                <td className="px-3 py-2 min-w-[96px]">
                   <EditableSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} />
                 </td>
                 {/* I/O */}
-                <td className="px-2 py-1.5 w-12">
+                <td className="px-3 py-2 min-w-[80px]">
                   <select
                     className={`text-xs border rounded px-1 py-0.5 w-full bg-white text-zinc-900 ${
                       cellStates[`${row.id}-inHouseOrOutsourced`] === "saving" ? "border-zinc-300 animate-pulse" :
@@ -605,7 +605,7 @@ export default function AllJobsPage() {
                   </select>
                 </td>
                 {/* Outsourced Company */}
-                <td className="px-2 py-1.5 min-w-[100px]">
+                <td className="px-3 py-2 min-w-[150px]">
                   {(row.inHouseOrOutsourced === "O" || row.inHouseOrOutsourced === "outsourced") ? (
                     <input
                       className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
@@ -622,15 +622,15 @@ export default function AllJobsPage() {
                   )}
                 </td>
                 {/* Amount */}
-                <td className="px-2 py-1.5 min-w-[80px]">
+                <td className="px-3 py-2 min-w-[110px]">
                   <EditableText id={row.id} field="amount" value={row.amount} />
                 </td>
                 {/* Paid Status */}
-                <td className="px-2 py-1.5 w-14">
+                <td className="px-3 py-2 min-w-[68px]">
                   <EditableSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["U", "P"]} />
                 </td>
                 {/* Delete */}
-                <td className="px-2 py-1.5 no-print">
+                <td className="px-3 py-2 no-print">
                   <button
                     onClick={() => handleDelete(row.id)}
                     className="text-red-400 hover:text-red-600 font-bold text-base leading-none px-1"
