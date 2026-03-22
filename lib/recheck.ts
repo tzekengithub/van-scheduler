@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, isNull, isNotNull, inArray, ne } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray, ne, asc } from "drizzle-orm";
 import { runReassign } from "@/lib/reassign";
 
 /**
@@ -65,8 +65,13 @@ export async function recheckAllVans(): Promise<void> {
   // across multiple vans (e.g. because the preferred van was blocked mid-pass).
   await enforceInvoiceVanConsistency();
 
-  // ── Step 5: Any still-unassigned → mark as outsourced ───────────────────────
-  // This creates the "OUTSOURCE COMPANY NEEDED" conflict in the UI.
+  // ── Step 5: HARD GUARANTEE — eliminate every double-booking ─────────────────
+  // No matter what the earlier passes did, this final sweep finds every
+  // (van, date) pair with 2+ bookings and displaces the lower-priority one.
+  await eliminateDoubleBookings();
+
+  // ── Step 6: Any still-unassigned → mark as outsourced ───────────────────────
+  // Catches bookings displaced in step 5 that could not find a free van.
   const stillUnassigned = await db
     .select({ id: bookings.id })
     .from(bookings)
@@ -232,5 +237,133 @@ async function enforceInvoiceVanConsistency(): Promise<void> {
         `[enforceInvoice] ${slotKey} date=${b.travelDate}: swapped blocker id=${blocker.id} → van ${b.vanId}, booking id=${b.id} → van ${canonicalVanId}`
       );
     }
+  }
+}
+
+/**
+ * HARD GUARANTEE: scan every (vanId, travelDate) pair in the DB and fix any
+ * that have more than one booking assigned.  This runs last, after all other
+ * passes, so it catches any double-booking that slipped through earlier logic.
+ *
+ * For each conflicting group:
+ *   • Sort by priority: manual > day_trip > one_way_ride > round_trip > trip,
+ *     then by booking id ascending (older booking wins ties).
+ *   • The highest-priority booking keeps the van.
+ *   • Every other booking is displaced: moved to any other free van on that
+ *     date, or outsourced (vanId=null, inHouseOrOutsourced='O') if none exists.
+ */
+async function eliminateDoubleBookings(): Promise<void> {
+  function slotPriority(tripType: string | null | undefined, manualChange: number): number {
+    if (manualChange === 1) return -1; // manual always wins
+    switch (tripType) {
+      case "day_trip":     return 0;
+      case "one_way_ride": return 1;
+      case "round_trip":   return 2;
+      default:             return 3;
+    }
+  }
+
+  // Load every booking that has a van assigned
+  const allAssigned = await db
+    .select({
+      id: bookings.id,
+      vanId: bookings.vanId,
+      travelDate: bookings.travelDate,
+      tripType: bookings.tripType,
+      manualChange: bookings.manualChange,
+    })
+    .from(bookings)
+    .where(isNotNull(bookings.vanId))
+    .orderBy(asc(bookings.id));
+
+  // Group by "vanId::travelDate"
+  const byVanDate = new Map<string, typeof allAssigned>();
+  for (const b of allAssigned) {
+    const key = `${b.vanId}::${b.travelDate}`;
+    if (!byVanDate.has(key)) byVanDate.set(key, []);
+    byVanDate.get(key)!.push(b);
+  }
+
+  // Collect all vans once for free-van lookup
+  const allVans = await db.select().from(vans).orderBy(vans.id);
+
+  let fixed = 0;
+
+  for (const [key, entries] of byVanDate) {
+    if (entries.length <= 1) continue;
+
+    const [vanIdStr, date] = key.split("::");
+    console.error(
+      `[eliminateDoubleBookings] CONFLICT van=${vanIdStr} date=${date} ids=[${entries.map((e) => e.id).join(",")}]`
+    );
+
+    // Sort: highest-priority booking first (lowest slotPriority number, then lowest id)
+    const sorted = [...entries].sort((a, b) => {
+      const pa = slotPriority(a.tripType, a.manualChange);
+      const pb = slotPriority(b.tripType, b.manualChange);
+      if (pa !== pb) return pa - pb;
+      return a.id - b.id;
+    });
+
+    // Keep sorted[0] on the van; displace everyone else
+    for (let i = 1; i < sorted.length; i++) {
+      const victim = sorted[i];
+
+      // Find a free van for the victim (any van other than the one it's on)
+      let freeVan: (typeof allVans)[number] | null = null;
+      for (const van of allVans) {
+        if (van.id === victim.vanId) continue;
+        const [conflict] = await db
+          .select({ id: bookings.id })
+          .from(bookings)
+          .where(
+            and(
+              eq(bookings.vanId, van.id),
+              eq(bookings.travelDate, date),
+              ne(bookings.id, victim.id),
+            )
+          )
+          .limit(1);
+        if (!conflict) { freeVan = van; break; }
+      }
+
+      if (freeVan) {
+        await db
+          .update(bookings)
+          .set({
+            vanId: freeVan.id,
+            vehiclePlate: freeVan.vanNumber ?? "",
+            driverName: freeVan.driverName ?? "",
+            driverContact: freeVan.driverContact ?? "",
+          })
+          .where(eq(bookings.id, victim.id));
+        console.log(
+          `[eliminateDoubleBookings] displaced id=${victim.id} date=${date} → van ${freeVan.id} (${freeVan.vanNumber})`
+        );
+      } else {
+        // No free van — outsource it
+        await db
+          .update(bookings)
+          .set({
+            vanId: null,
+            vehiclePlate: null,
+            driverName: null,
+            driverContact: null,
+            inHouseOrOutsourced: "O",
+          })
+          .where(eq(bookings.id, victim.id));
+        console.log(
+          `[eliminateDoubleBookings] outsourced id=${victim.id} date=${date} (no free van)`
+        );
+      }
+
+      fixed++;
+    }
+  }
+
+  if (fixed > 0) {
+    console.error(`[eliminateDoubleBookings] resolved ${fixed} double-booking violation(s)`);
+  } else {
+    console.log(`[eliminateDoubleBookings] ✓ no double bookings`);
   }
 }
