@@ -56,6 +56,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [countdown, setCountdown] = useState(0);
   const [minimised, setMinimised] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [uploadResults, setUploadResults] = useState<{ fileName: string; inserted: number; error?: string }[] | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -115,8 +116,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   async function handleConfirmUpload() {
     if (uploadFiles.length === 0) return;
     setConfirming(true);
+    setUploadResults(null);
     try {
       let totalCount = 0;
+      const results: { fileName: string; inserted: number; error?: string }[] = [];
       for (const file of uploadFiles) {
         const formData = new FormData();
         formData.append("file", file);
@@ -124,18 +127,18 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           const detail = Array.isArray(err.details) && err.details.length > 0
-            ? `\n${err.details.join("\n")}` : "";
-          setUploadError((err.error ?? `Upload failed for ${file.name}`) + detail);
-          return;
+            ? err.details[0] : (err.error ?? `Upload failed`);
+          results.push({ fileName: file.name, inserted: 0, error: detail });
+        } else {
+          const data = await res.json();
+          const inserted = data.inserted ?? 0;
+          results.push({ fileName: file.name, inserted });
+          totalCount += inserted;
         }
-        const data = await res.json();
-        totalCount += data.inserted ?? 0;
       }
-      // Notify any listening page to refresh and optionally navigate
+      // Notify any listening page to refresh
       window.dispatchEvent(new CustomEvent("bookings-uploaded", { detail: { count: totalCount } }));
-      // Close and reset
-      setUploadOpen(false);
-      setUploadFiles([]);
+      setUploadResults(results);
       setPreviewRows(null);
       setUploadError(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -148,6 +151,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setUploadFiles([]);
     setPreviewRows(null);
     setUploadError(null);
+    setUploadResults(null);
     setUploadOpen(false);
     setMinimised(false);
     setFullscreen(false);
@@ -185,7 +189,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setServiceStatus("error");
   };
 
-  const showPanel = uploadOpen || parsing || previewRows !== null || confirming;
+  const showPanel = uploadOpen || parsing || previewRows !== null || confirming || uploadResults !== null;
 
   return (
     <UploadContext.Provider value={{ uploadOpen, setUploadOpen, serviceStatus, parsing, previewRows }}>
@@ -414,6 +418,40 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
             {previewRows && previewRows.length === 0 && !parsing && (
               <div className="mt-3 text-sm text-zinc-500">No bookings found in this PDF. Check the file format.</div>
+            )}
+
+            {/* Upload results screen */}
+            {uploadResults && (
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                  Upload Complete — {uploadResults.reduce((s, r) => s + r.inserted, 0)} row{uploadResults.reduce((s, r) => s + r.inserted, 0) !== 1 ? "s" : ""} inserted
+                </p>
+                <div className="rounded-lg border border-zinc-200 overflow-hidden">
+                  {uploadResults.map((r, i) => (
+                    <div key={i} className={`flex items-center gap-3 px-4 py-2.5 text-sm border-b border-zinc-100 last:border-b-0 ${r.error ? "bg-red-50" : r.inserted === 0 ? "bg-amber-50" : "bg-white"}`}>
+                      <span className="text-base leading-none shrink-0">
+                        {r.error ? "❌" : r.inserted === 0 ? "⚠️" : "✅"}
+                      </span>
+                      <span className="font-mono text-zinc-700 truncate flex-1">{r.fileName}</span>
+                      <span className={`shrink-0 font-medium ${r.error ? "text-red-600" : r.inserted === 0 ? "text-amber-600" : "text-green-700"}`}>
+                        {r.error ? "Failed" : r.inserted === 0 ? "0 rows (skipped)" : `${r.inserted} row${r.inserted !== 1 ? "s" : ""}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {uploadResults.some((r) => r.error) && (
+                  <p className="mt-2 text-xs text-red-600">{uploadResults.find((r) => r.error)?.error}</p>
+                )}
+                {uploadResults.some((r) => r.inserted === 0 && !r.error) && (
+                  <p className="mt-2 text-xs text-amber-600">⚠️ Skipped files had no parseable booking rows (e.g. overtime-only invoices).</p>
+                )}
+                <button
+                  onClick={handleCancelUpload}
+                  className="mt-4 h-9 px-5 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700"
+                >
+                  Done
+                </button>
+              </div>
             )}
           </div>
 
