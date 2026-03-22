@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings } from "@/drizzle/schema";
-import { extractTravelBookings } from "@/lib/pdf-parser";
+import { extractTravelBookings, parseRawText } from "@/lib/pdf-parser";
 import { recheckAllVans } from "@/lib/recheck";
 
 // pdf-parse requires Node.js built-ins (Buffer, fs, path) — not available in Edge runtime
@@ -16,19 +16,65 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
-    // Parse all files, collect all bookings
+    const pythonServiceUrl = process.env.PDF_SERVICE_URL;
+    if (!pythonServiceUrl) {
+      return NextResponse.json({ error: "PDF_SERVICE_URL not configured" }, { status: 500 });
+    }
+
+    // Parse all files, collect all bookings — with per-file diagnostics
     const allParsed: Awaited<ReturnType<typeof extractTravelBookings>> = [];
+    const fileErrors: string[] = [];
+
     for (const entry of files) {
       if (typeof entry === "string") continue;
-      const arrayBuffer = await entry.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      const parsed = await extractTravelBookings(buffer);
-      allParsed.push(...parsed);
+      const fileName = (entry as File).name ?? "unknown";
+      try {
+        const arrayBuffer = await entry.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        console.log(`[upload] ${fileName}: buffer size=${buffer.length}`);
+
+        // Call Python service directly so we can log the raw text
+        const response = await fetch(`${pythonServiceUrl}/parse`, {
+          method: "POST",
+          headers: { "Content-Type": "application/pdf" },
+          body: new Uint8Array(buffer),
+        });
+
+        if (!response.ok) {
+          const errBody = await response.text();
+          const msg = `PDF service returned ${response.status} for ${fileName}: ${errBody.slice(0, 200)}`;
+          console.error(`[upload] ${msg}`);
+          fileErrors.push(msg);
+          continue;
+        }
+
+        const json = await response.json();
+        const text: string = json.text ?? "";
+        console.log(`[upload] ${fileName}: text length=${text.length}, first 200 chars: ${text.slice(0, 200)}`);
+
+        if (!text || text.trim().length < 10) {
+          const msg = `PDF service returned empty text for ${fileName} (length=${text.length})`;
+          console.error(`[upload] ${msg}`);
+          fileErrors.push(msg);
+          continue;
+        }
+
+        const parsed = parseRawText(text);
+        console.log(`[upload] ${fileName}: parsed ${parsed.length} bookings`);
+        allParsed.push(...parsed);
+      } catch (fileErr: any) {
+        const msg = `Error processing ${fileName}: ${fileErr.message}`;
+        console.error(`[upload] ${msg}`);
+        fileErrors.push(msg);
+      }
     }
 
     if (allParsed.length === 0) {
       return NextResponse.json(
-        { error: "No bookings found in the uploaded PDF(s). Check the file format." },
+        {
+          error: "No bookings found in the uploaded PDF(s). Check the file format.",
+          details: fileErrors.length > 0 ? fileErrors : ["parseRawText returned 0 rows — check PDF format"],
+        },
         { status: 422 }
       );
     }

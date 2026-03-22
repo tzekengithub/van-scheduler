@@ -123,7 +123,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         const res = await fetch("/api/upload", { method: "POST", body: formData });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          setUploadError(err.error ?? `Upload failed for ${file.name}`);
+          const detail = Array.isArray(err.details) && err.details.length > 0
+            ? `\n${err.details.join("\n")}` : "";
+          setUploadError((err.error ?? `Upload failed for ${file.name}`) + detail);
           return;
         }
         const data = await res.json();
