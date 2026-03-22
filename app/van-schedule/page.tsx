@@ -51,14 +51,19 @@ interface PopupState {
   dayNum: number;
 }
 
+function isOutsourced(b: BookingRow): boolean {
+  const v = b.inHouseOrOutsourced;
+  return v === "outsourced" || v === "O";
+}
+
 function clientFirstLine(b: BookingRow): string {
   return (b.clientDetails ?? "").split("\n")[0].trim();
 }
 
 function cellBg(bks: BookingRow[], isNoVan: boolean): string {
   if (isNoVan) return "bg-red-100 border-red-300 text-red-900";
-  const isOutsourced = bks[0]?.inHouseOrOutsourced === "outsourced";
-  if (isOutsourced) return "bg-purple-100 border-purple-300 text-purple-900";
+  const outsourced = bks[0] ? isOutsourced(bks[0]) : false;
+  if (outsourced) return "bg-purple-100 border-purple-300 text-purple-900";
   if (bks.length > 1) return "bg-red-100 border-red-300 text-red-900";
   if (!bks[0]?.driverName?.trim()) return "bg-amber-100 border-amber-300 text-amber-900";
   return "bg-blue-100 border-blue-300 text-blue-900";
@@ -131,7 +136,7 @@ export default function VanSchedulePage() {
     const map = new Map<string, Map<number, BookingRow[]>>();
     for (const b of bookings) {
       let plate: string;
-      if (b.inHouseOrOutsourced === "outsourced" && b.outsourcedCompany?.trim()) {
+      if (isOutsourced(b) && b.outsourcedCompany?.trim()) {
         plate = b.outsourcedCompany.trim();
       } else {
         plate = b.vanId == null ? "" : (b.vehiclePlate?.trim() ?? "");
@@ -154,7 +159,7 @@ export default function VanSchedulePage() {
   const outsourcedCompanyNames = useMemo(() => {
     const names = new Set<string>();
     for (const b of bookings) {
-      if (b.inHouseOrOutsourced === "outsourced" && b.outsourcedCompany?.trim()) {
+      if (isOutsourced(b) && b.outsourcedCompany?.trim()) {
         names.add(b.outsourcedCompany.trim());
       }
     }
@@ -212,7 +217,7 @@ export default function VanSchedulePage() {
     // No-van: skip bookings that are already marked outsourced (they have their own row)
     for (const [dayNum, bks] of noVanMap) {
       for (const b of bks) {
-        if (b.inHouseOrOutsourced === "outsourced") continue;
+        if (isOutsourced(b)) continue;
         conflicts.push({
           type: "no-van",
           label: `${MONTH_SHORT[viewMonth]} ${dayNum} — Booking has no van`,
@@ -308,7 +313,7 @@ export default function VanSchedulePage() {
                   <span className="font-medium text-zinc-500 w-16 inline-block">Driver:</span>
                   {b.driverName?.trim() ? b.driverName : <span className="text-amber-600">Not assigned</span>}
                 </div>
-                {b.inHouseOrOutsourced === "outsourced" && (
+                {isOutsourced(b) && (
                   <div>
                     <span className="font-medium text-zinc-500 w-16 inline-block">Company:</span>
                     <span className="text-purple-700 font-semibold">{b.outsourcedCompany || "—"}</span>
@@ -521,7 +526,7 @@ export default function VanSchedulePage() {
 
                   {/* UNASSIGNED row — only truly unassigned (not outsourced) */}
                   {noVanMap.size > 0 && [...noVanMap.values()].some(
-                    (bks) => bks.some((b) => b.inHouseOrOutsourced !== "outsourced")
+                    (bks) => bks.some((b) => !isOutsourced(b))
                   ) && (
                     <tr className="border-b border-zinc-100">
                       <td className="sticky left-0 z-10 bg-red-50 border-r border-zinc-200 px-3 py-2 min-w-[160px]">
@@ -531,7 +536,7 @@ export default function VanSchedulePage() {
                       {days.map((d) => {
                         const isToday = isCurrentMonth && d === today.getDate();
                         const bks = (noVanMap.get(d) ?? []).filter(
-                          (b) => b.inHouseOrOutsourced !== "outsourced"
+                          (b) => !isOutsourced(b)
                         );
                         if (bks.length === 0) {
                           return (
