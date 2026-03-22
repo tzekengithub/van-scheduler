@@ -33,12 +33,16 @@ interface BookingRow {
   toLocation: string;
   tripType: string | null;
   vanId: number | null;
+  inHouseOrOutsourced: string | null;
+  outsourcedCompany: string | null;
 }
 
 interface ConflictItem {
   type: "double-booked" | "no-van" | "no-driver";
   label: string;
   bookings: BookingRow[];
+  dayNum: number;
+  plate: string;
 }
 
 interface PopupState {
@@ -52,20 +56,29 @@ function clientFirstLine(b: BookingRow): string {
 }
 
 function cellBg(bks: BookingRow[], isNoVan: boolean): string {
-  if (isNoVan || bks.length > 1) return "bg-red-100 border-red-300 text-red-900";
-  if (!bks[0].driverName?.trim()) return "bg-amber-100 border-amber-300 text-amber-900";
+  if (isNoVan) return "bg-red-100 border-red-300 text-red-900";
+  const isOutsourced = bks[0]?.inHouseOrOutsourced === "outsourced";
+  if (isOutsourced) return "bg-purple-100 border-purple-300 text-purple-900";
+  if (bks.length > 1) return "bg-red-100 border-red-300 text-red-900";
+  if (!bks[0]?.driverName?.trim()) return "bg-amber-100 border-amber-300 text-amber-900";
   return "bg-blue-100 border-blue-300 text-blue-900";
 }
 
 export default function VanSchedulePage() {
   const today = new Date();
-  const [viewMonth, setViewMonth] = useState(today.getMonth()); // 0–11
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [vans, setVans] = useState<Van[]>([]);
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [popup, setPopup] = useState<PopupState | null>(null);
   const popupRef = useRef<HTMLDivElement>(null);
+
+  // Action table state
+  const [selectedVan, setSelectedVan] = useState<Record<number, string>>({});
+  const [outsourcingInput, setOutsourcingInput] = useState<Record<number, string>>({});
+  const [actionLoading, setActionLoading] = useState<Record<number, boolean>>({});
+  const [actionDone, setActionDone] = useState<Record<number, boolean>>({});
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -77,6 +90,9 @@ export default function VanSchedulePage() {
       ]);
       if (bRes.ok) setBookings(await bRes.json());
       if (vRes.ok) setVans(await vRes.json());
+      setSelectedVan({});
+      setOutsourcingInput({});
+      setActionDone({});
     } finally {
       setLoading(false);
     }
@@ -84,7 +100,6 @@ export default function VanSchedulePage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Close popup on outside click
   useEffect(() => {
     if (!popup) return;
     function handler(e: MouseEvent) {
@@ -109,13 +124,18 @@ export default function VanSchedulePage() {
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const isCurrentMonth = viewMonth === today.getMonth() && viewYear === today.getFullYear();
 
-  // bookingMap: plate (or "" for unassigned/no-van) → dayNum → BookingRow[]
-  // Bookings with vanId=null are always placed in the "" bucket (UNASSIGNED row)
+  // bookingMap: plate → dayNum → BookingRow[]
+  // Outsourced bookings with a company name get their own row keyed by company name.
+  // Everything else with vanId=null goes to "" (UNASSIGNED).
   const bookingMap = useMemo(() => {
     const map = new Map<string, Map<number, BookingRow[]>>();
     for (const b of bookings) {
-      // If vanId is null, treat as unassigned regardless of vehiclePlate
-      const plate = b.vanId == null ? "" : (b.vehiclePlate?.trim() ?? "");
+      let plate: string;
+      if (b.inHouseOrOutsourced === "outsourced" && b.outsourcedCompany?.trim()) {
+        plate = b.outsourcedCompany.trim();
+      } else {
+        plate = b.vanId == null ? "" : (b.vehiclePlate?.trim() ?? "");
+      }
       const dayNum = parseInt(b.day ?? "0", 10);
       if (!dayNum) continue;
       if (!map.has(plate)) map.set(plate, new Map());
@@ -128,63 +148,144 @@ export default function VanSchedulePage() {
 
   const noVanMap = bookingMap.get("") ?? new Map<number, BookingRow[]>();
 
-  // Plates seen in bookings that aren't in the registered vans list
   const knownPlates = useMemo(() => new Set(vans.map((v) => v.vanNumber)), [vans]);
+
+  // Outsource company names derived from bookings
+  const outsourcedCompanyNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const b of bookings) {
+      if (b.inHouseOrOutsourced === "outsourced" && b.outsourcedCompany?.trim()) {
+        names.add(b.outsourcedCompany.trim());
+      }
+    }
+    return names;
+  }, [bookings]);
+
+  // Extra plates = plates in bookingMap that are neither registered vans nor outsource companies
   const extraPlates = useMemo(
-    () => [...bookingMap.keys()].filter((p) => p && !knownPlates.has(p)).sort(),
-    [bookingMap, knownPlates]
+    () => [...bookingMap.keys()].filter(
+      (p) => p && !knownPlates.has(p) && !outsourcedCompanyNames.has(p)
+    ).sort(),
+    [bookingMap, knownPlates, outsourcedCompanyNames]
   );
 
-  // All van rows to render (registered vans + any unregistered plates found in bookings)
+  // Van rows: registered vans, then extra unrecognised plates, then outsource companies
   const vanRows = useMemo(() => [
-    ...vans.map((v) => ({ plate: v.vanNumber, driver: v.driverName ?? "" })),
-    ...extraPlates.map((p) => ({ plate: p, driver: "" })),
-  ], [vans, extraPlates]);
+    ...vans.map((v) => ({ plate: v.vanNumber, label: v.driverName ?? "", isOutsourced: false })),
+    ...extraPlates.map((p) => ({ plate: p, label: "", isOutsourced: false })),
+    ...[...outsourcedCompanyNames].sort().map((name) => ({ plate: name, label: "Outsourced", isOutsourced: true })),
+  ], [vans, extraPlates, outsourcedCompanyNames]);
 
-  // Detect conflicts and warnings
+  // Detect conflicts and warnings — skip outsource company rows
   const { conflicts, warnings } = useMemo(() => {
     const conflicts: ConflictItem[] = [];
     const warnings: ConflictItem[] = [];
 
     for (const [plate, dayMap] of bookingMap) {
       if (!plate) continue;
+      if (outsourcedCompanyNames.has(plate)) continue; // outsource rows never conflict
+
       for (const [dayNum, bks] of dayMap) {
-        // Conflict 1: same van, same day, multiple bookings
         if (bks.length > 1) {
           conflicts.push({
             type: "double-booked",
             label: `${MONTH_SHORT[viewMonth]} ${dayNum} — ${plate} has ${bks.length} bookings`,
             bookings: bks,
+            dayNum,
+            plate,
           });
         }
-        // Conflict 2: plate set but no driver name on booking
         for (const b of bks) {
           if (!b.driverName?.trim()) {
             warnings.push({
               type: "no-driver",
               label: `${MONTH_SHORT[viewMonth]} ${dayNum} — ${plate} has no driver assigned`,
               bookings: [b],
+              dayNum,
+              plate,
             });
           }
         }
       }
     }
 
-    // Conflict 3: no van assigned
+    // No-van: skip bookings that are already marked outsourced (they have their own row)
     for (const [dayNum, bks] of noVanMap) {
       for (const b of bks) {
+        if (b.inHouseOrOutsourced === "outsourced") continue;
         conflicts.push({
           type: "no-van",
           label: `${MONTH_SHORT[viewMonth]} ${dayNum} — Booking has no van`,
           bookings: [b],
+          dayNum,
+          plate: "",
         });
       }
     }
 
     return { conflicts, warnings };
-  }, [bookingMap, noVanMap, viewMonth]);
+  }, [bookingMap, noVanMap, outsourcedCompanyNames, viewMonth]);
 
   const totalIssues = conflicts.length + warnings.length;
+
+  function freeVansOnDay(dayNum: number): Van[] {
+    return vans.filter((v) => {
+      const dayMap = bookingMap.get(v.vanNumber);
+      return !dayMap || !dayMap.has(dayNum);
+    });
+  }
+
+  async function handleAssignVan(bookingId: number) {
+    const vanIdStr = selectedVan[bookingId];
+    if (!vanIdStr) return;
+    const vanId = parseInt(vanIdStr, 10);
+    const van = vans.find((v) => v.id === vanId);
+    if (!van) return;
+
+    setActionLoading((prev) => ({ ...prev, [bookingId]: true }));
+    try {
+      const res = await fetch(`/api/bookings/${bookingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vanId,
+          vehiclePlate: van.vanNumber,
+          driverName: van.driverName,
+          driverContact: van.driverContact,
+          manualChange: 1,
+        }),
+      });
+      if (res.ok) {
+        setActionDone((prev) => ({ ...prev, [bookingId]: true }));
+        await fetchData();
+      }
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [bookingId]: false }));
+    }
+  }
+
+  async function handleOutsource(bookingId: number) {
+    const companyName = outsourcingInput[bookingId]?.trim();
+    if (!companyName) return;
+
+    setActionLoading((prev) => ({ ...prev, [bookingId]: true }));
+    try {
+      const res = await fetch(`/api/bookings/${bookingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inHouseOrOutsourced: "outsourced",
+          outsourcedCompany: companyName,
+        }),
+      });
+      if (res.ok) {
+        setActionDone((prev) => ({ ...prev, [bookingId]: true }));
+        await fetchData();
+      }
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [bookingId]: false }));
+    }
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans">
@@ -204,27 +305,33 @@ export default function VanSchedulePage() {
                 className={`space-y-1 text-xs text-zinc-700 ${i > 0 ? "mt-3 pt-3 border-t border-zinc-100" : ""}`}
               >
                 <div>
-                  <span className="font-medium text-zinc-500 w-14 inline-block">Driver:</span>{" "}
+                  <span className="font-medium text-zinc-500 w-16 inline-block">Driver:</span>
                   {b.driverName?.trim() ? b.driverName : <span className="text-amber-600">Not assigned</span>}
                 </div>
+                {b.inHouseOrOutsourced === "outsourced" && (
+                  <div>
+                    <span className="font-medium text-zinc-500 w-16 inline-block">Company:</span>
+                    <span className="text-purple-700 font-semibold">{b.outsourcedCompany || "—"}</span>
+                  </div>
+                )}
                 <div>
-                  <span className="font-medium text-zinc-500 w-14 inline-block">Client:</span>{" "}
+                  <span className="font-medium text-zinc-500 w-16 inline-block">Client:</span>
                   {clientFirstLine(b) || "—"}
                 </div>
                 <div>
-                  <span className="font-medium text-zinc-500 w-14 inline-block">Route:</span>{" "}
+                  <span className="font-medium text-zinc-500 w-16 inline-block">Route:</span>
                   {b.details || (b.fromLocation && b.toLocation ? `${b.fromLocation} → ${b.toLocation}` : "—")}
                 </div>
                 <div>
-                  <span className="font-medium text-zinc-500 w-14 inline-block">Invoice:</span>{" "}
+                  <span className="font-medium text-zinc-500 w-16 inline-block">Invoice:</span>
                   {b.invoiceNo || "—"}
                 </div>
                 <div>
-                  <span className="font-medium text-zinc-500 w-14 inline-block">Amount:</span>{" "}
+                  <span className="font-medium text-zinc-500 w-16 inline-block">Amount:</span>
                   MYR {Number(b.amount ?? 0).toFixed(2)}
                 </div>
                 <div>
-                  <span className="font-medium text-zinc-500 w-14 inline-block">Status:</span>{" "}
+                  <span className="font-medium text-zinc-500 w-16 inline-block">Status:</span>
                   {b.paidStatus === "P"
                     ? <span className="text-green-600 font-medium">Paid</span>
                     : <span className="text-red-500 font-medium">Unpaid</span>}
@@ -285,12 +392,15 @@ export default function VanSchedulePage() {
               </span>
             )
           )}
-          {/* Legend */}
           {!loading && (
             <div className="flex items-center gap-3 ml-auto text-xs text-zinc-500">
               <span className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded-sm bg-blue-200 border border-blue-300 inline-block" />
                 Normal
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm bg-purple-200 border border-purple-300 inline-block" />
+                Outsourced
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-3 h-3 rounded-sm bg-amber-200 border border-amber-300 inline-block" />
@@ -332,15 +442,26 @@ export default function VanSchedulePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Van rows */}
-                  {vanRows.map(({ plate, driver }) => {
+                  {vanRows.map(({ plate, label, isOutsourced }) => {
                     const dayMap = bookingMap.get(plate) ?? new Map<number, BookingRow[]>();
                     return (
-                      <tr key={plate} className="border-b border-zinc-100">
-                        <td className="sticky left-0 z-10 bg-white border-r border-zinc-200 px-3 py-2 min-w-[160px]">
-                          <div className="font-semibold text-zinc-900 text-xs">{plate}</div>
-                          {driver && (
-                            <div className="text-zinc-400 text-[10px] truncate max-w-[140px]">{driver}</div>
+                      <tr
+                        key={plate}
+                        className={`border-b border-zinc-100 ${isOutsourced ? "bg-purple-50/30" : ""}`}
+                      >
+                        <td className={`sticky left-0 z-10 border-r border-zinc-200 px-3 py-2 min-w-[160px] ${isOutsourced ? "bg-purple-50" : "bg-white"}`}>
+                          {isOutsourced ? (
+                            <>
+                              <div className="font-semibold text-purple-800 text-xs">{plate}</div>
+                              <div className="text-purple-400 text-[10px]">Outsourced company</div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="font-semibold text-zinc-900 text-xs">{plate}</div>
+                              {label && (
+                                <div className="text-zinc-400 text-[10px] truncate max-w-[140px]">{label}</div>
+                              )}
+                            </>
                           )}
                         </td>
                         {days.map((d) => {
@@ -350,7 +471,7 @@ export default function VanSchedulePage() {
                             return (
                               <td
                                 key={d}
-                                className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top ${isToday ? "bg-blue-50/20" : ""}`}
+                                className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top ${isToday ? "bg-blue-50/20" : ""} ${isOutsourced ? "bg-purple-50/20" : ""}`}
                               />
                             );
                           }
@@ -360,29 +481,37 @@ export default function VanSchedulePage() {
                               key={d}
                               className={`border-r border-zinc-100 w-24 px-0.5 py-0.5 align-top ${isToday ? "bg-blue-50/20" : ""}`}
                             >
-                              <div
-                                className={`rounded border px-1.5 py-1 cursor-pointer hover:opacity-80 transition-opacity ${color}`}
-                                onClick={() => setPopup({ bookings: bks, vanLabel: plate, dayNum: d })}
-                              >
-                                <div className="font-semibold truncate max-w-[84px] leading-tight">
-                                  {clientFirstLine(bks[0]) || "—"}
-                                </div>
-                                <div className="truncate max-w-[84px] opacity-75 leading-tight mt-0.5">
-                                  {bks[0].fromLocation && bks[0].toLocation
-                                    ? `${bks[0].fromLocation}→${bks[0].toLocation}`
-                                    : bks[0].details || "—"}
-                                </div>
-                                {bks[0].tripType && (
-                                  <div className="text-[9px] leading-tight mt-0.5 opacity-80">
-                                    {bks[0].tripType === "one_way_ride" ? "🔵 One Way" :
-                                     bks[0].tripType === "round_trip"   ? "🟢 Round Trip" :
-                                     bks[0].tripType === "day_trip"     ? "🟡 Day Trip" : "🟠 Trip"}
+                              {bks.map((b, bi) => (
+                                <div
+                                  key={b.id}
+                                  className={`rounded border px-1.5 py-1 cursor-pointer hover:opacity-80 transition-opacity ${bi > 0 ? "mt-0.5" : ""} ${color}`}
+                                  onClick={() => setPopup({ bookings: [b], vanLabel: plate, dayNum: d })}
+                                >
+                                  <div className="font-semibold truncate max-w-[84px] leading-tight">
+                                    {clientFirstLine(b) || "—"}
                                   </div>
-                                )}
-                                {bks.length > 1 && (
-                                  <div className="text-[10px] font-bold mt-0.5">⚠️ CONFLICT +{bks.length - 1}</div>
-                                )}
-                              </div>
+                                  <div className="truncate max-w-[84px] opacity-75 leading-tight mt-0.5">
+                                    {b.fromLocation && b.toLocation
+                                      ? `${b.fromLocation}→${b.toLocation}`
+                                      : b.details || "—"}
+                                  </div>
+                                  {isOutsourced && (
+                                    <div className="text-[9px] leading-tight mt-0.5 text-purple-600 font-semibold">
+                                      🟣 Outsourced
+                                    </div>
+                                  )}
+                                  {!isOutsourced && b.tripType && (
+                                    <div className="text-[9px] leading-tight mt-0.5 opacity-80">
+                                      {b.tripType === "one_way_ride" ? "🔵 One Way" :
+                                       b.tripType === "round_trip"   ? "🟢 Round Trip" :
+                                       b.tripType === "day_trip"     ? "🟡 Day Trip" : "🟠 Trip"}
+                                    </div>
+                                  )}
+                                  {!isOutsourced && bks.length > 1 && bi === 0 && (
+                                    <div className="text-[10px] font-bold mt-0.5">⚠️ CONFLICT +{bks.length - 1}</div>
+                                  )}
+                                </div>
+                              ))}
                             </td>
                           );
                         })}
@@ -390,8 +519,10 @@ export default function VanSchedulePage() {
                     );
                   })}
 
-                  {/* No Van row — only when there are unassigned bookings */}
-                  {noVanMap.size > 0 && (
+                  {/* UNASSIGNED row — only truly unassigned (not outsourced) */}
+                  {noVanMap.size > 0 && [...noVanMap.values()].some(
+                    (bks) => bks.some((b) => b.inHouseOrOutsourced !== "outsourced")
+                  ) && (
                     <tr className="border-b border-zinc-100">
                       <td className="sticky left-0 z-10 bg-red-50 border-r border-zinc-200 px-3 py-2 min-w-[160px]">
                         <div className="font-semibold text-red-700 text-xs">⚠️ UNASSIGNED</div>
@@ -399,8 +530,10 @@ export default function VanSchedulePage() {
                       </td>
                       {days.map((d) => {
                         const isToday = isCurrentMonth && d === today.getDate();
-                        const bks = noVanMap.get(d);
-                        if (!bks || bks.length === 0) {
+                        const bks = (noVanMap.get(d) ?? []).filter(
+                          (b) => b.inHouseOrOutsourced !== "outsourced"
+                        );
+                        if (bks.length === 0) {
                           return (
                             <td
                               key={d}
@@ -436,7 +569,6 @@ export default function VanSchedulePage() {
                     </tr>
                   )}
 
-                  {/* Empty state */}
                   {vanRows.length === 0 && noVanMap.size === 0 && (
                     <tr>
                       <td
@@ -451,42 +583,271 @@ export default function VanSchedulePage() {
               </table>
             </div>
 
-            {/* Conflicts & warnings panel */}
-            <div className={`rounded-xl border shadow-sm p-4 bg-white ${totalIssues > 0 ? "border-red-200" : "border-green-200"}`}>
-              {totalIssues > 0 ? (
-                <>
-                  <h2 className="text-sm font-semibold text-red-700 mb-3">
-                    ⚠ {totalIssues} Conflict{totalIssues !== 1 ? "s" : ""} Found
-                  </h2>
-                  <div className="space-y-3">
-                    {conflicts.map((c, i) => (
-                      <div key={`c-${i}`} className="text-xs">
-                        <div className="font-semibold text-red-700">🔴 {c.label}</div>
-                        <ul className="mt-1 pl-4 space-y-0.5 text-zinc-600">
-                          {c.bookings.map((b) => (
-                            <li key={b.id}>
-                              • {b.invoiceNo || "No invoice"} — {clientFirstLine(b) || b.details || "No details"}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                    {warnings.map((w, i) => (
-                      <div key={`w-${i}`} className="text-xs">
-                        <div className="font-semibold text-amber-700">🟡 {w.label}</div>
-                        <ul className="mt-1 pl-4 space-y-0.5 text-zinc-600">
-                          {w.bookings.map((b) => (
-                            <li key={b.id}>
-                              • {b.invoiceNo || "No invoice"} — {clientFirstLine(b) || b.details || "No details"}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-green-700 font-medium">✓ All clear — no conflicts this month</p>
+            {/* ── Action Table ── */}
+            <div className={`rounded-xl border shadow-sm bg-white overflow-hidden ${totalIssues > 0 ? "border-red-200" : "border-green-200"}`}>
+              <div className={`px-4 py-3 border-b flex items-center justify-between ${totalIssues > 0 ? "bg-red-50 border-red-200" : "bg-green-50 border-green-200"}`}>
+                <h2 className={`text-sm font-semibold ${totalIssues > 0 ? "text-red-800" : "text-green-700"}`}>
+                  {totalIssues > 0
+                    ? `⚠ ${totalIssues} Conflict${totalIssues !== 1 ? "s" : ""} — Action Required`
+                    : "✓ All clear — no conflicts this month"}
+                </h2>
+                {totalIssues > 0 && (
+                  <span className="text-xs text-zinc-400">
+                    Assign a free van, or outsource to a company (creates a temporary row)
+                  </span>
+                )}
+              </div>
+
+              {totalIssues > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-zinc-50 border-b border-zinc-200 text-zinc-500 uppercase tracking-wide text-[10px]">
+                        <th className="px-4 py-2.5 text-left font-semibold w-28">Type</th>
+                        <th className="px-4 py-2.5 text-left font-semibold w-20">Date</th>
+                        <th className="px-4 py-2.5 text-left font-semibold w-28">Current Van</th>
+                        <th className="px-4 py-2.5 text-left font-semibold w-28">Invoice</th>
+                        <th className="px-4 py-2.5 text-left font-semibold">Client / Route</th>
+                        <th className="px-4 py-2.5 text-left font-semibold min-w-[340px]">Suggested Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+
+                      {/* Double-booked */}
+                      {conflicts
+                        .filter((c) => c.type === "double-booked")
+                        .flatMap((c) =>
+                          c.bookings.map((b, idx) => {
+                            const free = freeVansOnDay(c.dayNum);
+                            const isLoading = actionLoading[b.id];
+                            const isDone = actionDone[b.id];
+                            return (
+                              <tr key={`db-${b.id}`} className="hover:bg-red-50/40 transition-colors">
+                                <td className="px-4 py-3">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold text-[10px] border border-red-200">
+                                    🔴 Double-booked
+                                  </span>
+                                  <div className={`text-[9px] mt-0.5 ${idx > 0 ? "text-red-400 font-medium" : "text-zinc-400"}`}>
+                                    {idx > 0 ? "← reassign this" : `booking #${idx + 1} of ${c.bookings.length}`}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 font-medium text-zinc-700">
+                                  {MONTH_SHORT[viewMonth]} {c.dayNum}
+                                </td>
+                                <td className="px-4 py-3 text-zinc-600 font-mono text-[11px]">
+                                  {c.plate || <span className="text-zinc-400 font-sans italic">None</span>}
+                                </td>
+                                <td className="px-4 py-3 text-zinc-600">
+                                  {b.invoiceNo || <span className="text-zinc-400 italic">—</span>}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="text-zinc-800 font-medium truncate max-w-[180px]">{clientFirstLine(b) || "—"}</div>
+                                  <div className="text-zinc-400 truncate max-w-[180px] mt-0.5">
+                                    {b.fromLocation && b.toLocation ? `${b.fromLocation} → ${b.toLocation}` : b.details || "—"}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {isDone ? (
+                                    <span className="text-green-600 font-medium text-[11px]">✓ Resolved</span>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {/* Assign to van */}
+                                      <div className="flex items-center gap-2">
+                                        <select
+                                          value={selectedVan[b.id] ?? ""}
+                                          onChange={(e) => setSelectedVan((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                                          className="text-xs border border-zinc-300 rounded-md px-2 py-1.5 bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-blue-400 min-w-[140px]"
+                                          disabled={isLoading}
+                                        >
+                                          <option value="">
+                                            {free.length === 0 ? "No free vans" : "Pick a free van…"}
+                                          </option>
+                                          {free.map((v) => (
+                                            <option key={v.id} value={v.id}>
+                                              {v.vanNumber}{v.driverName ? ` — ${v.driverName}` : ""}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <button
+                                          onClick={() => handleAssignVan(b.id)}
+                                          disabled={!selectedVan[b.id] || isLoading}
+                                          className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                          {isLoading ? "Saving…" : "Reassign"}
+                                        </button>
+                                      </div>
+                                      {/* Or outsource */}
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] text-zinc-400 w-6 text-center">or</span>
+                                        <input
+                                          type="text"
+                                          placeholder="Outsource company name…"
+                                          value={outsourcingInput[b.id] ?? ""}
+                                          onChange={(e) => setOutsourcingInput((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                                          className="text-xs border border-zinc-300 rounded-md px-2 py-1.5 bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-purple-400 focus:border-purple-400 min-w-[160px]"
+                                          disabled={isLoading}
+                                        />
+                                        <button
+                                          onClick={() => handleOutsource(b.id)}
+                                          disabled={!outsourcingInput[b.id]?.trim() || isLoading}
+                                          className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                                        >
+                                          {isLoading ? "Saving…" : "Outsource →"}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+
+                      {/* No-van */}
+                      {conflicts
+                        .filter((c) => c.type === "no-van")
+                        .map((c) => {
+                          const b = c.bookings[0];
+                          const free = freeVansOnDay(c.dayNum);
+                          const isLoading = actionLoading[b.id];
+                          const isDone = actionDone[b.id];
+                          return (
+                            <tr key={`nv-${b.id}`} className="hover:bg-red-50/40 transition-colors">
+                              <td className="px-4 py-3">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-semibold text-[10px] border border-orange-200">
+                                  🟠 No Van
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-medium text-zinc-700">
+                                {MONTH_SHORT[viewMonth]} {c.dayNum}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="text-zinc-400 italic">Unassigned</span>
+                              </td>
+                              <td className="px-4 py-3 text-zinc-600">
+                                {b.invoiceNo || <span className="text-zinc-400 italic">—</span>}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="text-zinc-800 font-medium truncate max-w-[180px]">{clientFirstLine(b) || "—"}</div>
+                                <div className="text-zinc-400 truncate max-w-[180px] mt-0.5">
+                                  {b.fromLocation && b.toLocation ? `${b.fromLocation} → ${b.toLocation}` : b.details || "—"}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                {isDone ? (
+                                  <span className="text-green-600 font-medium text-[11px]">✓ Resolved</span>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {/* Assign to van */}
+                                    <div className="flex items-center gap-2">
+                                      <select
+                                        value={selectedVan[b.id] ?? ""}
+                                        onChange={(e) => setSelectedVan((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                                        className="text-xs border border-zinc-300 rounded-md px-2 py-1.5 bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-blue-400 min-w-[140px]"
+                                        disabled={isLoading}
+                                      >
+                                        <option value="">
+                                          {free.length === 0 ? "No free vans" : "Pick a free van…"}
+                                        </option>
+                                        {free.map((v) => (
+                                          <option key={v.id} value={v.id}>
+                                            {v.vanNumber}{v.driverName ? ` — ${v.driverName}` : ""}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        onClick={() => handleAssignVan(b.id)}
+                                        disabled={!selectedVan[b.id] || isLoading}
+                                        className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                      >
+                                        {isLoading ? "Saving…" : "Assign Van"}
+                                      </button>
+                                    </div>
+                                    {/* Or outsource with company name */}
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] text-zinc-400 w-6 text-center">or</span>
+                                      <input
+                                        type="text"
+                                        placeholder="Outsource company name…"
+                                        value={outsourcingInput[b.id] ?? ""}
+                                        onChange={(e) => setOutsourcingInput((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                                        onKeyDown={(e) => e.key === "Enter" && handleOutsource(b.id)}
+                                        className="text-xs border border-zinc-300 rounded-md px-2 py-1.5 bg-white text-zinc-700 focus:outline-none focus:ring-1 focus:ring-purple-400 focus:border-purple-400 min-w-[160px]"
+                                        disabled={isLoading}
+                                      />
+                                      <button
+                                        onClick={() => handleOutsource(b.id)}
+                                        disabled={!outsourcingInput[b.id]?.trim() || isLoading}
+                                        className="px-3 py-1.5 rounded-md bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                                      >
+                                        {isLoading ? "Saving…" : "Outsource →"}
+                                      </button>
+                                    </div>
+                                    {outsourcingInput[b.id]?.trim() && (
+                                      <p className="text-[10px] text-purple-600 pl-8">
+                                        A row for "{outsourcingInput[b.id].trim()}" will appear in the calendar.
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                      {/* No-driver warnings */}
+                      {warnings
+                        .filter((w) => w.type === "no-driver")
+                        .map((w) => {
+                          const b = w.bookings[0];
+                          return (
+                            <tr key={`nd-${b.id}`} className="hover:bg-amber-50/40 transition-colors">
+                              <td className="px-4 py-3">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold text-[10px] border border-amber-200">
+                                  🟡 No Driver
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-medium text-zinc-700">
+                                {MONTH_SHORT[viewMonth]} {w.dayNum}
+                              </td>
+                              <td className="px-4 py-3 text-zinc-600 font-mono text-[11px]">
+                                {w.plate}
+                              </td>
+                              <td className="px-4 py-3 text-zinc-600">
+                                {b.invoiceNo || <span className="text-zinc-400 italic">—</span>}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="text-zinc-800 font-medium truncate max-w-[180px]">{clientFirstLine(b) || "—"}</div>
+                                <div className="text-zinc-400 truncate max-w-[180px] mt-0.5">
+                                  {b.fromLocation && b.toLocation ? `${b.fromLocation} → ${b.toLocation}` : b.details || "—"}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-zinc-500 text-[11px]">
+                                    Van <span className="font-mono font-semibold text-zinc-700">{w.plate}</span> has no driver record.
+                                  </span>
+                                  <Link
+                                    href="/"
+                                    className="px-3 py-1.5 rounded-md bg-amber-500 text-white text-[11px] font-semibold hover:bg-amber-600 transition-colors whitespace-nowrap"
+                                  >
+                                    Edit Van →
+                                  </Link>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {totalIssues === 0 && (
+                <div className="px-4 py-4">
+                  <p className="text-sm text-green-700 font-medium">✓ All clear — no conflicts this month</p>
+                </div>
               )}
             </div>
           </>
