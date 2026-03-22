@@ -280,6 +280,31 @@ export default function AllJobsPage() {
     if (res.ok) await fetchRows();
   }
 
+  const [deleteInvoiceInput, setDeleteInvoiceInput] = useState("");
+  const [deleteInvoiceState, setDeleteInvoiceState] = useState<"idle" | "confirm" | "deleting">("idle");
+
+  async function handleDeleteByInvoice() {
+    const inv = deleteInvoiceInput.trim();
+    if (!inv) return;
+    if (deleteInvoiceState === "idle") { setDeleteInvoiceState("confirm"); return; }
+    setDeleteInvoiceState("deleting");
+    try {
+      const res = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(inv)}`, { method: "DELETE" });
+      if (res.ok) {
+        setDeleteInvoiceInput("");
+        setDeleteInvoiceState("idle");
+        await fetchRows();
+      } else {
+        const data = await res.json();
+        alert(data.error ?? "Delete failed");
+        setDeleteInvoiceState("idle");
+      }
+    } catch {
+      alert("Network error");
+      setDeleteInvoiceState("idle");
+    }
+  }
+
   async function handleAddRow() {
     const today = new Date();
     const res = await fetch("/api/bookings", {
@@ -610,6 +635,29 @@ export default function AllJobsPage() {
               className="h-9 px-4 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 transition-colors"
             >
               Print as PDF
+            </button>
+          </div>
+          {/* Delete by invoice */}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Invoice # to delete"
+              value={deleteInvoiceInput}
+              onChange={(e) => { setDeleteInvoiceInput(e.target.value); setDeleteInvoiceState("idle"); }}
+              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-red-400 w-44"
+            />
+            <button
+              onClick={handleDeleteByInvoice}
+              disabled={!deleteInvoiceInput.trim() || deleteInvoiceState === "deleting"}
+              className={`h-9 px-4 rounded-lg text-sm font-medium transition-colors ${
+                deleteInvoiceState === "confirm"
+                  ? "bg-red-600 text-white hover:bg-red-700"
+                  : deleteInvoiceState === "deleting"
+                  ? "bg-red-300 text-white cursor-not-allowed"
+                  : "border border-red-400 text-red-600 bg-white hover:bg-red-50"
+              }`}
+            >
+              {deleteInvoiceState === "confirm" ? "Confirm delete?" : deleteInvoiceState === "deleting" ? "Deleting…" : "Delete Invoice"}
             </button>
           </div>
         </div>
