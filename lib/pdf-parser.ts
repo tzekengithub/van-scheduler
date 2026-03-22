@@ -317,6 +317,9 @@ export function parseRawText(text: string): ParsedBooking[] {
 
     if (!bookingDetails) continue;
 
+    // Skip overtime-only rows — not a trip booking
+    if (/^overtime$/i.test(bookingDetails.trim())) continue;
+
     // ── Determine trip type ──
     const locationResult = parseLocations(bookingDetails);
     const tripType = detectTripType(
