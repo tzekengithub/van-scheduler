@@ -191,6 +191,21 @@ async function enforceInvoiceVanConsistency(): Promise<void> {
         .limit(2);
       if (blockerExtra) continue; // blocker invoice has >1 booking — leave it
 
+      // Guard: b's current van must only have b on this date — otherwise
+      // sending the blocker there would create a double-booking.
+      const [otherOnBVan] = await db
+        .select({ id: bookings.id })
+        .from(bookings)
+        .where(
+          and(
+            eq(bookings.vanId, b.vanId!),
+            eq(bookings.travelDate, b.travelDate),
+            ne(bookings.id, b.id),
+          )
+        )
+        .limit(1);
+      if (otherOnBVan) continue; // can't safely swap — b's van is shared
+
       // Safe to swap: blocker takes b's current van, b takes canonical van
       const bVan = vanMap.get(b.vanId!);
       await db

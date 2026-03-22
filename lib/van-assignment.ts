@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNotNull, asc, ne } from "drizzle-orm";
 
 /**
  * Smart van assignment.
@@ -30,79 +30,77 @@ export async function smartAssignVan(
   travelDate: string,
   fromLocation: string,
   invoiceNo: string,
-  _vehicleIndex: number,
+  vehicleIndex: number,
   _numberOfVehicles: number,
   tripType?: string | null,
 ): Promise<AssignResult> {
   const allVans = await db.select().from(vans).orderBy(vans.id);
   if (allVans.length === 0) return { outsource: true };
 
-  // ── PRIORITY 1: Multi-day invoice ────────────────────────────────────────────
+  // ── PRIORITY 1: Same-slot continuity ─────────────────────────────────────────
+  // For a multi-date invoice, every booking with the same (invoiceNo, vehicleIndex)
+  // must land on the SAME van. Look for any already-assigned booking for this
+  // EXACT slot on a DIFFERENT date to find the canonical van.
   if (invoiceNo && invoiceNo.trim() !== "") {
-    // Check if this invoice has > 1 booking row (multi-day trip)
-    const invoiceRows = await db
-      .select({ id: bookings.id })
+    const [priorSlot] = await db
+      .select({ vanId: bookings.vanId })
       .from(bookings)
-      .where(eq(bookings.invoiceNo, invoiceNo))
-      .limit(2);
-    const isMultiDay = invoiceRows.length > 1;
+      .where(
+        and(
+          eq(bookings.invoiceNo, invoiceNo),
+          eq(bookings.vehicleIndex, vehicleIndex),
+          isNotNull(bookings.vanId),
+          ne(bookings.travelDate, travelDate), // a different date = already processed
+        )
+      )
+      .orderBy(asc(bookings.travelDate))
+      .limit(1);
 
-    if (isMultiDay) {
-      // Find the van already assigned to this invoice
-      const existing = await db
-        .select({ vanId: bookings.vanId })
+    if (priorSlot?.vanId != null) {
+      const preferredVanId = priorSlot.vanId;
+
+      // Check if preferred van has ANY booking on this travelDate
+      const [conflict] = await db
+        .select({ id: bookings.id, invoiceNo: bookings.invoiceNo })
         .from(bookings)
-        .where(eq(bookings.invoiceNo, invoiceNo))
+        .where(
+          and(
+            eq(bookings.vanId, preferredVanId),
+            eq(bookings.travelDate, travelDate),
+          )
+        )
         .limit(1);
 
-      if (existing.length > 0 && existing[0].vanId != null) {
-        const preferredVanId = existing[0].vanId;
+      if (!conflict) {
+        // Van is completely free on this date → assign it.
+        return preferredVanId;
+      }
 
-        // Check if preferred van has ANY booking on this travelDate
-        const anyConflict = await db
-          .select({ id: bookings.id, invoiceNo: bookings.invoiceNo })
+      if (conflict.invoiceNo === invoiceNo) {
+        // Same invoice blocking the preferred van (a different vehicleIndex on same date).
+        // Each vehicleIndex needs its own van → fall through to Priority 2/3.
+      } else {
+        // Different invoice is blocking → check if blocker is multi-booking
+        const blockerInvoiceNo = conflict.invoiceNo ?? "";
+        const [, blockerExtra] = await db
+          .select({ id: bookings.id })
           .from(bookings)
-          .where(
-            and(
-              eq(bookings.vanId, preferredVanId),
-              eq(bookings.travelDate, travelDate),
-            )
-          )
-          .limit(1);
+          .where(eq(bookings.invoiceNo, blockerInvoiceNo))
+          .limit(2);
+        const blockerIsMultiDay = !!blockerExtra;
 
-        if (anyConflict.length === 0) {
-          // Van is completely free on this date → assign it.
-          return preferredVanId;
-        }
-
-        if (anyConflict[0].invoiceNo === invoiceNo) {
-          // Same invoice, same date → multi-vehicle scenario
-          // Each vehicle needs its own van → fall through to Priority 2/3
-        } else {
-          // Different invoice is blocking → check if blocker is multi-day
-          const blockerInvoiceNo = anyConflict[0].invoiceNo ?? "";
-          const blockerInvoiceRows = await db
-            .select({ id: bookings.id })
-            .from(bookings)
-            .where(eq(bookings.invoiceNo, blockerInvoiceNo))
-            .limit(2);
-          const blockerIsMultiDay = blockerInvoiceRows.length > 1;
-
-          if (blockerIsMultiDay) {
-            // Cannot bump a multi-day blocker — preferred van is unavailable.
-            // Fall through to Priority 2/3 to find any other free van.
-          } else {
-          // Single blocker → bump it to a free van
-          const blockerBookingId = anyConflict[0].id;
+        if (!blockerIsMultiDay) {
+          // Single blocker → bump it to a free van, then claim preferred van
+          const blockerBookingId = conflict.id;
           const freeVansForBump: typeof allVans = [];
           for (const van of allVans) {
             if (van.id === preferredVanId) continue;
-            const conflict = await db
+            const [c] = await db
               .select({ id: bookings.id })
               .from(bookings)
               .where(and(eq(bookings.vanId, van.id), eq(bookings.travelDate, travelDate)))
               .limit(1);
-            if (conflict.length === 0) freeVansForBump.push(van);
+            if (!c) freeVansForBump.push(van);
           }
 
           if (freeVansForBump.length > 0) {
@@ -126,8 +124,8 @@ export async function smartAssignVan(
 
           // Preferred van is now free on travelDate → assign to current booking.
           return preferredVanId;
-          } // end else (single blocker)
         }
+        // Multi-day blocker: cannot bump → fall through to Priority 2/3.
       }
     }
   }
