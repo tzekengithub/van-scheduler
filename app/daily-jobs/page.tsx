@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useUploadContext } from "@/app/upload-context";
 
@@ -127,6 +128,7 @@ export default function DailyJobsPage() {
   const [deleteInvoiceState, setDeleteInvoiceState] = useState<"idle" | "confirm" | "deleting">("idle");
   const [allInvoiceNos, setAllInvoiceNos] = useState<string[]>([]);
 
+  const router = useRouter();
   const { uploadOpen, setUploadOpen, serviceStatus } = useUploadContext();
 
   // ── Date navigation ────────────────────────────────────────────────────────
@@ -259,7 +261,7 @@ export default function DailyJobsPage() {
   async function handleDelete(id: number) {
     if (!confirm("Delete this booking?")) return;
     const res = await fetch(`/api/bookings/${id}`, { method: "DELETE" });
-    if (res.ok) await fetchRows();
+    if (res.ok) { await fetchRows(); router.refresh(); }
   }
 
   async function handleDeleteByInvoice() {
@@ -274,6 +276,7 @@ export default function DailyJobsPage() {
         setDeleteInvoiceInput("");
         setDeleteInvoiceState("idle");
         await fetchRows();
+        router.refresh();
       } else {
         alert(data.error ?? "Delete failed");
         setDeleteInvoiceState("idle");

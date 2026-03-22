@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useUploadContext } from "@/app/upload-context";
 
@@ -115,6 +116,7 @@ export default function AllJobsPage() {
   const [sortField, setSortField] = useState<SortField>("travelDate");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
+  const router = useRouter();
   const { uploadOpen, setUploadOpen, serviceStatus } = useUploadContext();
 
   // ── Data fetching ──────────────────────────────────────────────────────────
@@ -283,7 +285,7 @@ export default function AllJobsPage() {
   async function handleDelete(id: number) {
     if (!confirm("Delete this booking?")) return;
     const res = await fetch(`/api/bookings/${id}`, { method: "DELETE" });
-    if (res.ok) await fetchRows();
+    if (res.ok) { await fetchRows(); router.refresh(); }
   }
 
   const [deleteInvoiceInput, setDeleteInvoiceInput] = useState("");
@@ -300,6 +302,7 @@ export default function AllJobsPage() {
         setDeleteInvoiceInput("");
         setDeleteInvoiceState("idle");
         await fetchRows();
+        router.refresh();
       } else {
         const data = await res.json();
         alert(data.error ?? "Delete failed");
