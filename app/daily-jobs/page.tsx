@@ -553,16 +553,13 @@ export default function DailyJobsPage() {
                 </td>
                 {/* I/O */}
                 <td className="px-3 py-2 min-w-[80px]">
-                  <select
-                    className={`text-xs border rounded px-1 py-0.5 w-full bg-white text-zinc-900 ${
-                      cellStates[`${row.id}-inHouseOrOutsourced`] === "saving" ? "border-zinc-300 animate-pulse" :
-                      cellStates[`${row.id}-inHouseOrOutsourced`] === "saved"  ? "border-green-400" : "border-zinc-300"
-                    }`}
-                    value={row.inHouseOrOutsourced === "outsourced" ? "O" : (row.inHouseOrOutsourced ?? "I")}
-                    onChange={async (e) => {
-                      const val = e.target.value;
+                  {(() => {
+                    const ioVal = row.inHouseOrOutsourced === "outsourced" ? "O" : (row.inHouseOrOutsourced ?? "I");
+                    const saving = cellStates[`${row.id}-inHouseOrOutsourced`] === "saving";
+                    const saved  = cellStates[`${row.id}-inHouseOrOutsourced`] === "saved";
+                    const handleIO = async (val: string) => {
+                      if (val === ioVal) return;
                       if (val === "O") {
-                        // Switching to Outsourced: clear van assignment in one atomic call
                         await patchFields(row.id, {
                           inHouseOrOutsourced: "O",
                           vanId: null,
@@ -571,7 +568,6 @@ export default function DailyJobsPage() {
                           driverContact: null,
                         }, "inHouseOrOutsourced");
                       } else {
-                        // Switching back to In-house: reset fields then auto-assign a van
                         await patchFields(row.id, {
                           inHouseOrOutsourced: "I",
                           outsourcedCompany: "",
@@ -583,11 +579,22 @@ export default function DailyJobsPage() {
                           setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, ...updated } : r));
                         }
                       }
-                    }}
-                  >
-                    <option value="I">I</option>
-                    <option value="O">O</option>
-                  </select>
+                    };
+                    return (
+                      <div className={`inline-flex rounded border text-xs font-semibold overflow-hidden ${saving ? "opacity-50 pointer-events-none" : ""} ${saved ? "border-green-400" : "border-zinc-300"}`}>
+                        <button
+                          type="button"
+                          onClick={() => handleIO("I")}
+                          className={`px-2.5 py-1 leading-none transition-colors ${ioVal === "I" ? "bg-blue-600 text-white" : "bg-white text-zinc-500 hover:bg-zinc-100"}`}
+                        >I</button>
+                        <button
+                          type="button"
+                          onClick={() => handleIO("O")}
+                          className={`px-2.5 py-1 leading-none border-l border-zinc-300 transition-colors ${ioVal === "O" ? "bg-orange-500 text-white" : "bg-white text-zinc-500 hover:bg-zinc-100"}`}
+                        >O</button>
+                      </div>
+                    );
+                  })()}
                 </td>
                 {/* Outsourced Company */}
                 <td className="px-3 py-2 min-w-[150px]">
