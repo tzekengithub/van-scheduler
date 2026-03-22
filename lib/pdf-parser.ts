@@ -1,4 +1,4 @@
-export type TripType = "one_way_ride" | "round_trip" | "day_trip" | "trip";
+export type TripType = "one_way_ride" | "round_trip" | "day_trip" | "trip" | "one_way";
 
 export interface ParsedBooking {
   // existing fields (for van-assignment compatibility)
@@ -96,27 +96,21 @@ function cleanBookingDetails(raw: string): string {
 
 /**
  * Determine tripType from booking details and annotation.
- * Priority: annotation "(One-Way Ride Only)" > "Day Trip" in details > A-B-A route > default "trip"
+ * "one_way" if details/annotation contain "one-way" or "one way" (case-insensitive).
+ * Everything else → "trip".
  */
 function detectTripType(
   bookingDetails: string,
   annotationLine: string,
-  isRoundTripByRoute: boolean
+  _isRoundTripByRoute: boolean
 ): TripType {
+  const lower = bookingDetails.toLowerCase();
+  const annotLower = annotationLine.toLowerCase();
   if (
-    annotationLine.includes("One-Way Ride Only") ||
-    bookingDetails.includes("One-Way Ride Only")
+    lower.includes("one-way") || lower.includes("one way") ||
+    annotLower.includes("one-way") || annotLower.includes("one way")
   ) {
-    return "one_way_ride";
-  }
-  if (
-    bookingDetails.toLowerCase().includes("day trip") ||
-    annotationLine.toLowerCase().includes("day trip")
-  ) {
-    return "day_trip";
-  }
-  if (isRoundTripByRoute) {
-    return "round_trip";
+    return "one_way";
   }
   return "trip";
 }
@@ -326,28 +320,9 @@ export function parseRawText(text: string): ParsedBooking[] {
       locationResult.isRoundTrip === 1
     );
 
-    // ── Resolve fromLocation / toLocation based on tripType ──
-    let fromLocation: string;
-    let toLocation: string;
-    let isRoundTrip: 0 | 1;
-
-    if (tripType === "day_trip") {
-      // Day Trip: full description as fromLocation, no toLocation
-      fromLocation = bookingDetails;
-      toLocation = "";
-      isRoundTrip = 0;
-    } else if (tripType === "round_trip") {
-      // Round Trip: preserve the full route exactly as written, e.g.
-      // "KL - Genting Highlands - KL" → "KL → Genting Highlands → KL"
-      fromLocation = bookingDetails.replace(/ - /g, " → ");
-      toLocation = "";
-      isRoundTrip = 1;
-    } else {
-      // One-way / trip: split into from/to
-      fromLocation = locationResult.fromLocation;
-      toLocation = locationResult.toLocation;
-      isRoundTrip = 0;
-    }
+    const fromLocation = locationResult.fromLocation;
+    const toLocation = locationResult.toLocation;
+    const isRoundTrip = locationResult.isRoundTrip;
 
     if (!fromLocation) continue;
 

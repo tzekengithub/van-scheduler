@@ -125,6 +125,7 @@ export default function DailyJobsPage() {
   const [patchError, setPatchError] = useState<string | null>(null);
   const [deleteInvoiceInput, setDeleteInvoiceInput] = useState("");
   const [deleteInvoiceState, setDeleteInvoiceState] = useState<"idle" | "confirm" | "deleting">("idle");
+  const [allInvoiceNos, setAllInvoiceNos] = useState<string[]>([]);
 
   const { uploadOpen, setUploadOpen, serviceStatus } = useUploadContext();
 
@@ -154,6 +155,16 @@ export default function DailyJobsPage() {
   }, [day, month, year]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  useEffect(() => {
+    fetch("/api/bookings")
+      .then((r) => r.json())
+      .then((data: BookingRow[]) => {
+        const nos = [...new Set(data.map((r) => r.invoiceNo).filter(Boolean))] as string[];
+        setAllInvoiceNos(nos);
+      })
+      .catch(() => {});
+  }, []);
 
   // Refresh data and navigate to first inserted date after PDF upload
   useEffect(() => {
