@@ -87,9 +87,10 @@ export async function smartAssignVan(
         const isMultiDay = blockerInvoiceRows.length > 1;
 
         if (isMultiDay) {
-          // Do NOT bump a multi-day trip — outsource the current booking instead.
-          return { outsource: true };
-        }
+          // Cannot bump a multi-day trip — fall through to Rule 2
+          // to find a different free van for the current booking.
+          // Only outsource if Rule 2 also finds nothing (Rule 3).
+        } else {
 
         // Single blocking booking — bump it.
         // Find any other van free on travelDate (excluding the preferred van).
@@ -126,6 +127,7 @@ export async function smartAssignVan(
 
         // Preferred van is now free on travelDate → assign to current booking.
         return preferredVanId;
+        } // end else (single blocker)
       }
     }
   }
