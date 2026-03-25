@@ -78,6 +78,7 @@ export async function runReassign(
     const assignResult: AssignResult = await smartAssignVan(
       b.travelDate,
       b.fromLocation,
+      b.toLocation,
       b.invoiceNo ?? "",
       b.vehicleIndex ?? 1,
       b.numberOfVehicles ?? 1,
@@ -198,6 +199,7 @@ export async function runReassign(
       const retryResult: AssignResult = await smartAssignVan(
         b.travelDate,
         b.fromLocation,
+        b.toLocation,
         b.invoiceNo ?? "",
         b.vehicleIndex ?? 1,
         b.numberOfVehicles ?? 1,

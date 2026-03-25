@@ -8,6 +8,8 @@ interface Van {
   vanNumber: string;
   driverName: string | null;
   driverContact: string | null;
+  singaporeEnabled: number;
+  thailandEnabled: number;
 }
 
 const BADGE_COLORS = [
@@ -27,6 +29,8 @@ export default function DashboardPage() {
   const [newPlate, setNewPlate] = useState("");
   const [newDriverName, setNewDriverName] = useState("");
   const [newDriverContact, setNewDriverContact] = useState("");
+  const [newSingapore, setNewSingapore] = useState(false);
+  const [newThailand, setNewThailand] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState(false);
@@ -63,6 +67,8 @@ export default function DashboardPage() {
           vanNumber: newPlate,
           driverName: newDriverName,
           driverContact: newDriverContact,
+          singaporeEnabled: newSingapore,
+          thailandEnabled: newThailand,
         }),
       });
       const data = await res.json();
@@ -71,11 +77,29 @@ export default function DashboardPage() {
       setNewPlate("");
       setNewDriverName("");
       setNewDriverContact("");
+      setNewSingapore(false);
+      setNewThailand(false);
       await fetchVans();
     } catch (e) {
       setError(String(e));
     } finally {
       setVanLoading(false);
+    }
+  }
+
+  async function handleToggleCapability(id: number, field: "singaporeEnabled" | "thailandEnabled", current: number) {
+    setError(null);
+    try {
+      const res = await fetch("/api/vans", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, [field]: current === 1 ? 0 : 1 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update van");
+      await fetchVans();
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -208,6 +232,24 @@ export default function DashboardPage() {
               placeholder="e.g. +60 12-xxx xxxx"
               className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
+            <label className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700 cursor-pointer select-none hover:bg-zinc-50">
+              <input
+                type="checkbox"
+                checked={newSingapore}
+                onChange={(e) => setNewSingapore(e.target.checked)}
+                className="accent-red-500"
+              />
+              🇸🇬 SG
+            </label>
+            <label className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700 cursor-pointer select-none hover:bg-zinc-50">
+              <input
+                type="checkbox"
+                checked={newThailand}
+                onChange={(e) => setNewThailand(e.target.checked)}
+                className="accent-blue-500"
+              />
+              🇹🇭 TH
+            </label>
             <button
               type="submit"
               disabled={vanLoading || !newPlate.trim() || !newDriverName.trim()}
@@ -234,6 +276,30 @@ export default function DashboardPage() {
                     {van.driverContact && (
                       <span className="font-normal opacity-60">{van.driverContact}</span>
                     )}
+                    <div className="flex gap-1 mt-1">
+                      <button
+                        onClick={() => handleToggleCapability(van.id, "singaporeEnabled", van.singaporeEnabled)}
+                        title={van.singaporeEnabled ? "Singapore enabled — click to disable" : "Singapore disabled — click to enable"}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
+                          van.singaporeEnabled
+                            ? "bg-red-100 text-red-700 border border-red-300 hover:bg-red-200"
+                            : "bg-zinc-100 text-zinc-400 border border-zinc-200 hover:bg-zinc-200 line-through"
+                        }`}
+                      >
+                        🇸🇬 SG
+                      </button>
+                      <button
+                        onClick={() => handleToggleCapability(van.id, "thailandEnabled", van.thailandEnabled)}
+                        title={van.thailandEnabled ? "Thailand enabled — click to disable" : "Thailand disabled — click to enable"}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
+                          van.thailandEnabled
+                            ? "bg-blue-100 text-blue-700 border border-blue-300 hover:bg-blue-200"
+                            : "bg-zinc-100 text-zinc-400 border border-zinc-200 hover:bg-zinc-200 line-through"
+                        }`}
+                      >
+                        🇹🇭 TH
+                      </button>
+                    </div>
                   </div>
                   <button
                     onClick={() => handleDeleteVan(van.id, van.vanNumber)}

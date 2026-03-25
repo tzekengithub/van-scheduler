@@ -26,9 +26,19 @@ import { eq, and, desc, isNotNull, asc, ne } from "drizzle-orm";
  */
 export type AssignResult = number | { outsource: true };
 
+/** Detect if a trip requires Singapore or Thailand capability based on locations. */
+function detectTripRequirements(fromLocation: string, toLocation: string) {
+  const combined = `${fromLocation} ${toLocation}`.toLowerCase();
+  return {
+    needsSingapore: combined.includes("singapore"),
+    needsThailand: combined.includes("thailand"),
+  };
+}
+
 export async function smartAssignVan(
   travelDate: string,
   fromLocation: string,
+  toLocation: string,
   invoiceNo: string,
   vehicleIndex: number,
   _numberOfVehicles: number,
@@ -36,6 +46,15 @@ export async function smartAssignVan(
 ): Promise<AssignResult> {
   const allVans = await db.select().from(vans).orderBy(vans.id);
   if (allVans.length === 0) return { outsource: true };
+
+  // ── Filter vans by Singapore / Thailand capability ────────────────────────
+  const { needsSingapore, needsThailand } = detectTripRequirements(fromLocation, toLocation);
+  const eligibleVans = allVans.filter(v => {
+    if (needsSingapore && v.singaporeEnabled !== 1) return false;
+    if (needsThailand && v.thailandEnabled !== 1) return false;
+    return true;
+  });
+  if (eligibleVans.length === 0) return { outsource: true };
 
   // ── PRIORITY 1: Same-slot continuity ─────────────────────────────────────────
   // For a multi-date invoice, every booking with the same (invoiceNo, vehicleIndex)
@@ -132,7 +151,7 @@ export async function smartAssignVan(
 
   // ── PRIORITY 2 & 3: Find a free van ──────────────────────────────────────────
   const freeVans: typeof allVans = [];
-  for (const van of allVans) {
+  for (const van of eligibleVans) {
     const conflict = await db
       .select({ id: bookings.id })
       .from(bookings)
