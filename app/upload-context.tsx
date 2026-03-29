@@ -110,6 +110,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     if (parsing || previewRows !== null) setUploadOpen(true);
   }, [parsing, previewRows]);
 
+  // Auto-start the service when the upload panel opens and it's cold
+  useEffect(() => {
+    if (uploadOpen && serviceStatus === "cold") startService();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadOpen]);
+
   async function handleFilesSelected(files: File[]) {
     setUploadFiles(files);
     setPreviewRows(null);
@@ -408,36 +414,46 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           <div className="overflow-y-auto flex-1 p-4">
 
             {/* Drop zone (shown when no files picked and not parsing) */}
-            {uploadFiles.length === 0 && !parsing && (
-              <div
-                className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors ${
-                  dragOver ? "border-zinc-500 bg-zinc-50" : "border-zinc-300 hover:border-zinc-400"
-                }`}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOver(false);
-                  const files = Array.from(e.dataTransfer.files).filter((f) => f.type === "application/pdf");
-                  if (files.length > 0) handleFilesSelected(files);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files ?? []);
+            {uploadFiles.length === 0 && !parsing && (() => {
+              const serviceReady = serviceStatus === "ready";
+              return (
+                <div
+                  className={`border-2 border-dashed rounded-lg p-10 text-center transition-colors ${
+                    !serviceReady
+                      ? "border-zinc-200 bg-zinc-50 cursor-not-allowed opacity-50"
+                      : dragOver
+                      ? "border-zinc-500 bg-zinc-50 cursor-pointer"
+                      : "border-zinc-300 hover:border-zinc-400 cursor-pointer"
+                  }`}
+                  onDragOver={(e) => { if (!serviceReady) return; e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    if (!serviceReady) return;
+                    const files = Array.from(e.dataTransfer.files).filter((f) => f.type === "application/pdf");
                     if (files.length > 0) handleFilesSelected(files);
                   }}
-                />
-                <p className="text-sm text-zinc-500">Drop one or more PDFs here, or click to select</p>
-                <p className="text-xs text-zinc-400 mt-1">Invoice PDFs only</p>
-              </div>
-            )}
+                  onClick={() => { if (serviceReady) fileInputRef.current?.click(); }}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      if (files.length > 0) handleFilesSelected(files);
+                    }}
+                  />
+                  <p className="text-sm text-zinc-500">
+                    {serviceReady ? "Drop one or more PDFs here, or click to select" : "Start the PDF service above before uploading"}
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-1">Invoice PDFs only</p>
+                </div>
+              );
+            })()}
 
             {/* Parsing / upload progress */}
             {(parsing || confirming) && parseProgress && (() => {
