@@ -337,6 +337,11 @@ export function parseRawText(text: string): ParsedBooking[] {
 
     if (!fromLocation) continue;
 
+    // Skip rows with no destination unless they are an explicit day trip.
+    // This filters out fee/service lines like "Parking Fees", "Gift",
+    // "Paging", "Food", "Help to check in at the hotel", etc.
+    if (!toLocation && !/day\s*trip/i.test(bookingDetails)) continue;
+
     // ── Expand: one row per vehicle ──
     const baseRow = {
       travelDate,
