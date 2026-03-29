@@ -1,29 +1,7 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, desc, isNotNull, asc, ne } from "drizzle-orm";
+import { eq, and, isNotNull, desc } from "drizzle-orm";
 
-/**
- * Smart van assignment.
- *
- * GOLDEN RULE: 1 van = maximum 1 job per day. No exceptions. No sharing. Ever.
- *
- * Priority 1 — Multi-day invoice (invoiceNo appears > 1 time across all dates).
- *   Find the van already assigned to this invoice (any date).
- *   If preferred van is free on travelDate → assign it.
- *   If blocked by a different single-booking invoice → bump the blocker to a free van
- *     (or outsource the blocker), then assign preferred van.
- *   If blocked by a multi-day invoice (cannot bump) → outsource current booking.
- *   If no existing van for this invoice → fall through to Priority 2/3.
- *
- * Priority 2 — Normal trip (tripType = "trip" or anything except "one_way").
- *   Find first free van on travelDate.
- *   Prefer continuity: van whose last booking ended at fromLocation.
- *
- * Priority 3 — One-way trip (tripType = "one_way").
- *   Find first free van on travelDate. No continuity preference.
- *
- * RULE 3 — No free van → return { outsource: true }. NEVER null. NEVER force-assign.
- */
 export type AssignResult = number | { outsource: true };
 
 /** Detect if a trip requires Singapore or Thailand capability based on locations. */
@@ -47,21 +25,30 @@ export async function smartAssignVan(
   const allVans = await db.select().from(vans).orderBy(vans.id);
   if (allVans.length === 0) return { outsource: true };
 
-  // ── Filter vans by Singapore / Thailand capability ────────────────────────
-  const { needsSingapore, needsThailand } = detectTripRequirements(fromLocation, toLocation);
-  const eligibleVans = allVans.filter(v => {
-    if (needsSingapore && v.singaporeEnabled !== 1) return false;
-    if (needsThailand && v.thailandEnabled !== 1) return false;
-    return true;
-  });
-  if (eligibleVans.length === 0) return { outsource: true };
+  // ── Gather which vans are already booked on this date ──────────────────────
+  const bookedOnDate = await db
+    .select({ vanId: bookings.vanId })
+    .from(bookings)
+    .where(and(eq(bookings.travelDate, travelDate), isNotNull(bookings.vanId)));
 
-  // ── PRIORITY 1: Same-slot continuity ─────────────────────────────────────────
-  // For a multi-date invoice, every booking with the same (invoiceNo, vehicleIndex)
-  // must land on the SAME van. Look for any already-assigned booking for this
-  // EXACT slot on a DIFFERENT date to find the canonical van.
-  if (invoiceNo && invoiceNo.trim() !== "") {
-    const [priorSlot] = await db
+  const bookedVanIds = new Set(bookedOnDate.map((b) => b.vanId));
+
+  // ── Gather last drop-off location per van (continuity hint) ────────────────
+  const vanLastDropOff: Record<number, string | null> = {};
+  for (const van of allVans) {
+    const [last] = await db
+      .select({ toLocation: bookings.toLocation })
+      .from(bookings)
+      .where(eq(bookings.vanId, van.id))
+      .orderBy(desc(bookings.travelDate))
+      .limit(1);
+    vanLastDropOff[van.id] = last?.toLocation ?? null;
+  }
+
+  // ── Check if this invoice already has a van assigned on another date ───────
+  let existingInvoiceVanId: number | null = null;
+  if (invoiceNo.trim()) {
+    const [prior] = await db
       .select({ vanId: bookings.vanId })
       .from(bookings)
       .where(
@@ -69,119 +56,95 @@ export async function smartAssignVan(
           eq(bookings.invoiceNo, invoiceNo),
           eq(bookings.vehicleIndex, vehicleIndex),
           isNotNull(bookings.vanId),
-          ne(bookings.travelDate, travelDate), // a different date = already processed
         )
       )
-      .orderBy(asc(bookings.travelDate))
       .limit(1);
-
-    if (priorSlot?.vanId != null) {
-      const preferredVanId = priorSlot.vanId;
-
-      // Check if preferred van has ANY booking on this travelDate
-      const [conflict] = await db
-        .select({ id: bookings.id, invoiceNo: bookings.invoiceNo })
-        .from(bookings)
-        .where(
-          and(
-            eq(bookings.vanId, preferredVanId),
-            eq(bookings.travelDate, travelDate),
-          )
-        )
-        .limit(1);
-
-      if (!conflict) {
-        // Van is completely free on this date → assign it.
-        return preferredVanId;
-      }
-
-      if (conflict.invoiceNo === invoiceNo) {
-        // Same invoice blocking the preferred van (a different vehicleIndex on same date).
-        // Each vehicleIndex needs its own van → fall through to Priority 2/3.
-      } else {
-        // Different invoice is blocking → check if blocker is multi-booking
-        const blockerInvoiceNo = conflict.invoiceNo ?? "";
-        const [, blockerExtra] = await db
-          .select({ id: bookings.id })
-          .from(bookings)
-          .where(eq(bookings.invoiceNo, blockerInvoiceNo))
-          .limit(2);
-        const blockerIsMultiDay = !!blockerExtra;
-
-        if (!blockerIsMultiDay) {
-          // Single blocker → bump it to a free van, then claim preferred van
-          const blockerBookingId = conflict.id;
-          const freeVansForBump: typeof allVans = [];
-          for (const van of allVans) {
-            if (van.id === preferredVanId) continue;
-            const [c] = await db
-              .select({ id: bookings.id })
-              .from(bookings)
-              .where(and(eq(bookings.vanId, van.id), eq(bookings.travelDate, travelDate)))
-              .limit(1);
-            if (!c) freeVansForBump.push(van);
-          }
-
-          if (freeVansForBump.length > 0) {
-            const newVan = freeVansForBump[0];
-            await db.update(bookings).set({
-              vanId: newVan.id,
-              vehiclePlate: newVan.vanNumber,
-              driverName: newVan.driverName ?? "",
-              driverContact: newVan.driverContact ?? "",
-            }).where(eq(bookings.id, blockerBookingId));
-          } else {
-            // No free van for bump → outsource the blocker
-            await db.update(bookings).set({
-              inHouseOrOutsourced: "O",
-              vanId: null,
-              vehiclePlate: null,
-              driverName: null,
-              driverContact: null,
-            }).where(eq(bookings.id, blockerBookingId));
-          }
-
-          // Preferred van is now free on travelDate → assign to current booking.
-          return preferredVanId;
-        }
-        // Multi-day blocker: cannot bump → fall through to Priority 2/3.
-      }
-    }
+    existingInvoiceVanId = prior?.vanId ?? null;
   }
 
-  // ── PRIORITY 2 & 3: Find a free van ──────────────────────────────────────────
-  const freeVans: typeof allVans = [];
-  for (const van of eligibleVans) {
-    const conflict = await db
-      .select({ id: bookings.id })
-      .from(bookings)
-      .where(and(eq(bookings.vanId, van.id), eq(bookings.travelDate, travelDate)))
-      .limit(1);
-    if (conflict.length === 0) freeVans.push(van);
+  // ── Build van context for the AI ───────────────────────────────────────────
+  const vanContext = allVans.map((van) => ({
+    id: van.id,
+    plate: van.vanNumber,
+    driver: van.driverName || "Unknown",
+    freeOnDate: !bookedVanIds.has(van.id),
+    singaporeEnabled: van.singaporeEnabled === 1,
+    thailandEnabled: van.thailandEnabled === 1,
+    lastDropOffLocation: vanLastDropOff[van.id] ?? null,
+    preferredForThisInvoice: van.id === existingInvoiceVanId,
+  }));
+
+  // ── Call OpenRouter Gemini 2.5 Pro ─────────────────────────────────────────
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+
+  const systemPrompt = `You are a van fleet dispatch optimizer. Assign the best available van to a booking.
+
+HARD RULES (never break these):
+1. A van can only take ONE booking per day — never assign a van where freeOnDate=false.
+2. Routes involving Singapore require singaporeEnabled=true on the van.
+3. Routes involving Thailand require thailandEnabled=true on the van.
+4. If no suitable free van exists, return outsource=true.
+
+SOFT PREFERENCES (apply when multiple vans are eligible):
+- If preferredForThisInvoice=true on a free van, prefer it (keeps multi-day invoices on the same van).
+- Otherwise prefer a van whose lastDropOffLocation matches the booking's fromLocation (routing continuity).
+- Otherwise pick the van with the lowest id.
+
+Respond ONLY with valid JSON — no markdown, no explanation:
+{"vanId": <number>, "outsource": false}   — when assigning a van
+{"vanId": null, "outsource": true}         — when no van is available`;
+
+  const userMessage = `Booking details:
+- Travel date: ${travelDate}
+- From: ${fromLocation}
+- To: ${toLocation}
+- Trip type: ${tripType ?? "trip"}
+- Invoice: ${invoiceNo || "n/a"}
+- Vehicle index: ${vehicleIndex}
+
+Vans:
+${JSON.stringify(vanContext, null, 2)}`;
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+      "X-Title": "Van Scheduler",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-pro",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`OpenRouter error ${response.status}: ${errText.slice(0, 300)}`);
   }
 
-  if (freeVans.length === 0) return { outsource: true };
+  const json = await response.json();
+  const content: string = json.choices?.[0]?.message?.content ?? "";
 
-  // Priority 3 — one-way: no continuity check, just first free van
-  if (tripType === "one_way_ride") return freeVans[0].id;
-
-  // Priority 2 — trip: prefer continuity (van last ended at fromLocation)
-  for (const van of freeVans) {
-    const lastRows = await db
-      .select({ toLocation: bookings.toLocation })
-      .from(bookings)
-      .where(eq(bookings.vanId, van.id))
-      .orderBy(desc(bookings.travelDate))
-      .limit(1);
-
-    if (
-      lastRows.length > 0 &&
-      lastRows[0].toLocation?.toLowerCase().trim() === fromLocation.toLowerCase().trim()
-    ) {
-      return van.id;
-    }
+  let result: { vanId: number | null; outsource: boolean };
+  try {
+    result = JSON.parse(content);
+  } catch {
+    throw new Error(`AI returned non-JSON: ${content.slice(0, 200)}`);
   }
 
-  // Fallback: first free van.
-  return freeVans[0].id;
+  if (result.outsource || result.vanId == null) return { outsource: true };
+
+  // Safety check — make sure returned ID actually exists and is free
+  const chosenVan = allVans.find((v) => v.id === result.vanId);
+  if (!chosenVan || bookedVanIds.has(chosenVan.id)) return { outsource: true };
+
+  return chosenVan.id;
 }
