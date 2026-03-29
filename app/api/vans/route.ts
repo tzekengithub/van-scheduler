@@ -17,12 +17,14 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { id, singaporeEnabled, thailandEnabled } = await request.json();
+    const { id, singaporeEnabled, thailandEnabled, maxPaxCapacity, location } = await request.json();
     if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
     const updates: Record<string, unknown> = {};
     if (typeof singaporeEnabled === "number") updates.singaporeEnabled = singaporeEnabled;
     if (typeof thailandEnabled === "number") updates.thailandEnabled = thailandEnabled;
+    if (typeof maxPaxCapacity === "number") updates.maxPaxCapacity = maxPaxCapacity;
+    if (typeof location === "string") updates.location = location;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No fields to update" }, { status: 400 });
@@ -42,7 +44,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { vanNumber, driverName, driverContact, singaporeEnabled, thailandEnabled } = await request.json();
+    const { vanNumber, driverName, driverContact, singaporeEnabled, thailandEnabled, maxPaxCapacity, location } = await request.json();
     if (!vanNumber || !vanNumber.trim()) {
       return NextResponse.json({ error: "Plate number is required" }, { status: 400 });
     }
@@ -63,6 +65,8 @@ export async function POST(request: NextRequest) {
         driverContact: driverContact?.trim() ?? "",
         singaporeEnabled: singaporeEnabled ? 1 : 0,
         thailandEnabled: thailandEnabled ? 1 : 0,
+        maxPaxCapacity: typeof maxPaxCapacity === "number" ? maxPaxCapacity : 4,
+        location: location?.trim() ?? "",
       })
       .returning();
 

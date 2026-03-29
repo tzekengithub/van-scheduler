@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 
+const LOCATIONS = ["KL", "Singapore", "Penang", "Johor Bahru", "Ipoh", "Melaka", "Kuantan", "Kota Kinabalu", "Kuching", "Other"];
+
 interface Van {
   id: number;
   vanNumber: string;
@@ -10,6 +12,8 @@ interface Van {
   driverContact: string | null;
   singaporeEnabled: number;
   thailandEnabled: number;
+  maxPaxCapacity: number | null;
+  location: string | null;
 }
 
 const BADGE_COLORS = [
@@ -31,6 +35,8 @@ export default function DashboardPage() {
   const [newDriverContact, setNewDriverContact] = useState("");
   const [newSingapore, setNewSingapore] = useState(false);
   const [newThailand, setNewThailand] = useState(false);
+  const [newMaxPax, setNewMaxPax] = useState(4);
+  const [newLocation, setNewLocation] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState(false);
@@ -69,6 +75,8 @@ export default function DashboardPage() {
           driverContact: newDriverContact,
           singaporeEnabled: newSingapore,
           thailandEnabled: newThailand,
+          maxPaxCapacity: newMaxPax,
+          location: newLocation,
         }),
       });
       const data = await res.json();
@@ -79,6 +87,8 @@ export default function DashboardPage() {
       setNewDriverContact("");
       setNewSingapore(false);
       setNewThailand(false);
+      setNewMaxPax(4);
+      setNewLocation("");
       await fetchVans();
     } catch (e) {
       setError(String(e));
@@ -232,6 +242,27 @@ export default function DashboardPage() {
               placeholder="e.g. +60 12-xxx xxxx"
               className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
+            <select
+              value={newLocation}
+              onChange={(e) => setNewLocation(e.target.value)}
+              className="h-9 px-2 rounded-lg border border-zinc-300 text-sm text-zinc-900 bg-white focus:outline-none focus:ring-2 focus:ring-zinc-400"
+            >
+              <option value="">📍 Base</option>
+              {LOCATIONS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <div className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700">
+              <span className="text-zinc-500">👥</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={newMaxPax}
+                onChange={(e) => setNewMaxPax(Number(e.target.value))}
+                className="w-10 text-center focus:outline-none text-zinc-900"
+                title="Max passenger capacity"
+              />
+              <span className="text-zinc-400 text-xs">pax</span>
+            </div>
             <label className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700 cursor-pointer select-none hover:bg-zinc-50">
               <input
                 type="checkbox"
@@ -276,6 +307,18 @@ export default function DashboardPage() {
                     {van.driverContact && (
                       <span className="font-normal opacity-60">{van.driverContact}</span>
                     )}
+                    <div className="flex gap-1 mt-0.5 flex-wrap">
+                      {van.location && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-white/50 border border-current opacity-70">
+                          📍 {van.location}
+                        </span>
+                      )}
+                      {van.maxPaxCapacity != null && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-white/50 border border-current opacity-70">
+                          👥 {van.maxPaxCapacity} pax
+                        </span>
+                      )}
+                    </div>
                     <div className="flex gap-1 mt-1">
                       <button
                         onClick={() => handleToggleCapability(van.id, "singaporeEnabled", van.singaporeEnabled)}

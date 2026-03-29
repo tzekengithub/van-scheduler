@@ -7,6 +7,8 @@ export const vans = pgTable("vans", {
   driverContact: text("driver_contact").default(""),
   singaporeEnabled: integer("singapore_enabled").notNull().default(0),
   thailandEnabled: integer("thailand_enabled").notNull().default(0),
+  maxPaxCapacity: integer("max_pax_capacity").default(4),
+  location: text("location").default(""),
 });
 
 export const bookings = pgTable("bookings", {
