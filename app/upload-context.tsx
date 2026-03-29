@@ -570,12 +570,24 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                   {confirming && insertProgress && (
                     <div className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3">
                       {insertProgress.phase === "rechecking" ? (
-                        <div className="flex items-center gap-2 text-xs text-indigo-600">
-                          <svg className="animate-spin h-3 w-3 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                          </svg>
-                          Rechecking van assignments…
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-xs text-indigo-600">
+                            <svg className="animate-spin h-3 w-3 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                            </svg>
+                            <span>AI assigning vans…</span>
+                            {recheckElapsed > 0 && (
+                              <span className="text-zinc-400 font-mono">{recheckElapsed}s</span>
+                            )}
+                          </div>
+                          {recheckLog.length > 0 && (
+                            <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2 max-h-36 overflow-y-auto space-y-0.5">
+                              {recheckLog.map((line, i) => (
+                                <div key={i} className="text-[11px] font-mono text-zinc-600 leading-relaxed">{line}</div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <>
