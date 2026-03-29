@@ -27,7 +27,7 @@ import { eq, and, desc, isNotNull, asc, ne } from "drizzle-orm";
 export type AssignResult = number | { outsource: true };
 
 /** Detect if a trip requires Singapore or Thailand capability based on locations. */
-function detectTripRequirements(fromLocation: string, toLocation: string) {
+export function detectTripRequirements(fromLocation: string, toLocation: string) {
   const combined = `${fromLocation} ${toLocation}`.toLowerCase();
   return {
     needsSingapore: combined.includes("singapore"),

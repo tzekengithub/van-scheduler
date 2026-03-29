@@ -653,13 +653,7 @@ export default function DailyJobsPage() {
           <div className="flex gap-2 ml-2 self-end">
             <button
               onClick={() => setUploadOpen(true)}
-              disabled={serviceStatus !== "ready"}
-              title={serviceStatus !== "ready" ? "Click Start PDF Service first" : ""}
-              className={`h-9 px-4 rounded-lg text-sm font-medium transition-colors ${
-                serviceStatus === "ready"
-                  ? "border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50"
-                  : "bg-gray-200 text-gray-400 cursor-not-allowed"
-              }`}
+              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
             >
               Upload Invoice PDF
             </button>

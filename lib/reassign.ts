@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, isNull, isNotNull, inArray, asc, ne } from "drizzle-orm";
-import { smartAssignVan, AssignResult } from "@/lib/van-assignment";
+import { smartAssignVan, AssignResult, detectTripRequirements } from "@/lib/van-assignment";
 
 /**
  * Priority rank for processing order and bumping.
@@ -106,9 +106,12 @@ export async function runReassign(
     } else if (b.tripType === "day_trip") {
       // ── Day Trip: try to bump a lower-priority booking on the same date ────
       let bumped = false;
+      const { needsSingapore, needsThailand } = detectTripRequirements(
+        b.fromLocation, b.toLocation,
+      );
 
       for (const bumpType of BUMP_TYPES) {
-        const [victim] = await db
+        const candidates = await db
           .select({ id: bookings.id, vanId: bookings.vanId })
           .from(bookings)
           .where(
@@ -119,8 +122,16 @@ export async function runReassign(
               eq(bookings.manualChange, 0), // never bump manual rows
               ne(bookings.id, b.id),        // not self
             )
-          )
-          .limit(1);
+          );
+
+        // Only bump if the victim's van is capable for this day_trip's route
+        const victim = candidates.find((c) => {
+          const van = vanMap.get(c.vanId!);
+          if (!van) return false;
+          if (needsSingapore && van.singaporeEnabled !== 1) return false;
+          if (needsThailand && van.thailandEnabled !== 1) return false;
+          return true;
+        }) ?? null;
 
         if (victim && victim.vanId != null) {
           const bumpedVanId = victim.vanId;

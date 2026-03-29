@@ -378,9 +378,9 @@ export function parseRawText(text: string): ParsedBooking[] {
 export async function extractTravelBookings(
   buffer: Buffer
 ): Promise<ParsedBooking[]> {
-  const pythonServiceUrl = process.env.PDF_SERVICE_URL;
+  const pythonServiceUrl = process.env.PDF_SERVICE_URL ?? process.env.NEXT_PUBLIC_PDF_SERVICE_URL;
   if (!pythonServiceUrl) {
-    throw new Error("PDF_SERVICE_URL environment variable is not set");
+    throw new Error("PDF_SERVICE_URL (or NEXT_PUBLIC_PDF_SERVICE_URL) environment variable is not set");
   }
 
   const response = await fetch(`${pythonServiceUrl}/parse`, {

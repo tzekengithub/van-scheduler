@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, isNull, isNotNull, inArray, notInArray, ne, asc } from "drizzle-orm";
 import { runReassign } from "@/lib/reassign";
+import { detectTripRequirements } from "@/lib/van-assignment";
 
 /**
  * Full van schedule recheck.
@@ -140,6 +141,8 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       vehicleIndex: bookings.vehicleIndex,
       vanId: bookings.vanId,
       travelDate: bookings.travelDate,
+      fromLocation: bookings.fromLocation,
+      toLocation: bookings.toLocation,
     })
     .from(bookings)
     .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
@@ -185,10 +188,22 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       `[enforceInvoice] ${slotKey}: ${rows.length} bookings split across vans [${[...vanSet].join(",")}] on dates [${dates.join(",")}]`
     );
 
+    // Determine capability requirements from this group's bookings
+    const anyRow = rows[0];
+    const { needsSingapore, needsThailand } = detectTripRequirements(
+      anyRow.fromLocation ?? "",
+      anyRow.toLocation ?? "",
+    );
+    const capableVans = allVans.filter((v) => {
+      if (needsSingapore && v.singaporeEnabled !== 1) return false;
+      if (needsThailand && v.thailandEnabled !== 1) return false;
+      return true;
+    });
+
     // Prefer vans already used by this group (fewer moves), then try all others
     const vanPriority = [
-      ...allVans.filter((v) => vanSet.has(v.id)),
-      ...allVans.filter((v) => !vanSet.has(v.id)),
+      ...capableVans.filter((v) => vanSet.has(v.id)),
+      ...capableVans.filter((v) => !vanSet.has(v.id)),
     ];
 
     let targetVan: typeof allVans[number] | null = null;
@@ -268,6 +283,8 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
       travelDate: bookings.travelDate,
       tripType: bookings.tripType,
       manualChange: bookings.manualChange,
+      fromLocation: bookings.fromLocation,
+      toLocation: bookings.toLocation,
     })
     .from(bookings)
     .where(isNotNull(bookings.vanId))
@@ -306,10 +323,16 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
     for (let i = 1; i < sorted.length; i++) {
       const victim = sorted[i];
 
-      // Find a free van for the victim (any van other than the one it's on)
+      // Find a free, capability-matching van for the victim
+      const { needsSingapore, needsThailand } = detectTripRequirements(
+        victim.fromLocation ?? "",
+        victim.toLocation ?? "",
+      );
       let freeVan: (typeof allVans)[number] | null = null;
       for (const van of allVans) {
         if (van.id === victim.vanId) continue;
+        if (needsSingapore && van.singaporeEnabled !== 1) continue;
+        if (needsThailand && van.thailandEnabled !== 1) continue;
         const [conflict] = await db
           .select({ id: bookings.id })
           .from(bookings)
