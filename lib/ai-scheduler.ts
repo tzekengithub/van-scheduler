@@ -146,28 +146,44 @@ export async function aiRecheckAllVans(
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://van-scheduler.vercel.app",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-pro-preview",
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userMessage },
-        ],
-      }),
-    });
+    emit(`🤖 Sending ${unprotected.length} booking(s) to Gemini 2.5 Pro…`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min hard timeout
+
+    let response: Response;
+    try {
+      response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://van-scheduler.vercel.app",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-pro-preview",
+          temperature: 0,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: userMessage },
+          ],
+        }),
+      });
+    } catch (fetchErr: any) {
+      clearTimeout(timeoutId);
+      if (fetchErr?.name === "AbortError") throw new Error("AI request timed out after 2 minutes");
+      throw fetchErr;
+    }
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
       throw new Error(`OpenRouter error ${response.status}: ${errText.slice(0, 200)}`);
     }
+
+    emit("⏳ AI responded — parsing assignments…");
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;

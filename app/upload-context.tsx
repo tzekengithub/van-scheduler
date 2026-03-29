@@ -71,6 +71,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     total: number;
     phase: "inserting" | "rechecking";
   } | null>(null);
+  const [recheckLog, setRecheckLog] = useState<string[]>([]);
+  const [recheckStartTime, setRecheckStartTime] = useState<number | null>(null);
+  const [recheckElapsed, setRecheckElapsed] = useState(0);
 
   const [parseProgress, setParseProgress] = useState<{
     phase: "preview" | "upload";
@@ -113,6 +116,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     progressTimerRef.current = setInterval(() => setProgressTick((t) => t + 1), 500);
     return () => { if (progressTimerRef.current) clearInterval(progressTimerRef.current); };
   }, [parseProgress]);
+
+  // Elapsed timer during AI recheck
+  useEffect(() => {
+    if (!recheckStartTime) { setRecheckElapsed(0); return; }
+    const id = setInterval(() => setRecheckElapsed(Math.floor((Date.now() - recheckStartTime) / 1000)), 500);
+    return () => clearInterval(id);
+  }, [recheckStartTime]);
 
   // Auto-show panel when parsing starts or preview is ready
   useEffect(() => {
@@ -188,6 +198,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         etaMs: null,
       });
 
+      setRecheckLog([]);
+      setRecheckStartTime(null);
+      setRecheckElapsed(0);
+
       let inserted = 0;
       let insertError: string | undefined;
 
@@ -217,8 +231,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 setInsertProgress({ inserted: event.inserted, total: event.total, phase: "inserting" });
               } else if (event.type === "recheck") {
                 setInsertProgress((prev) => prev ? { ...prev, phase: "rechecking" } : { inserted: 0, total: 0, phase: "rechecking" });
+                setRecheckLog([]);
+                setRecheckStartTime(Date.now());
               } else if (event.type === "recheck_log") {
-                // log lines streamed during AI recheck — no UI action needed here
+                setRecheckLog((prev) => [...prev.slice(-49), event.message ?? ""]);
               } else if (event.type === "ai_summary") {
                 setAiSummary(event.summary ?? null);
                 setAiReasoning(event.reasoning ?? []);
@@ -233,6 +249,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       }
 
       setInsertProgress(null);
+      setRecheckStartTime(null);
       const results = [{ fileName: uploadFiles.map((f) => f.name).join(", "), inserted, error: insertError }];
       window.dispatchEvent(new CustomEvent("bookings-uploaded", { detail: { count: inserted } }));
       setUploadResults(results);
@@ -319,12 +336,27 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 </span>
               )}
               {confirming && (
-                <span className="text-xs text-blue-600">
-                  {insertProgress?.phase === "rechecking"
-                    ? "Rechecking vans…"
-                    : insertProgress
-                    ? `Inserting ${insertProgress.inserted} / ${insertProgress.total} rows…`
-                    : "Uploading…"}
+                <span className="text-xs text-blue-600 flex flex-col gap-0.5 max-w-[320px]">
+                  {insertProgress?.phase === "rechecking" ? (
+                    <>
+                      <span className="flex items-center gap-1.5">
+                        <svg className="animate-spin h-3 w-3 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                        </svg>
+                        AI assigning vans… {recheckElapsed > 0 && <span className="text-zinc-400">({recheckElapsed}s)</span>}
+                      </span>
+                      {recheckLog.length > 0 && (
+                        <span className="text-[10px] text-zinc-500 truncate">
+                          {recheckLog[recheckLog.length - 1]}
+                        </span>
+                      )}
+                    </>
+                  ) : insertProgress ? (
+                    `Inserting ${insertProgress.inserted} / ${insertProgress.total} rows…`
+                  ) : (
+                    "Uploading…"
+                  )}
                 </span>
               )}
             </div>
