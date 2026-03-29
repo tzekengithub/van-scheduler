@@ -19,6 +19,7 @@ import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq } from "drizzle-orm";
 import { recheckAllVans } from "@/lib/recheck";
+import { getActiveRules } from "@/lib/scheduling-rules";
 
 export interface AiReasoningEntry {
   bookingId: number;
@@ -142,6 +143,13 @@ export async function aiRecheckAllVans(
 
     const userMessage = `CURRENT FLEET:\n${JSON.stringify(vansPayload, null, 2)}\n\nBOOKINGS TO ASSIGN:\n${JSON.stringify(bookingsPayload, null, 2)}`;
 
+    // Load saved scheduling rules
+    const customRules = await getActiveRules();
+    const customRulesSection = customRules.length > 0
+      ? `\n\nCUSTOM SCHEDULING RULES (user-defined, highest priority after hard constraints):\n${customRules.map((r, i) => `${i + 1}. ${r}`).join("\n")}`
+      : "";
+    const finalUserMessage = userMessage + customRulesSection;
+
     // Step 5 — Call OpenRouter
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
@@ -167,7 +175,7 @@ export async function aiRecheckAllVans(
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userMessage },
+            { role: "user", content: finalUserMessage },
           ],
         }),
       });
@@ -287,10 +295,10 @@ export async function aiRecheckAllVans(
     // Step 9 — Return
     return { summary: result.summary, log, reasoning };
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
     console.error("[AI-SCHEDULER ERROR]", err);
     // Fallback: use existing rules engine
-    const warningMsg = "⚠ AI scheduler failed — fell back to rules engine";
-    emit(warningMsg);
+    emit(`⚠ AI scheduler failed (${errMsg}) — fell back to rules engine`);
     await recheckAllVans((msg) => {
       log.push(msg);
       logger?.(msg);
