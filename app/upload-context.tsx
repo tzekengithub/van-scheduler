@@ -495,8 +495,61 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               );
             })()}
 
-            {/* Parsing / upload progress */}
-            {(parsing || confirming) && parseProgress && (() => {
+            {/* Insert / recheck progress — shown instead of the parse bar during confirm */}
+            {confirming && insertProgress && (
+              <div className="py-6 px-2 space-y-3">
+                {insertProgress.phase === "rechecking" ? (
+                  <>
+                    <div className="flex items-center gap-2 text-sm font-medium text-indigo-700">
+                      <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                      <span>AI assigning vans…</span>
+                      {recheckElapsed > 0 && (
+                        <span className="text-zinc-400 font-mono text-xs">{recheckElapsed}s</span>
+                      )}
+                    </div>
+                    {recheckLog.length > 0 ? (
+                      <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2.5 max-h-48 overflow-y-auto space-y-1">
+                        {recheckLog.map((line, i) => (
+                          <div key={i} className="text-[11px] font-mono text-zinc-600 leading-relaxed">{line}</div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-zinc-400">Waiting for AI response…</p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between text-xs font-medium text-zinc-700">
+                      <span className="flex items-center gap-1.5">
+                        <svg className="animate-spin h-3.5 w-3.5 text-blue-500 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                        </svg>
+                        Inserting rows
+                      </span>
+                      <span className="font-mono tabular-nums text-zinc-500">
+                        {insertProgress.inserted} / {insertProgress.total}
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-zinc-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 rounded-full transition-all duration-150"
+                        style={{ width: `${insertProgress.total > 0 ? Math.round(insertProgress.inserted / insertProgress.total * 100) : 0}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-zinc-400">
+                      {insertProgress.total > 0 ? `${Math.round(insertProgress.inserted / insertProgress.total * 100)}% complete` : "Starting…"}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Parsing / upload progress (preview phase only — hidden during confirm) */}
+            {(parsing || (confirming && !insertProgress)) && parseProgress && (() => {
               const elapsedMs = Date.now() - parseProgress.startTime + (progressTick * 0); // progressTick triggers re-render
               const elapsedMs2 = Date.now() - parseProgress.startTime;
               const elapsedSec = Math.floor(elapsedMs2 / 1000);
@@ -566,47 +619,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                     </div>
                   )}
 
-                  {/* Row-level insertion progress (upload phase only) */}
-                  {confirming && insertProgress && (
-                    <div className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3">
-                      {insertProgress.phase === "rechecking" ? (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 text-xs text-indigo-600">
-                            <svg className="animate-spin h-3 w-3 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                            <span>AI assigning vans…</span>
-                            {recheckElapsed > 0 && (
-                              <span className="text-zinc-400 font-mono">{recheckElapsed}s</span>
-                            )}
-                          </div>
-                          {recheckLog.length > 0 && (
-                            <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2 max-h-36 overflow-y-auto space-y-0.5">
-                              {recheckLog.map((line, i) => (
-                                <div key={i} className="text-[11px] font-mono text-zinc-600 leading-relaxed">{line}</div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between text-xs text-zinc-600">
-                            <span>Inserting rows</span>
-                            <span className="font-mono tabular-nums">
-                              {insertProgress.inserted} / {insertProgress.total}
-                            </span>
-                          </div>
-                          <div className="w-full h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-500 rounded-full transition-all duration-150"
-                              style={{ width: `${insertProgress.total > 0 ? Math.round(insertProgress.inserted / insertProgress.total * 100) : 0}%` }}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })()}
