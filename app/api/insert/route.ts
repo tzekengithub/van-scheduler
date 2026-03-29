@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { bookings } from "@/drizzle/schema";
-import { recheckAllVans } from "@/lib/recheck";
+import { aiRecheckAllVans } from "@/lib/ai-scheduler";
 import type { ParsedBooking } from "@/lib/pdf-parser";
 
 export const runtime = "nodejs";
@@ -60,8 +60,12 @@ export async function POST(request: NextRequest) {
         }
 
         send({ type: "recheck" });
-        await recheckAllVans();
 
+        const { summary, reasoning } = await aiRecheckAllVans((msg) => {
+          send({ type: "recheck_log", message: msg });
+        });
+
+        send({ type: "ai_summary", summary, reasoning });
         send({ type: "done", inserted: rows.length });
         controller.close();
       } catch (error: any) {

@@ -1,0 +1,288 @@
+/*
+ * MANUAL ACTIONS REQUIRED BY STAFF:
+ * 1. Fill in outsourcedCompany name when a booking is auto-outsourced
+ *    → Van Schedule page shows conflict banner
+ * 2. Mark bookings as paid (paidStatus)
+ *    → Daily Jobs or All Jobs page
+ * 3. Override incorrect van assignments
+ *    → Click van field on any booking row to edit
+ *    → This sets manualChange=1, locking the assignment
+ * 4. Reset a bad manual assignment back to auto
+ *    → Click "Reset to auto" on the booking row
+ * 5. Add new vans or remove vans from the fleet
+ *    → Dashboard → Van Management section
+ * 6. Handle edge case routes the AI may not know about
+ *    → If AI assigns wrong van for unusual route, override manually
+ */
+
+import { db } from "@/lib/db";
+import { bookings, vans } from "@/drizzle/schema";
+import { eq } from "drizzle-orm";
+import { recheckAllVans } from "@/lib/recheck";
+
+export interface AiReasoningEntry {
+  bookingId: number;
+  van: string | null;
+  action: "assigned" | "outsourced";
+  reasoning: string;
+}
+
+export interface AiRecheckResult {
+  summary: string;
+  log: string[];
+  reasoning: AiReasoningEntry[];
+}
+
+const SYSTEM_PROMPT = `You are a van scheduling optimizer for a Malaysian transport company
+called Excellent Travel. You assign vans to trip bookings.
+
+THE FLEET:
+You will receive the current van list in each request.
+
+HARD CONSTRAINTS — never violate these:
+- One van = maximum one job per day. No exceptions.
+- Routes containing "singapore" (case-insensitive) in from/to/details:
+  only assign vans where singaporeEnabled = true
+- Routes containing "thailand" or "hatyai" or "hat yai" or "padang besar"
+  (case-insensitive) in from/to/details: only assign vans where
+  thailandEnabled = true
+- Never reassign bookings where manualChange = 1 (return currentVanId as-is)
+- Never reassign confirmed outsourced bookings (inHouseOrOutsourced = 'O'
+  with outsourcedCompany filled)
+
+OPTIMIZATION GOALS — in strict priority order:
+1. Minimize total outsourced bookings — always try to keep jobs in-house
+2. Invoice continuity — all bookings sharing the same (invoiceNo +
+   vehicleIndex) across multiple dates MUST use the same van
+3. Location continuity — if a van's last job on a date ends at location X,
+   prefer assigning that van to the next job departing from X on a
+   subsequent date
+4. Trip type priority when vans conflict on the same date:
+   day_trip > one_way_ride > round_trip > trip
+   Higher priority jobs get the van; lower priority gets displaced
+5. Workload distribution — spread jobs evenly across vans where possible
+
+OUTSOURCE ONLY when:
+- All vans are already committed on that date
+- No capable van exists for the route (SG/TH constraints)
+- It is genuinely impossible to assign in-house without violating a
+  hard constraint
+
+OUTPUT — return ONLY this JSON shape, nothing else:
+{
+  "assignments": [
+    {
+      "bookingId": 123,
+      "vanId": 4,
+      "reasoning": "one concise sentence"
+    }
+  ],
+  "outsourced": [
+    {
+      "bookingId": 456,
+      "reasoning": "one concise sentence explaining why no van was available"
+    }
+  ],
+  "summary": "2-3 sentence plain English overview of the full schedule, highlighting any outsourced jobs or notable decisions"
+}
+
+Every bookingId from the input must appear in either assignments or outsourced. Never omit a booking from the output.`;
+
+export async function aiRecheckAllVans(
+  logger?: (msg: string) => void,
+): Promise<AiRecheckResult> {
+  const log: string[] = [];
+  const emit = (msg: string) => {
+    log.push(msg);
+    logger?.(msg);
+  };
+
+  try {
+    // Step 1 — Fetch all data
+    const allVans = await db.select().from(vans);
+    const allBookings = await db.select().from(bookings);
+
+    // Step 2 — Separate protected vs unprotected bookings
+    const isProtected = (b: (typeof allBookings)[0]) =>
+      b.manualChange === 1 ||
+      (b.inHouseOrOutsourced === "O" && (b.outsourcedCompany ?? "").trim() !== "");
+
+    const unprotected = allBookings.filter((b) => !isProtected(b));
+
+    // Step 3 — Early return if nothing to assign
+    if (unprotected.length === 0) {
+      return { summary: "No bookings to assign.", log, reasoning: [] };
+    }
+
+    // Step 4 — Build user message payload
+    const vansPayload = allVans.map((v) => ({
+      vanId: v.id,
+      plate: v.vanNumber,
+      driver: v.driverName ?? "",
+      singaporeEnabled: v.singaporeEnabled === 1,
+      thailandEnabled: v.thailandEnabled === 1,
+    }));
+
+    const bookingsPayload = unprotected.map((b) => ({
+      bookingId: b.id,
+      travelDate: b.travelDate,
+      from: b.fromLocation,
+      to: b.toLocation,
+      details: b.details ?? "",
+      tripType: b.tripType ?? "trip",
+      invoiceNo: b.invoiceNo ?? "",
+      vehicleIndex: b.vehicleIndex ?? 1,
+      numberOfVehicles: b.numberOfVehicles ?? 1,
+      passengerCount: b.passengerCount ?? 0,
+      manualChange: b.manualChange ?? 0,
+      currentVanId: b.vanId ?? null,
+      inHouseOrOutsourced: b.inHouseOrOutsourced ?? "I",
+      outsourcedCompany: b.outsourcedCompany ?? "",
+    }));
+
+    const userMessage = `CURRENT FLEET:\n${JSON.stringify(vansPayload, null, 2)}\n\nBOOKINGS TO ASSIGN:\n${JSON.stringify(bookingsPayload, null, 2)}`;
+
+    // Step 5 — Call OpenRouter
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://van-scheduler.vercel.app",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-pro-preview",
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userMessage },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      throw new Error(`OpenRouter error ${response.status}: ${errText.slice(0, 200)}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) throw new Error("OpenRouter returned empty content");
+
+    // Step 6 — Parse and validate
+    let result: {
+      assignments: Array<{ bookingId: number; vanId: number; reasoning: string }>;
+      outsourced: Array<{ bookingId: number; reasoning: string }>;
+      summary: string;
+    };
+
+    try {
+      result = JSON.parse(content);
+    } catch {
+      throw new Error("AI returned invalid JSON — falling back");
+    }
+
+    if (!Array.isArray(result.assignments) || !Array.isArray(result.outsourced)) {
+      throw new Error("AI returned incomplete assignment — falling back");
+    }
+
+    // Validate every unprotected bookingId is accounted for
+    const inputIds = new Set(unprotected.map((b) => b.id));
+    const assignedIds = new Set(result.assignments.map((a) => a.bookingId));
+    const outsourcedIds = new Set(result.outsourced.map((o) => o.bookingId));
+    for (const id of inputIds) {
+      if (!assignedIds.has(id) && !outsourcedIds.has(id)) {
+        throw new Error("AI returned incomplete assignment — falling back");
+      }
+    }
+
+    // Check for double-bookings: same van on same travelDate
+    const vanDateMap = new Map<string, number>();
+    for (const assignment of result.assignments) {
+      const booking = unprotected.find((b) => b.id === assignment.bookingId);
+      if (!booking) continue;
+      const key = `${assignment.vanId}::${booking.travelDate}`;
+      if (vanDateMap.has(key)) {
+        throw new Error("AI returned duplicate van assignment — falling back");
+      }
+      vanDateMap.set(key, assignment.bookingId);
+    }
+
+    // Step 7 — Write assignments to DB
+    const vanMap = new Map(allVans.map((v) => [v.id, v]));
+    const reasoning: AiReasoningEntry[] = [];
+
+    for (const assignment of result.assignments) {
+      const van = vanMap.get(assignment.vanId);
+      if (!van) continue;
+      await db
+        .update(bookings)
+        .set({
+          vanId: assignment.vanId,
+          vehiclePlate: van.vanNumber ?? "",
+          driverName: van.driverName ?? "",
+          driverContact: van.driverContact ?? "",
+          inHouseOrOutsourced: "I",
+          outsourcedCompany: "",
+        })
+        .where(eq(bookings.id, assignment.bookingId));
+
+      const booking = unprotected.find((b) => b.id === assignment.bookingId);
+      emit(
+        `✓ Assigned ${van.vanNumber} (${van.driverName ?? "?"}) → ${booking?.invoiceNo ?? `#${assignment.bookingId}`} on ${booking?.travelDate ?? "?"}`,
+      );
+      reasoning.push({
+        bookingId: assignment.bookingId,
+        van: van.vanNumber,
+        action: "assigned",
+        reasoning: assignment.reasoning,
+      });
+    }
+
+    for (const outsourced of result.outsourced) {
+      const booking = unprotected.find((b) => b.id === outsourced.bookingId);
+      await db
+        .update(bookings)
+        .set({
+          vanId: null,
+          vehiclePlate: "",
+          driverName: "",
+          driverContact: "",
+          inHouseOrOutsourced: "O",
+          outsourcedCompany: "",
+        })
+        .where(eq(bookings.id, outsourced.bookingId));
+
+      emit(
+        `⚠ Outsourced booking #${outsourced.bookingId} (${booking?.travelDate ?? "?"} ${booking?.fromLocation ?? ""}→${booking?.toLocation ?? ""}): ${outsourced.reasoning}`,
+      );
+      reasoning.push({
+        bookingId: outsourced.bookingId,
+        van: null,
+        action: "outsourced",
+        reasoning: outsourced.reasoning,
+      });
+    }
+
+    // Step 9 — Return
+    return { summary: result.summary, log, reasoning };
+  } catch (err) {
+    console.error("[AI-SCHEDULER ERROR]", err);
+    // Fallback: use existing rules engine
+    const warningMsg = "⚠ AI scheduler failed — fell back to rules engine";
+    emit(warningMsg);
+    await recheckAllVans((msg) => {
+      log.push(msg);
+      logger?.(msg);
+    });
+    return {
+      summary: "Van assignments completed using the rules engine (AI scheduler unavailable).",
+      log,
+      reasoning: [],
+    };
+  }
+}

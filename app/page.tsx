@@ -44,6 +44,9 @@ export default function DashboardPage() {
   const [actionMessage, setActionMessage] = useState('');
   const [rechecking, setRechecking] = useState(false);
   const [recheckLogs, setRecheckLogs] = useState<string[]>([]);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiReasoning, setAiReasoning] = useState<Array<{ bookingId: number; van: string | null; action: string; reasoning: string }>>([]);
+  const [showReasoning, setShowReasoning] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -155,6 +158,9 @@ export default function DashboardPage() {
     setRechecking(true);
     setActionMessage('');
     setRecheckLogs([]);
+    setAiSummary(null);
+    setAiReasoning([]);
+    setShowReasoning(false);
     try {
       const res = await fetch('/api/reassign', { method: 'POST' });
       if (!res.ok || !res.body) {
@@ -179,6 +185,12 @@ export default function DashboardPage() {
             setActionMessage('✅ Van assignments rechecked — same invoice = same van enforced, no double-bookings.');
           } else if (payload.startsWith('[ERROR]')) {
             setActionMessage(`❌ Recheck failed: ${payload.slice(7).trim()}`);
+          } else if (payload.startsWith('[AI_SUMMARY]')) {
+            try {
+              const aiData = JSON.parse(payload.slice('[AI_SUMMARY]'.length));
+              setAiSummary(aiData.summary ?? '');
+              setAiReasoning(aiData.reasoning ?? []);
+            } catch {}
           } else {
             setRecheckLogs(prev => [...prev, payload]);
           }
@@ -379,9 +391,46 @@ export default function DashboardPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
                 Recheck Van Assignments
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-300 text-amber-900 uppercase tracking-wide">AI</span>
               </>
             )}
           </button>
+
+          {/* AI summary box */}
+          {aiSummary && !rechecking && (
+            <div className="mt-4 border-l-4 border-amber-400 bg-amber-50 rounded-r-lg px-4 py-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 uppercase tracking-wide">AI Scheduler</span>
+              </div>
+              <p className="text-sm text-amber-900">{aiSummary}</p>
+              {aiReasoning.length > 0 && (
+                <div className="mt-2">
+                  <button
+                    onClick={() => setShowReasoning((v) => !v)}
+                    className="text-xs text-amber-700 hover:text-amber-900 underline underline-offset-2 transition-colors"
+                  >
+                    {showReasoning ? "Hide" : "View"} assignment reasoning ({aiReasoning.length})
+                  </button>
+                  {showReasoning && (
+                    <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                      {aiReasoning.map((r, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs">
+                          <span className={`shrink-0 font-bold ${r.action === 'outsourced' ? 'text-orange-600' : 'text-green-700'}`}>
+                            {r.action === 'outsourced' ? '⚠' : '✓'}
+                          </span>
+                          <span className="text-amber-900">
+                            <span className="font-medium">#{r.bookingId}</span>
+                            {r.van && <span className="text-amber-700"> → {r.van}</span>}
+                            {': '}{r.reasoning}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Terminal log panel */}
           {recheckLogs.length > 0 && (

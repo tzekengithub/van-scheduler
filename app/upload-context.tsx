@@ -63,6 +63,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [minimised, setMinimised] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [uploadResults, setUploadResults] = useState<{ fileName: string; inserted: number; error?: string }[] | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiReasoning, setAiReasoning] = useState<Array<{ bookingId: number; van: string | null; action: string; reasoning: string }>>([]);
+  const [showReasoning, setShowReasoning] = useState(false);
   const [insertProgress, setInsertProgress] = useState<{
     inserted: number;
     total: number;
@@ -171,6 +174,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setConfirming(true);
     setUploadResults(null);
     setInsertProgress(null);
+    setAiSummary(null);
+    setAiReasoning([]);
+    setShowReasoning(false);
     const startTime = Date.now();
     try {
       setParseProgress({
@@ -211,6 +217,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 setInsertProgress({ inserted: event.inserted, total: event.total, phase: "inserting" });
               } else if (event.type === "recheck") {
                 setInsertProgress((prev) => prev ? { ...prev, phase: "rechecking" } : { inserted: 0, total: 0, phase: "rechecking" });
+              } else if (event.type === "recheck_log") {
+                // log lines streamed during AI recheck — no UI action needed here
+              } else if (event.type === "ai_summary") {
+                setAiSummary(event.summary ?? null);
+                setAiReasoning(event.reasoning ?? []);
               } else if (event.type === "done") {
                 inserted = event.inserted ?? 0;
               } else if (event.type === "error") {
@@ -655,6 +666,43 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 {uploadResults.some((r) => r.inserted === 0 && !r.error) && (
                   <p className="mt-2 text-xs text-amber-600">⚠️ Skipped files had no parseable booking rows (e.g. overtime-only invoices).</p>
                 )}
+
+                {/* AI Scheduler summary */}
+                {aiSummary && (
+                  <div className="mt-4 border-l-4 border-amber-400 bg-amber-50 rounded-r-lg px-4 py-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 uppercase tracking-wide">AI Scheduler</span>
+                    </div>
+                    <p className="text-sm text-amber-900">{aiSummary}</p>
+                    {aiReasoning.length > 0 && (
+                      <div className="mt-2">
+                        <button
+                          onClick={() => setShowReasoning((v) => !v)}
+                          className="text-xs text-amber-700 hover:text-amber-900 underline underline-offset-2 transition-colors"
+                        >
+                          {showReasoning ? "Hide" : "View"} assignment reasoning ({aiReasoning.length})
+                        </button>
+                        {showReasoning && (
+                          <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                            {aiReasoning.map((r, i) => (
+                              <div key={i} className="flex items-start gap-2 text-xs">
+                                <span className={`shrink-0 font-bold ${r.action === "outsourced" ? "text-orange-600" : "text-green-700"}`}>
+                                  {r.action === "outsourced" ? "⚠" : "✓"}
+                                </span>
+                                <span className="text-amber-900">
+                                  <span className="font-medium">#{r.bookingId}</span>
+                                  {r.van && <span className="text-amber-700"> → {r.van}</span>}
+                                  {": "}{r.reasoning}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <button
                   onClick={handleCancelUpload}
                   className="mt-4 h-9 px-5 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700"
