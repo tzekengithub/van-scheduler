@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
         "HTTP-Referer": "https://van-scheduler.vercel.app",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-preview",
+        model: "google/gemini-2.5-pro-preview",
         temperature: 0.3,
         stream: true,
         messages: [{ role: "system", content: systemPrompt }, ...messages],

@@ -85,9 +85,14 @@ export default function ChatPanel() {
         });
 
         if (!res.ok || !res.body) {
+          let errMsg = "Sorry, I couldn't reach the AI service. Please try again.";
+          try {
+            const errData = await res.json();
+            if (errData?.error) errMsg = `AI error: ${errData.error}`;
+          } catch {}
           setMessages((prev) => [
             ...prev.slice(0, -1),
-            { role: "assistant", content: "Sorry, I couldn't reach the AI service. Please try again." },
+            { role: "assistant", content: errMsg },
           ]);
           return;
         }
