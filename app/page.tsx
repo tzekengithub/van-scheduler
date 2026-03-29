@@ -307,18 +307,9 @@ export default function DashboardPage() {
                     {van.driverContact && (
                       <span className="font-normal opacity-60">{van.driverContact}</span>
                     )}
-                    <div className="flex gap-1 mt-0.5 flex-wrap">
-                      {van.location && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-white/50 border border-current opacity-70">
-                          📍 {van.location}
-                        </span>
-                      )}
-                      {van.maxPaxCapacity != null && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-white/50 border border-current opacity-70">
-                          👥 {(van.maxPaxCapacity ?? 1) - 1}+1 seats
-                        </span>
-                      )}
-                    </div>
+                    {van.maxPaxCapacity != null && (
+                      <span className="font-normal opacity-60 text-[11px]">👥 {(van.maxPaxCapacity ?? 1) - 1}+1 seats</span>
+                    )}
                     <div className="flex gap-1 mt-1">
                       <button
                         onClick={() => handleToggleCapability(van.id, "singaporeEnabled", van.singaporeEnabled)}
