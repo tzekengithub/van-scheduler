@@ -27,7 +27,7 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   log("━━━ RECHECK STARTED ━━━");
 
   // ── Step 1: Find all auto-managed bookings ───────────────────────────────────
-  log("Step 1/6 — scanning auto-managed bookings…");
+  log("Step 1/7 — scanning auto-managed bookings…");
   const allAuto = await db
     .select({
       id: bookings.id,
@@ -69,7 +69,7 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   }
 
   // ── Step 2: Batch-reset — clear van + restore to in-house ───────────────────
-  log("Step 2/6 — resetting van assignments (clearing vanId, plate, driver)…");
+  log("Step 2/7 — resetting van assignments (clearing vanId, plate, driver)…");
   await db
     .update(bookings)
     .set({
@@ -83,20 +83,24 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   log(`  cleared ${toResetIds.length} booking(s)`);
 
   // ── Step 3: Reassign all cleared bookings ────────────────────────────────────
-  log("Step 3/6 — running van reassignment (priority: day_trip > one_way_ride > round_trip > trip)…");
+  log("Step 3/7 — running van reassignment (priority: day_trip > one_way_ride > round_trip > trip)…");
   const { assigned, conflicts } = await runReassign(undefined, log);
   log(`  reassignment done — assigned=${assigned} conflicts=${conflicts}`);
 
   // ── Step 4: Enforce same-invoice-same-van ────────────────────────────────────
-  log("Step 4/6 — enforcing same invoice = same van per (invoiceNo, vehicleIndex)…");
+  log("Step 4/7 — enforcing same invoice = same van per (invoiceNo, vehicleIndex)…");
   await enforceInvoiceVanConsistency(log);
 
-  // ── Step 5: HARD GUARANTEE — eliminate every double-booking ─────────────────
-  log("Step 5/6 — scanning for double-bookings (same van, same date)…");
+  // ── Step 5: Same-day same-invoice-slot conflicts → assign any free van ───────
+  log("Step 5/7 — assigning free vans to same-invoice/vehicleIndex/date conflicts…");
+  await assignFreeVanToSameDayConflicts(log);
+
+  // ── Step 6: HARD GUARANTEE — eliminate every double-booking ─────────────────
+  log("Step 6/7 — scanning for double-bookings (same van, same date)…");
   await eliminateDoubleBookings(log);
 
-  // ── Step 6: Any still-unassigned → mark as outsourced ───────────────────────
-  log("Step 6/6 — marking any still-unassigned bookings as outsourced…");
+  // ── Step 7: Any still-unassigned → mark as outsourced ───────────────────────
+  log("Step 7/7 — marking any still-unassigned bookings as outsourced…");
   const stillUnassigned = await db
     .select({ id: bookings.id })
     .from(bookings)
@@ -119,6 +123,119 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   }
 
   log("━━━ RECHECK COMPLETE ━━━");
+}
+
+/**
+ * For unassigned auto-managed in-house bookings that share the same
+ * (invoiceNo, vehicleIndex, travelDate) with an already-assigned booking,
+ * try to assign any randomly-selected free capable van instead of falling
+ * through to outsource.  This handles the "same-day same-invoice-slot"
+ * multi-vehicle scenario where the preferred invoice van is already taken.
+ *
+ * Only outsources if every van is booked on that date.
+ */
+async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Promise<void> {
+  const unassigned = await db
+    .select()
+    .from(bookings)
+    .where(
+      and(
+        isNull(bookings.vanId),
+        eq(bookings.manualChange, 0),
+        eq(bookings.inHouseOrOutsourced, "I"),
+      )
+    );
+
+  if (unassigned.length === 0) {
+    log("  no unassigned in-house bookings — nothing to do");
+    return;
+  }
+
+  const allVans = await db.select().from(vans).orderBy(vans.id);
+  let fixed = 0;
+
+  for (const b of unassigned) {
+    if (!b.invoiceNo) continue;
+
+    // Is there another booking with the same (invoiceNo, vehicleIndex, travelDate)
+    // that already has a van?  That's the conflict scenario the user described.
+    const [sibling] = await db
+      .select({ id: bookings.id })
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.invoiceNo, b.invoiceNo),
+          eq(bookings.vehicleIndex, b.vehicleIndex ?? 1),
+          eq(bookings.travelDate, b.travelDate),
+          isNotNull(bookings.vanId),
+          ne(bookings.id, b.id),
+        )
+      )
+      .limit(1);
+
+    if (!sibling) continue; // not the same-day same-invoice conflict — leave for step 7
+
+    log(
+      `[assignFreeVan] ${b.invoiceNo} vi=${b.vehicleIndex ?? 1} date=${b.travelDate} id=${b.id} — same-day conflict with assigned sibling, picking random free van…`
+    );
+
+    const { needsSingapore, needsThailand } = detectTripRequirements(
+      b.fromLocation ?? "",
+      b.toLocation ?? "",
+    );
+
+    // Shuffle all vans so the selection is random
+    const shuffled = [...allVans].sort(() => Math.random() - 0.5);
+
+    let freeVan: typeof allVans[number] | null = null;
+    for (const van of shuffled) {
+      if (needsSingapore && van.singaporeEnabled !== 1) continue;
+      if (needsThailand && van.thailandEnabled !== 1) continue;
+
+      const [conflict] = await db
+        .select({ id: bookings.id })
+        .from(bookings)
+        .where(
+          and(
+            eq(bookings.vanId, van.id),
+            eq(bookings.travelDate, b.travelDate),
+            ne(bookings.id, b.id),
+          )
+        )
+        .limit(1);
+
+      if (!conflict) {
+        freeVan = van;
+        break;
+      }
+    }
+
+    if (freeVan) {
+      await db
+        .update(bookings)
+        .set({
+          vanId: freeVan.id,
+          vehiclePlate: freeVan.vanNumber ?? "",
+          driverName: freeVan.driverName ?? "",
+          driverContact: freeVan.driverContact ?? "",
+        })
+        .where(eq(bookings.id, b.id));
+      log(
+        `[assignFreeVan] id=${b.id} → van ${freeVan.id} (${freeVan.vanNumber ?? "?"})`
+      );
+      fixed++;
+    } else {
+      log(
+        `[assignFreeVan] id=${b.id} — all vans fully booked on ${b.travelDate}, will outsource in step 7`
+      );
+    }
+  }
+
+  if (fixed > 0) {
+    log(`  resolved ${fixed} same-day conflict(s) by assigning free van(s)`);
+  } else {
+    log("  no same-day conflict resolutions needed ✓");
+  }
 }
 
 /**
