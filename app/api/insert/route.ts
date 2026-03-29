@@ -1,0 +1,86 @@
+import { NextRequest } from "next/server";
+import { db } from "@/lib/db";
+import { bookings } from "@/drizzle/schema";
+import { recheckAllVans } from "@/lib/recheck";
+import type { ParsedBooking } from "@/lib/pdf-parser";
+
+export const runtime = "nodejs";
+
+export async function POST(request: NextRequest) {
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data: object) => {
+        try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch {}
+      };
+
+      try {
+        const { bookings: rows }: { bookings: ParsedBooking[] } = await request.json();
+
+        if (!rows || rows.length === 0) {
+          send({ type: "done", inserted: 0 });
+          controller.close();
+          return;
+        }
+
+        send({ type: "parsed", total: rows.length });
+
+        for (let i = 0; i < rows.length; i++) {
+          const booking = rows[i];
+          await db.insert(bookings).values({
+            travelDate: booking.travelDate,
+            fromLocation: booking.fromLocation,
+            toLocation: booking.toLocation,
+            isRoundTrip: booking.isRoundTrip,
+            details: booking.details,
+            vanId: null,
+            manualChange: 0,
+            invoiceNo: booking.invoiceNo,
+            clientDetails: booking.clientDetails,
+            day: booking.day,
+            month: booking.month,
+            year: booking.year,
+            passengerCount: 0,
+            myrPerVehicle: String(booking.myrPerVehicle),
+            amount: String(booking.myrPerVehicle),
+            vehiclePlate: null,
+            driverName: null,
+            driverContact: null,
+            paidStatus: booking.paidStatus,
+            overtime: booking.overtime,
+            introducer: booking.introducer,
+            inHouseOrOutsourced: "I",
+            outsourcedCompany: booking.outsourcedCompany,
+            tripType: booking.tripType,
+            vehicleIndex: booking.vehicleIndex,
+            numberOfVehicles: booking.numberOfVehicles,
+          });
+          send({ type: "progress", inserted: i + 1, total: rows.length });
+        }
+
+        send({ type: "recheck" });
+        await recheckAllVans();
+
+        send({ type: "done", inserted: rows.length });
+        controller.close();
+      } catch (error: any) {
+        console.error("Insert error:", error);
+        const send2 = (data: object) => {
+          try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch {}
+        };
+        send2({ type: "error", error: error.message });
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}

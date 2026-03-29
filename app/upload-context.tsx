@@ -13,10 +13,16 @@ interface PreviewBooking {
   details: string;
   fromLocation: string;
   toLocation: string;
+  isRoundTrip: 0 | 1;
   numberOfVehicles: number;
   vehicleIndex: number;
+  myrPerVehicle: number;
   amount: number;
   tripType: string;
+  paidStatus: string;
+  overtime: string;
+  introducer: string;
+  outsourcedCompany: string;
 }
 
 interface UploadContextValue {
@@ -161,72 +167,63 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   }
 
   async function handleConfirmUpload() {
-    if (uploadFiles.length === 0) return;
+    if (!previewRows || previewRows.length === 0) return;
     setConfirming(true);
     setUploadResults(null);
     setInsertProgress(null);
     const startTime = Date.now();
     try {
-      let totalCount = 0;
-      const results: { fileName: string; inserted: number; error?: string }[] = [];
-      for (let i = 0; i < uploadFiles.length; i++) {
-        const file = uploadFiles[i];
-        setParseProgress({
-          phase: "upload",
-          current: i + 1,
-          total: uploadFiles.length,
-          currentFile: file.name,
-          startTime,
-          etaMs: null,
-        });
-        setInsertProgress(null);
-        const formData = new FormData();
-        formData.append("file", file);
-        const res = await fetch("/api/upload", { method: "POST", body: formData });
+      setParseProgress({
+        phase: "upload",
+        current: 1,
+        total: 1,
+        currentFile: uploadFiles.map((f) => f.name).join(", "),
+        startTime,
+        etaMs: null,
+      });
 
-        let fileInserted = 0;
-        let fileError: string | undefined;
+      let inserted = 0;
+      let insertError: string | undefined;
 
-        if (res.body) {
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const parts = buffer.split("\n\n");
-            buffer = parts.pop() ?? "";
-            for (const part of parts) {
-              if (!part.startsWith("data: ")) continue;
-              try {
-                const event = JSON.parse(part.slice(6));
-                if (event.type === "parsed") {
-                  setInsertProgress({ inserted: 0, total: event.total, phase: "inserting" });
-                } else if (event.type === "progress") {
-                  setInsertProgress({ inserted: event.inserted, total: event.total, phase: "inserting" });
-                } else if (event.type === "recheck") {
-                  setInsertProgress((prev) => prev ? { ...prev, phase: "rechecking" } : { inserted: 0, total: 0, phase: "rechecking" });
-                } else if (event.type === "done") {
-                  fileInserted = event.inserted ?? 0;
-                } else if (event.type === "error") {
-                  fileError = Array.isArray(event.details) && event.details.length > 0
-                    ? event.details[0] : (event.error ?? "Upload failed");
-                }
-              } catch {}
-            }
+      const res = await fetch("/api/insert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookings: previewRows }),
+      });
+
+      if (res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() ?? "";
+          for (const part of parts) {
+            if (!part.startsWith("data: ")) continue;
+            try {
+              const event = JSON.parse(part.slice(6));
+              if (event.type === "parsed") {
+                setInsertProgress({ inserted: 0, total: event.total, phase: "inserting" });
+              } else if (event.type === "progress") {
+                setInsertProgress({ inserted: event.inserted, total: event.total, phase: "inserting" });
+              } else if (event.type === "recheck") {
+                setInsertProgress((prev) => prev ? { ...prev, phase: "rechecking" } : { inserted: 0, total: 0, phase: "rechecking" });
+              } else if (event.type === "done") {
+                inserted = event.inserted ?? 0;
+              } else if (event.type === "error") {
+                insertError = event.error ?? "Insert failed";
+              }
+            } catch {}
           }
         }
-
-        results.push({ fileName: file.name, inserted: fileInserted, error: fileError });
-        totalCount += fileInserted;
-        const elapsed = Date.now() - startTime;
-        const avgPerFile = elapsed / (i + 1);
-        const remaining = uploadFiles.length - (i + 1);
-        setParseProgress((prev) => prev ? { ...prev, etaMs: remaining * avgPerFile } : prev);
       }
+
       setInsertProgress(null);
-      window.dispatchEvent(new CustomEvent("bookings-uploaded", { detail: { count: totalCount } }));
+      const results = [{ fileName: uploadFiles.map((f) => f.name).join(", "), inserted, error: insertError }];
+      window.dispatchEvent(new CustomEvent("bookings-uploaded", { detail: { count: inserted } }));
       setUploadResults(results);
       setPreviewRows(null);
       setUploadError(null);
