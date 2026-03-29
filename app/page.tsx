@@ -261,7 +261,7 @@ export default function DashboardPage() {
                 className="w-10 text-center focus:outline-none text-zinc-900"
                 title="Max passenger capacity"
               />
-              <span className="text-zinc-400 text-xs">pax</span>
+              <span className="text-zinc-400 text-xs">total seats</span>
             </div>
             <label className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700 cursor-pointer select-none hover:bg-zinc-50">
               <input
@@ -315,7 +315,7 @@ export default function DashboardPage() {
                       )}
                       {van.maxPaxCapacity != null && (
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-white/50 border border-current opacity-70">
-                          👥 {van.maxPaxCapacity} pax
+                          👥 {(van.maxPaxCapacity ?? 1) - 1}+1 seats
                         </span>
                       )}
                     </div>
