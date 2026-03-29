@@ -9,6 +9,7 @@ export const vans = pgTable("vans", {
   thailandEnabled: integer("thailand_enabled").notNull().default(0),
   maxPaxCapacity: integer("max_pax_capacity").default(4),
   location: text("location").default(""),
+  vehicleType: text("vehicle_type").default("van"),
 });
 
 export const bookings = pgTable("bookings", {
@@ -50,3 +51,11 @@ export type Van = typeof vans.$inferSelect;
 export type NewVan = typeof vans.$inferInsert;
 export type Booking = typeof bookings.$inferSelect;
 export type NewBooking = typeof bookings.$inferInsert;
+
+export const schedulingRules = pgTable("scheduling_rules", {
+  id: serial("id").primaryKey(),
+  ruleText: text("rule_text").notNull(),
+  createdAt: text("created_at").notNull(),
+  active: integer("active").notNull().default(1),
+});
+export type SchedulingRule = typeof schedulingRules.$inferSelect;

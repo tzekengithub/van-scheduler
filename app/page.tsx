@@ -14,6 +14,7 @@ interface Van {
   thailandEnabled: number;
   maxPaxCapacity: number | null;
   location: string | null;
+  vehicleType: string | null;
 }
 
 const BADGE_COLORS = [
@@ -37,6 +38,7 @@ export default function DashboardPage() {
   const [newThailand, setNewThailand] = useState(false);
   const [newMaxPax, setNewMaxPax] = useState(4);
   const [newLocation, setNewLocation] = useState("");
+  const [newVehicleType, setNewVehicleType] = useState("van");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState(false);
@@ -80,6 +82,7 @@ export default function DashboardPage() {
           thailandEnabled: newThailand,
           maxPaxCapacity: newMaxPax,
           location: newLocation,
+          vehicleType: newVehicleType,
         }),
       });
       const data = await res.json();
@@ -92,6 +95,7 @@ export default function DashboardPage() {
       setNewThailand(false);
       setNewMaxPax(4);
       setNewLocation("");
+      setNewVehicleType("van");
       await fetchVans();
     } catch (e) {
       setError(String(e));
@@ -254,6 +258,14 @@ export default function DashboardPage() {
               placeholder="e.g. +60 12-xxx xxxx"
               className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
+            <input
+              type="text"
+              value={newVehicleType}
+              onChange={(e) => setNewVehicleType(e.target.value)}
+              placeholder="e.g. van, Toyota Alphard"
+              className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              title="Vehicle type"
+            />
             <select
               value={newLocation}
               onChange={(e) => setNewLocation(e.target.value)}
@@ -313,6 +325,9 @@ export default function DashboardPage() {
                 >
                   <div className="flex flex-col gap-0.5 min-w-0">
                     <span>{van.vanNumber}</span>
+                    {van.vehicleType && (
+                      <span className="font-normal opacity-75 text-[11px]">🚐 {van.vehicleType}</span>
+                    )}
                     {van.driverName && (
                       <span className="font-normal opacity-70">Driver: {van.driverName}</span>
                     )}
