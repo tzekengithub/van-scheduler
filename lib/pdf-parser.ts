@@ -27,6 +27,7 @@ export interface ParsedBooking {
   // new fields — Section 1
   tripType: TripType;
   isAlphardTrip: 0 | 1;
+  vehicleCategory: "Van" | "Alphard" | "Car";
 }
 
 /**
@@ -101,14 +102,21 @@ function cleanBookingDetails(raw: string): string {
 }
 
 /**
- * Returns true if the booking details or annotation line contain "Alphard",
- * indicating the trip requires a Toyota Alphard vehicle.
+ * Determine vehicle category from booking details and annotation bracket.
+ *
+ * "(5-Seater Car)" | "(7-Seater Car)" → "Car"  (auto-outsourced, skip van pool)
+ * "(Alphard)" or "alphard" anywhere    → "Alphard" (try Toyota Alphard; outsource if none)
+ * Otherwise                            → "Van"    (standard van pool)
  */
-function detectAlphardTrip(bookingDetails: string, annotationLine: string): boolean {
-  return (
-    bookingDetails.toLowerCase().includes("alphard") ||
-    annotationLine.toLowerCase().includes("alphard")
-  );
+function detectVehicleCategory(bookingDetails: string, annotationLine: string): "Van" | "Alphard" | "Car" {
+  const lowerAnnot = annotationLine.toLowerCase();
+  const lowerDetails = bookingDetails.toLowerCase();
+  if (
+    lowerAnnot.includes("5-seater car") || lowerAnnot.includes("7-seater car") ||
+    lowerDetails.includes("5-seater car") || lowerDetails.includes("7-seater car")
+  ) return "Car";
+  if (lowerAnnot.includes("alphard") || lowerDetails.includes("alphard")) return "Alphard";
+  return "Van";
 }
 
 /**
@@ -354,6 +362,9 @@ export function parseRawText(text: string): ParsedBooking[] {
     // "Paging", "Food", "Help to check in at the hotel", etc.
     if (!toLocation && !/day\s*trip/i.test(bookingDetails)) continue;
 
+    // ── Determine vehicle category (Van / Alphard / Car) ──
+    const vehicleCategory = detectVehicleCategory(bookingDetails, annotationLine);
+
     // ── Expand: one row per vehicle ──
     const baseRow = {
       travelDate,
@@ -372,12 +383,14 @@ export function parseRawText(text: string): ParsedBooking[] {
       vehiclePlate: "",
       driverName: "",
       paidStatus: "U",
-      inHouseOrOutsourced: "I",
+      // Car trips are always outsourced — mark "O" immediately, skip van pool
+      inHouseOrOutsourced: vehicleCategory === "Car" ? "O" : "I",
       outsourcedCompany: "",
       overtime: "",
       introducer: "",
       tripType,
-      isAlphardTrip: (detectAlphardTrip(bookingDetails, annotationLine) ? 1 : 0) as 0 | 1,
+      isAlphardTrip: (vehicleCategory === "Alphard" ? 1 : 0) as 0 | 1,
+      vehicleCategory,
     } as const;
 
     for (let vi = 1; vi <= numberOfVehicles; vi++) {

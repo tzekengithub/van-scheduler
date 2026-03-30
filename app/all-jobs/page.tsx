@@ -45,6 +45,7 @@ interface BookingRow {
   tourGuide: string | null;
   vehicleIndex: number | null;
   numberOfVehicles: number | null;
+  vehicleCategory: string | null;
 }
 
 type SortField = "travelDate" | "invoiceNo" | "amount";

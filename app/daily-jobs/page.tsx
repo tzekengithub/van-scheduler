@@ -47,6 +47,7 @@ interface BookingRow {
   tourGuide: string | null;
   vehicleIndex: number | null;
   numberOfVehicles: number | null;
+  vehicleCategory: string | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -532,7 +533,7 @@ export default function DailyJobsPage() {
                         cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" : "border-zinc-300"
                       }`}
                       defaultValue={row.outsourcedCompany ?? ""}
-                      placeholder="Company name"
+                      placeholder={row.vehicleCategory === "Alphard" ? "Alphard company" : row.vehicleCategory === "Car" ? "Car company" : "Company name"}
                       key={`oc-${row.id}`}
                       onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
                     />
@@ -731,11 +732,34 @@ export default function DailyJobsPage() {
             <div className="font-bold text-red-800 text-sm">
               ⚠️ CONFLICT — {noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length} issue{noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length !== 1 ? "s" : ""} found
             </div>
-            {outsourceNeededRows.map((r) => (
-              <div key={`on-${r.id}`} className="text-xs text-red-700 pl-4">
-                • {r.travelDate} | {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""} | {tripTypeLabel(r.tripType)} | <strong>OUTSOURCE COMPANY NEEDED — enter company name in the row</strong>
-              </div>
-            ))}
+            {(() => {
+              const alphardOut = outsourceNeededRows.filter((r) => r.vehicleCategory === "Alphard");
+              const carOut = outsourceNeededRows.filter((r) => r.vehicleCategory === "Car");
+              const vanOut = outsourceNeededRows.filter((r) => r.vehicleCategory !== "Alphard" && r.vehicleCategory !== "Car");
+              return <>
+                {alphardOut.length > 0 && (
+                  <div className="text-xs text-red-700 pl-4">
+                    🚐 <strong>Outsource (Alphard)</strong> — {alphardOut.length} booking{alphardOut.length !== 1 ? "s" : ""} need outsource company
+                    {alphardOut.map((r) => (
+                      <div key={`oa-${r.id}`} className="pl-4">• {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""}</div>
+                    ))}
+                  </div>
+                )}
+                {carOut.length > 0 && (
+                  <div className="text-xs text-red-700 pl-4">
+                    🚗 <strong>Outsource (Car)</strong> — {carOut.length} booking{carOut.length !== 1 ? "s" : ""} need outsource company
+                    {carOut.map((r) => (
+                      <div key={`oc-${r.id}`} className="pl-4">• {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""}</div>
+                    ))}
+                  </div>
+                )}
+                {vanOut.map((r) => (
+                  <div key={`on-${r.id}`} className="text-xs text-red-700 pl-4">
+                    • {r.travelDate} | {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""} | {tripTypeLabel(r.tripType)} | <strong>OUTSOURCE COMPANY NEEDED — enter company name in the row</strong>
+                  </div>
+                ))}
+              </>;
+            })()}
             {noVanRows.map((r) => (
               <div key={r.id} className="text-xs text-red-700 pl-4">
                 • {r.travelDate} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>NO VAN ASSIGNED</strong>

@@ -22,7 +22,13 @@ export async function smartAssignVan(
   _numberOfVehicles: number,
   tripType?: string | null,
   isAlphardTrip?: boolean,
+  vehicleCategory?: string | null,
 ): Promise<AssignResult> {
+  // Car trips (5-Seater / 7-Seater) are always outsourced — never assign a van
+  if (vehicleCategory === "Car") {
+    return { outsource: true, reason: "Car trip requested — outsource required" };
+  }
+
   const allVans = await db.select().from(vans).orderBy(vans.id);
   if (allVans.length === 0) return { outsource: true };
 

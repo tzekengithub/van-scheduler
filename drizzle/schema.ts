@@ -46,6 +46,7 @@ export const bookings = pgTable("bookings", {
   vehicleIndex: integer("vehicle_index").default(1),
   numberOfVehicles: integer("number_of_vehicles").default(1),
   isAlphardTrip: integer("is_alphard_trip").notNull().default(0),
+  vehicleCategory: text("vehicle_category").default("Van"),
 });
 
 export type Van = typeof vans.$inferSelect;

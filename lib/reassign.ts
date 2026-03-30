@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, isNull, isNotNull, inArray, asc, ne } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray, asc, ne, or } from "drizzle-orm";
 import { smartAssignVan, AssignResult, detectTripRequirements } from "@/lib/van-assignment";
 
 /**
@@ -43,17 +43,18 @@ export async function runReassign(
   const allVans = await db.select().from(vans);
   const vanMap = new Map(allVans.map((v) => [v.id, v]));
 
-  // ── Fetch target bookings ────────────────────────────────────────────────────
+  // ── Fetch target bookings (Car trips are always outsourced — skip them) ──────
+  const notCarTrip = or(isNull(bookings.vehicleCategory), ne(bookings.vehicleCategory, "Car"));
   const raw =
     bookingIds && bookingIds.length > 0
       ? await db
           .select()
           .from(bookings)
-          .where(inArray(bookings.id, bookingIds))
+          .where(and(inArray(bookings.id, bookingIds), notCarTrip))
       : await db
           .select()
           .from(bookings)
-          .where(and(isNull(bookings.vanId), eq(bookings.manualChange, 0)));
+          .where(and(isNull(bookings.vanId), eq(bookings.manualChange, 0), notCarTrip));
 
   // Sort: date ASC, then priority (day_trip first within each date), then invoice/vehicleIndex
   const targetBookings = [...raw].sort((a, b) => {
@@ -84,6 +85,7 @@ export async function runReassign(
       b.numberOfVehicles ?? 1,
       b.tripType,
       b.isAlphardTrip === 1,
+      b.vehicleCategory,
     );
     const vanId = typeof assignResult === "number" ? assignResult : null;
 
@@ -221,6 +223,7 @@ export async function runReassign(
         b.numberOfVehicles ?? 1,
         b.tripType,
         b.isAlphardTrip === 1,
+        b.vehicleCategory,
       );
       const vanId = typeof retryResult === "number" ? retryResult : null;
 

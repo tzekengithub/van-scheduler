@@ -33,6 +33,7 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
       id: bookings.id,
       inHouseOrOutsourced: bookings.inHouseOrOutsourced,
       outsourcedCompany: bookings.outsourcedCompany,
+      vehicleCategory: bookings.vehicleCategory,
     })
     .from(bookings)
     .where(eq(bookings.manualChange, 0));
@@ -47,19 +48,23 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
 
   // User-confirmed outsourced = I/O is 'O' AND company name is filled in.
   // These are a deliberate user choice — leave them alone.
+  // Car trips (vehicleCategory = "Car") are always outsourced — never reset them.
   const userConfirmedCount = allAuto.filter(
     (b) => b.inHouseOrOutsourced === "O" && (b.outsourcedCompany ?? "").trim() !== ""
   ).length;
+  const carTripCount = allAuto.filter((b) => b.vehicleCategory === "Car").length;
   const toResetIds = allAuto
     .filter((b) => {
       const userConfirmed =
         b.inHouseOrOutsourced === "O" &&
         (b.outsourcedCompany ?? "").trim() !== "";
-      return !userConfirmed;
+      const isCarTrip = b.vehicleCategory === "Car";
+      return !userConfirmed && !isCarTrip;
     })
     .map((b) => b.id);
 
   log(`  skipping ${userConfirmedCount} user-confirmed outsourced booking(s)`);
+  log(`  skipping ${carTripCount} Car trip(s) (always outsourced — 5/7-Seater Car)`);
   log(`  will reset ${toResetIds.length} booking(s)`);
 
   if (toResetIds.length === 0) {

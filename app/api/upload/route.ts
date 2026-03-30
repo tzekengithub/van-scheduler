@@ -120,10 +120,11 @@ export async function POST(request: NextRequest) {
             paidStatus: booking.paidStatus,
             overtime: booking.overtime,
             introducer: booking.introducer,
-            inHouseOrOutsourced: "I",
+            inHouseOrOutsourced: booking.inHouseOrOutsourced,
             outsourcedCompany: booking.outsourcedCompany,
             tripType: booking.tripType,
             isAlphardTrip: booking.isAlphardTrip,
+            vehicleCategory: booking.vehicleCategory,
             vehicleIndex: booking.vehicleIndex,
             numberOfVehicles: booking.numberOfVehicles,
           });
