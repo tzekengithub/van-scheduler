@@ -73,6 +73,12 @@ OPTIMIZATION GOALS — in strict priority order:
    day_trip > one_way_ride > round_trip > trip
    Higher priority jobs get the van; lower priority gets displaced
 5. Workload distribution — spread jobs evenly across vans where possible
+6. Assignment stability — if a booking already has currentVanId set and
+   keeping it causes no conflict with the above goals, prefer keeping it
+   rather than reassigning. Only move an existing assignment when required
+   by a higher-priority goal (e.g. bumping for a day_trip, or fixing a
+   double-booking). Unnecessary reshuffling of already-correct assignments
+   should be avoided.
 
 OUTSOURCE ONLY when:
 - All vans are already committed on that date
