@@ -26,9 +26,11 @@ export async function POST(request: NextRequest) {
 
         send({ type: "parsed", total: rows.length });
 
+        const insertedIds: number[] = [];
+
         for (let i = 0; i < rows.length; i++) {
           const booking = rows[i];
-          await db.insert(bookings).values({
+          const [inserted] = await db.insert(bookings).values({
             travelDate: booking.travelDate,
             fromLocation: booking.fromLocation,
             toLocation: booking.toLocation,
@@ -57,15 +59,20 @@ export async function POST(request: NextRequest) {
             vehicleCategory: booking.vehicleCategory,
             vehicleIndex: booking.vehicleIndex,
             numberOfVehicles: booking.numberOfVehicles,
-          });
+          }).returning({ id: bookings.id });
+          insertedIds.push(inserted.id);
           send({ type: "progress", inserted: i + 1, total: rows.length });
         }
 
         send({ type: "recheck" });
 
+        // Pass the newly inserted IDs so the AI knows which bookings are new.
+        // Existing assigned bookings are still visible to the AI (for bumping)
+        // but flagged as isNew=false — it won't touch them unless a new
+        // higher-priority trip needs their exact van+date slot.
         const { summary, reasoning } = await aiRecheckAllVans((msg) => {
           send({ type: "recheck_log", message: msg });
-        });
+        }, insertedIds);
 
         send({ type: "ai_summary", summary, reasoning });
         send({ type: "done", inserted: rows.length });

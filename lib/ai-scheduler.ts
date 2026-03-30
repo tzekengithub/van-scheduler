@@ -134,14 +134,14 @@ OPTIMIZATION GOALS — in strict priority order
 
 4. Bumping to prevent outsourcing (see BUMPING LOGIC above).
 
-5. Assignment stability — STRONG RULE. If a booking already has
-   currentVanId set and there is NO conflict (no double-booking, no
-   priority violation, no hard-constraint breach) on that van+date,
-   you MUST keep the existing assignment. Do not move it for any soft
-   reason such as workload balance or location continuity preference.
-   Only displace an existing assignment when a hard constraint is
-   violated OR a strictly higher-priority trip (per the tier system)
-   needs that van+date slot and there is no free alternative.
+5. Assignment stability — STRONG RULE. Each booking has an "isNew" flag:
+   - isNew = true  → just uploaded, no van yet, assign freely.
+   - isNew = false → already assigned (currentVanId is set). You MUST
+     keep the existing van UNLESS a strictly higher-priority isNew trip
+     needs that exact van+date slot and there is no free alternative.
+     Never move an isNew=false booking for soft reasons like workload
+     balance or location preference — only bump it when forced by a
+     genuine priority conflict with a new trip.
 
 6. Workload distribution — spread jobs evenly across vans ONLY when
    assigning bookings that have no current van (vanId = null). Never
@@ -180,8 +180,20 @@ OUTPUT — return ONLY this JSON shape, nothing else
 
 Every bookingId from the input must appear in either assignments or outsourced. Never omit a booking from the output.`;
 
+/**
+ * Run the AI scheduler.
+ *
+ * @param logger    Optional streaming log callback.
+ * @param newIds    When provided (e.g. just-uploaded rows), these IDs are
+ *                  flagged as "isNew: true" in the payload. The AI still sees
+ *                  ALL unprotected bookings so it can bump older low-priority
+ *                  ones to make room — but it knows existing assigned bookings
+ *                  should only be moved when a new higher-priority trip
+ *                  genuinely needs their slot.
+ */
 export async function aiRecheckAllVans(
   logger?: (msg: string) => void,
+  newIds?: number[],
 ): Promise<AiRecheckResult> {
   const log: string[] = [];
   const emit = (msg: string) => {
@@ -199,6 +211,7 @@ export async function aiRecheckAllVans(
       (b.inHouseOrOutsourced === "O" && (b.outsourcedCompany ?? "").trim() !== "");
 
     const unprotected = allBookings.filter((b) => !isProtected(b));
+    const newIdSet = newIds ? new Set(newIds) : null;
 
     if (unprotected.length === 0) {
       return { summary: "No bookings to assign.", log, reasoning: [] };
@@ -295,6 +308,9 @@ export async function aiRecheckAllVans(
         currentVanId: b.vanId ?? null,
         inHouseOrOutsourced: b.inHouseOrOutsourced ?? "I",
         outsourcedCompany: b.outsourcedCompany ?? "",
+        // true = just uploaded, needs assignment from scratch
+        // false = already has a van, only move if a higher-priority new trip needs the slot
+        isNew: newIdSet ? newIdSet.has(b.id) : b.vanId === null,
       }));
 
       // Build committed-context section for this batch
