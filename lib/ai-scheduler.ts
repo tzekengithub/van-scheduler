@@ -50,6 +50,13 @@ HARD CONSTRAINTS — never violate these:
 - Never reassign bookings where manualChange = 1 (return currentVanId as-is)
 - Never reassign confirmed outsourced bookings (inHouseOrOutsourced = 'O'
   with outsourcedCompany filled)
+- Bookings with vehicleCategory = "Car" (5-Seater / 7-Seater): always
+  outsource — never assign a van, no exceptions
+- Bookings with isAlphardTrip = 1: only assign vans whose vehicleType is
+  "toyota alphard" (case-insensitive). Never assign a regular van.
+- Bookings with isAlphardTrip = 0 (or absent): never assign a van whose
+  vehicleType is "toyota alphard". Alphard vans are reserved exclusively
+  for Alphard trips.
 
 OPTIMIZATION GOALS — in strict priority order:
 1. Minimize total outsourced bookings — always try to keep jobs in-house
@@ -120,6 +127,7 @@ export async function aiRecheckAllVans(
       vanId: v.id,
       plate: v.vanNumber,
       driver: v.driverName ?? "",
+      vehicleType: v.vehicleType ?? "van",
       singaporeEnabled: v.singaporeEnabled === 1,
       thailandEnabled: v.thailandEnabled === 1,
     }));
@@ -131,6 +139,8 @@ export async function aiRecheckAllVans(
       to: b.toLocation,
       details: b.details ?? "",
       tripType: b.tripType ?? "trip",
+      vehicleCategory: b.vehicleCategory ?? "Van",
+      isAlphardTrip: b.isAlphardTrip ?? 0,
       invoiceNo: b.invoiceNo ?? "",
       vehicleIndex: b.vehicleIndex ?? 1,
       numberOfVehicles: b.numberOfVehicles ?? 1,
