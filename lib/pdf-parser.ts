@@ -268,14 +268,15 @@ export function parseRawText(text: string): ParsedBooking[] {
 
     // ── Collect up to 3 numeric tokens; capture annotation "(…)" lines ──
     const numTokens: string[] = [];
-    let annotationLine = "";
+    const annotationLines: string[] = [];
 
     while (j < lines.length && numTokens.length < 3) {
       const next = lines[j];
       if (isStop(next) || isRowNum(next)) break;
       if (isSkippable(next)) {
-        // Capture annotation lines starting with "(" before skipping
-        if (next.startsWith("(") && !annotationLine) annotationLine = next;
+        // Collect ALL annotation lines starting with "(" — a row can have several
+        // e.g. "(One-Way Ride Only)" on one line then "(Alphard)" on the next
+        if (next.startsWith("(")) annotationLines.push(next);
         j++; continue;
       }
       const words = next.trim().split(/\s+/);
@@ -288,16 +289,16 @@ export function parseRawText(text: string): ParsedBooking[] {
       }
     }
 
-    // Also look ahead for annotation if not yet found
-    if (!annotationLine) {
-      for (let k = j; k < lines.length; k++) {
-        const l = lines[k];
-        if (isStop(l) || isRowNum(l)) break;
-        if (l.startsWith("(")) { annotationLine = l; break; }
-        // Stop if we've hit something clearly non-annotation
-        if (!isSkippable(l)) break;
-      }
+    // Look ahead after numeric tokens for any remaining annotation lines
+    for (let k = j; k < lines.length; k++) {
+      const l = lines[k];
+      if (isStop(l) || isRowNum(l)) break;
+      if (l.startsWith("(")) { annotationLines.push(l); continue; }
+      if (!isSkippable(l)) break;
     }
+
+    // Join all annotation lines into one string for detection
+    const annotationLine = annotationLines.join(" ");
 
     let numberOfVehicles = 1;
     let myrPerVehicle = 0;
