@@ -707,11 +707,37 @@ export default function AllJobsPage() {
             <div className="font-bold text-red-800 text-sm">
               ⚠️ CONFLICT — {noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length} issue{noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length !== 1 ? "s" : ""} found
             </div>
-            {outsourceNeededRows.map((r) => (
-              <div key={`on-${r.id}`} className="text-xs text-red-700 pl-4">
-                • {formatDate(r)} | {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""} | {tripTypeLabel(r.tripType)} | <strong>OUTSOURCE COMPANY NEEDED — enter company name in the row</strong>
-              </div>
-            ))}
+            {(() => {
+              const alphardOut = outsourceNeededRows.filter((r) => r.vehicleCategory === "Alphard");
+              const carOut     = outsourceNeededRows.filter((r) => r.vehicleCategory === "Car");
+              const vanOut     = outsourceNeededRows.filter((r) => r.vehicleCategory !== "Alphard" && r.vehicleCategory !== "Car");
+              return <>
+                {alphardOut.length > 0 && (
+                  <div className="text-xs text-red-700 pl-4">
+                    🚐 <strong>Outsource (Alphard)</strong> — {alphardOut.length} booking{alphardOut.length !== 1 ? "s" : ""} need outsource company
+                    {alphardOut.map((r) => (
+                      <div key={`oa-${r.id}`} className="pl-4">• {formatDate(r)} | {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""} | {tripTypeLabel(r.tripType)}</div>
+                    ))}
+                  </div>
+                )}
+                {carOut.length > 0 && (
+                  <div className="text-xs text-red-700 pl-4">
+                    🚗 <strong>Outsource (Car)</strong> — {carOut.length} booking{carOut.length !== 1 ? "s" : ""} need outsource company
+                    {carOut.map((r) => (
+                      <div key={`oc-${r.id}`} className="pl-4">• {formatDate(r)} | {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""} | {tripTypeLabel(r.tripType)}</div>
+                    ))}
+                  </div>
+                )}
+                {vanOut.length > 0 && (
+                  <div className="text-xs text-red-700 pl-4">
+                    🚐 <strong>Outsource (Van)</strong> — {vanOut.length} booking{vanOut.length !== 1 ? "s" : ""} need outsource company
+                    {vanOut.map((r) => (
+                      <div key={`on-${r.id}`} className="pl-4">• {formatDate(r)} | {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""} | {tripTypeLabel(r.tripType)}</div>
+                    ))}
+                  </div>
+                )}
+              </>;
+            })()}
             {noVanRows.map((r) => (
               <div key={r.id} className="text-xs text-red-700 pl-4">
                 • {formatDate(r)} | {r.fromLocation} → {r.toLocation} | {tripTypeLabel(r.tripType)} | <strong>NO VAN ASSIGNED</strong>

@@ -43,6 +43,7 @@ interface BookingRow {
   overtime: string | null;
   introducer: string | null;
   tourGuide: string | null;
+  vehicleCategory: string | null;
 }
 
 interface EditForm {
@@ -1244,6 +1245,17 @@ export default function VanSchedulePage() {
                                 <div className="text-zinc-400 truncate max-w-[180px] mt-0.5">
                                   {b.fromLocation && b.toLocation ? `${b.fromLocation} → ${b.toLocation}` : b.details || "—"}
                                 </div>
+                                {b.vehicleCategory && (
+                                  <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                    b.vehicleCategory === "Alphard" ? "bg-purple-100 text-purple-700" :
+                                    b.vehicleCategory === "Car" ? "bg-blue-100 text-blue-700" :
+                                    "bg-zinc-100 text-zinc-600"
+                                  }`}>
+                                    {b.vehicleCategory === "Alphard" ? "🚐 Alphard required" :
+                                     b.vehicleCategory === "Car" ? "🚗 Car required" :
+                                     "🚐 Van required"}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-4 py-3">
                                 {isDone ? (

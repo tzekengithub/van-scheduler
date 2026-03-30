@@ -753,11 +753,14 @@ export default function DailyJobsPage() {
                     ))}
                   </div>
                 )}
-                {vanOut.map((r) => (
-                  <div key={`on-${r.id}`} className="text-xs text-red-700 pl-4">
-                    • {r.travelDate} | {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""} | {tripTypeLabel(r.tripType)} | <strong>OUTSOURCE COMPANY NEEDED — enter company name in the row</strong>
+                {vanOut.length > 0 && (
+                  <div className="text-xs text-red-700 pl-4">
+                    🚐 <strong>Outsource (Van)</strong> — {vanOut.length} booking{vanOut.length !== 1 ? "s" : ""} need outsource company
+                    {vanOut.map((r) => (
+                      <div key={`on-${r.id}`} className="pl-4">• {r.fromLocation}{r.toLocation ? ` → ${r.toLocation}` : ""}</div>
+                    ))}
                   </div>
-                ))}
+                )}
               </>;
             })()}
             {noVanRows.map((r) => (

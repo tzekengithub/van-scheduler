@@ -49,6 +49,8 @@ export async function GET(request: NextRequest) {
         tourGuide: bookings.tourGuide,
         vehicleIndex: bookings.vehicleIndex,
         numberOfVehicles: bookings.numberOfVehicles,
+        vehicleCategory: bookings.vehicleCategory,
+        isAlphardTrip: bookings.isAlphardTrip,
       })
       .from(bookings)
       .leftJoin(vans, eq(bookings.vanId, vans.id))
