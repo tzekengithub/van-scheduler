@@ -89,6 +89,10 @@ van, or outsource it only if no other van is available.
 ════════════════════════════════════════════════════════════
 BUMPING LOGIC — think before outsourcing
 ════════════════════════════════════════════════════════════
+STABILITY FIRST: If a booking already has currentVanId and that van is
+free on that date (no conflict), keep it exactly as-is. Do not move it.
+Only trigger the bump cascade when a genuine conflict exists.
+
 BEFORE marking any booking as outsourced, you MUST check:
 1. Is there a free (unassigned) van on that date that meets the route
    constraints? If yes → assign it. Never outsource when a free van exists.
@@ -130,11 +134,18 @@ OPTIMIZATION GOALS — in strict priority order
 
 4. Bumping to prevent outsourcing (see BUMPING LOGIC above).
 
-5. Workload distribution — spread jobs evenly across vans where possible.
+5. Assignment stability — STRONG RULE. If a booking already has
+   currentVanId set and there is NO conflict (no double-booking, no
+   priority violation, no hard-constraint breach) on that van+date,
+   you MUST keep the existing assignment. Do not move it for any soft
+   reason such as workload balance or location continuity preference.
+   Only displace an existing assignment when a hard constraint is
+   violated OR a strictly higher-priority trip (per the tier system)
+   needs that van+date slot and there is no free alternative.
 
-6. Assignment stability — if a booking already has currentVanId set and
-   keeping it violates none of the above, prefer keeping it. Only move an
-   existing assignment when required by a higher-priority rule.
+6. Workload distribution — spread jobs evenly across vans ONLY when
+   assigning bookings that have no current van (vanId = null). Never
+   reshuffle an already-assigned booking purely for balance.
 
 ════════════════════════════════════════════════════════════
 OUTSOURCE RULES — last resort only
