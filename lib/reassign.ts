@@ -83,6 +83,7 @@ export async function runReassign(
       b.vehicleIndex ?? 1,
       b.numberOfVehicles ?? 1,
       b.tripType,
+      b.isAlphardTrip === 1,
     );
     const vanId = typeof assignResult === "number" ? assignResult : null;
 
@@ -124,12 +125,16 @@ export async function runReassign(
             )
           );
 
-        // Only bump if the victim's van is capable for this day_trip's route
+        // Only bump if the victim's van is capable and matches Alphard eligibility
+        const isDayTripAlphard = b.isAlphardTrip === 1;
         const victim = candidates.find((c) => {
           const van = vanMap.get(c.vanId!);
           if (!van) return false;
           if (needsSingapore && van.singaporeEnabled !== 1) return false;
           if (needsThailand && van.thailandEnabled !== 1) return false;
+          const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+          if (isDayTripAlphard && !isVanAlphard) return false;
+          if (!isDayTripAlphard && isVanAlphard) return false;
           return true;
         }) ?? null;
 
@@ -215,6 +220,7 @@ export async function runReassign(
         b.vehicleIndex ?? 1,
         b.numberOfVehicles ?? 1,
         b.tripType,
+        b.isAlphardTrip === 1,
       );
       const vanId = typeof retryResult === "number" ? retryResult : null;
 

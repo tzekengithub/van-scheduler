@@ -26,6 +26,7 @@ export interface ParsedBooking {
   introducer: string;
   // new fields — Section 1
   tripType: TripType;
+  isAlphardTrip: 0 | 1;
 }
 
 /**
@@ -97,6 +98,17 @@ function cleanBookingDetails(raw: string): string {
   const slashIdx = raw.indexOf("/");
   const clipped = slashIdx >= 0 ? raw.slice(0, slashIdx) : raw;
   return clipped.replace(/[^\x00-\x7F]/g, "").trim();
+}
+
+/**
+ * Returns true if the booking details or annotation line contain "Alphard",
+ * indicating the trip requires a Toyota Alphard vehicle.
+ */
+function detectAlphardTrip(bookingDetails: string, annotationLine: string): boolean {
+  return (
+    bookingDetails.toLowerCase().includes("alphard") ||
+    annotationLine.toLowerCase().includes("alphard")
+  );
 }
 
 /**
@@ -365,6 +377,7 @@ export function parseRawText(text: string): ParsedBooking[] {
       overtime: "",
       introducer: "",
       tripType,
+      isAlphardTrip: (detectAlphardTrip(bookingDetails, annotationLine) ? 1 : 0) as 0 | 1,
     } as const;
 
     for (let vi = 1; vi <= numberOfVehicles; vi++) {

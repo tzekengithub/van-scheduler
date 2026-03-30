@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, isNotNull, desc } from "drizzle-orm";
 
-export type AssignResult = number | { outsource: true };
+export type AssignResult = number | { outsource: true; reason?: string };
 
 /** Detect if a trip requires Singapore or Thailand capability based on locations. */
 export function detectTripRequirements(fromLocation: string, toLocation: string) {
@@ -21,6 +21,7 @@ export async function smartAssignVan(
   vehicleIndex: number,
   _numberOfVehicles: number,
   tripType?: string | null,
+  isAlphardTrip?: boolean,
 ): Promise<AssignResult> {
   const allVans = await db.select().from(vans).orderBy(vans.id);
   if (allVans.length === 0) return { outsource: true };
@@ -45,6 +46,21 @@ export async function smartAssignVan(
     vanLastDropOff[van.id] = last?.toLocation ?? null;
   }
 
+  // ── Alphard hard constraint pre-checks ────────────────────────────────────
+  const isAlphardVan = (van: typeof allVans[number]) =>
+    (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+
+  if (isAlphardTrip) {
+    const alphardVans = allVans.filter(isAlphardVan);
+    if (alphardVans.length === 0) {
+      return { outsource: true, reason: "No Toyota Alphard available for this Alphard Trip" };
+    }
+    const freeAlphards = alphardVans.filter((v) => !bookedVanIds.has(v.id));
+    if (freeAlphards.length === 0) {
+      return { outsource: true, reason: "All Toyota Alphards are fully booked for this time slot" };
+    }
+  }
+
   // ── Check if this invoice already has a van assigned on another date ───────
   let existingInvoiceVanId: number | null = null;
   if (invoiceNo.trim()) {
@@ -62,8 +78,11 @@ export async function smartAssignVan(
     existingInvoiceVanId = prior?.vanId ?? null;
   }
 
-  // ── Build van context for the AI ───────────────────────────────────────────
-  const vanContext = allVans.map((van) => ({
+  // ── Build van context for the AI (pre-filtered by Alphard eligibility) ────
+  const eligibleVans = allVans.filter((van) =>
+    isAlphardTrip ? isAlphardVan(van) : !isAlphardVan(van)
+  );
+  const vanContext = eligibleVans.map((van) => ({
     id: van.id,
     plate: van.vanNumber,
     driver: van.driverName || "Unknown",
@@ -85,6 +104,7 @@ HARD RULES (never break these):
 2. Routes involving Singapore require singaporeEnabled=true on the van.
 3. Routes involving Thailand require thailandEnabled=true on the van.
 4. If no suitable free van exists, return outsource=true.
+5. Only vans in the list below are eligible for this booking (vehicle-type filtering is pre-applied).
 
 SOFT PREFERENCES (apply when multiple vans are eligible):
 - If preferredForThisInvoice=true on a free van, prefer it (keeps multi-day invoices on the same van).
@@ -142,9 +162,11 @@ ${JSON.stringify(vanContext, null, 2)}`;
 
   if (result.outsource || result.vanId == null) return { outsource: true };
 
-  // Safety check — make sure returned ID actually exists and is free
+  // Safety check — make sure returned ID actually exists, is free, and obeys Alphard rules
   const chosenVan = allVans.find((v) => v.id === result.vanId);
   if (!chosenVan || bookedVanIds.has(chosenVan.id)) return { outsource: true };
+  if (isAlphardTrip && !isAlphardVan(chosenVan)) return { outsource: true };
+  if (!isAlphardTrip && isAlphardVan(chosenVan)) return { outsource: true };
 
   return chosenVan.id;
 }

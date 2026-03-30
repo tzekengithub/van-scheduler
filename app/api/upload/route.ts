@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
             inHouseOrOutsourced: "I",
             outsourcedCompany: booking.outsourcedCompany,
             tripType: booking.tripType,
+            isAlphardTrip: booking.isAlphardTrip,
             vehicleIndex: booking.vehicleIndex,
             numberOfVehicles: booking.numberOfVehicles,
           });

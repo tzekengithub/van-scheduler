@@ -184,6 +184,8 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
       b.toLocation ?? "",
     );
 
+    const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+
     // Shuffle all vans so the selection is random
     const shuffled = [...allVans].sort(() => Math.random() - 0.5);
 
@@ -191,6 +193,9 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
     for (const van of shuffled) {
       if (needsSingapore && van.singaporeEnabled !== 1) continue;
       if (needsThailand && van.thailandEnabled !== 1) continue;
+      const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+      if (isAlphardBooking && !isVanAlphard) continue;
+      if (!isAlphardBooking && isVanAlphard) continue;
 
       const [conflict] = await db
         .select({ id: bookings.id })
@@ -260,6 +265,7 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       travelDate: bookings.travelDate,
       fromLocation: bookings.fromLocation,
       toLocation: bookings.toLocation,
+      isAlphardTrip: bookings.isAlphardTrip,
     })
     .from(bookings)
     .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
@@ -311,9 +317,13 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       anyRow.fromLocation ?? "",
       anyRow.toLocation ?? "",
     );
+    const isAlphardBooking = (anyRow.isAlphardTrip ?? 0) === 1;
     const capableVans = allVans.filter((v) => {
       if (needsSingapore && v.singaporeEnabled !== 1) return false;
       if (needsThailand && v.thailandEnabled !== 1) return false;
+      const isVanAlphard = (v.vehicleType ?? "").toLowerCase() === "toyota alphard";
+      if (isAlphardBooking && !isVanAlphard) return false;
+      if (!isAlphardBooking && isVanAlphard) return false;
       return true;
     });
 
@@ -402,6 +412,7 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
       manualChange: bookings.manualChange,
       fromLocation: bookings.fromLocation,
       toLocation: bookings.toLocation,
+      isAlphardTrip: bookings.isAlphardTrip,
     })
     .from(bookings)
     .where(isNotNull(bookings.vanId))
@@ -445,11 +456,15 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
         victim.fromLocation ?? "",
         victim.toLocation ?? "",
       );
+      const isAlphardBooking = (victim.isAlphardTrip ?? 0) === 1;
       let freeVan: (typeof allVans)[number] | null = null;
       for (const van of allVans) {
         if (van.id === victim.vanId) continue;
         if (needsSingapore && van.singaporeEnabled !== 1) continue;
         if (needsThailand && van.thailandEnabled !== 1) continue;
+        const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+        if (isAlphardBooking && !isVanAlphard) continue;
+        if (!isAlphardBooking && isVanAlphard) continue;
         const [conflict] = await db
           .select({ id: bookings.id })
           .from(bookings)
