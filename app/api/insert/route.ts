@@ -26,11 +26,8 @@ export async function POST(request: NextRequest) {
 
         send({ type: "parsed", total: rows.length });
 
-        const insertedIds: number[] = [];
-
-        for (let i = 0; i < rows.length; i++) {
-          const booking = rows[i];
-          const [inserted] = await db.insert(bookings).values({
+        const inserted = await db.insert(bookings).values(
+          rows.map((booking) => ({
             travelDate: booking.travelDate,
             fromLocation: booking.fromLocation,
             toLocation: booking.toLocation,
@@ -59,10 +56,11 @@ export async function POST(request: NextRequest) {
             vehicleCategory: booking.vehicleCategory,
             vehicleIndex: booking.vehicleIndex,
             numberOfVehicles: booking.numberOfVehicles,
-          }).returning({ id: bookings.id });
-          insertedIds.push(inserted.id);
-          send({ type: "progress", inserted: i + 1, total: rows.length });
-        }
+          }))
+        ).returning({ id: bookings.id });
+        const insertedIds = inserted.map((r) => r.id);
+        // Include insertedIds so the client can call /api/cancel-insert if needed
+        send({ type: "progress", inserted: rows.length, total: rows.length, insertedIds });
 
         send({ type: "recheck" });
 

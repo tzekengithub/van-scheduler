@@ -393,7 +393,7 @@ export async function aiRecheckAllVans(
               "HTTP-Referer": "https://van-scheduler.vercel.app",
             },
             body: JSON.stringify({
-              model: "google/gemini-2.5-flash-preview",
+              model: "google/gemini-2.5-flash",
               temperature: 0,
               response_format: { type: "json_object" },
               messages: [

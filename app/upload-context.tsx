@@ -85,9 +85,16 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   } | null>(null);
   const [progressTick, setProgressTick] = useState(0);
 
+  // IDs of rows inserted by the current /api/insert call — used by emergency cancel
+  const [insertedIds, setInsertedIds] = useState<number[]>([]);
+  const [cancelling, setCancelling] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Ref to the SSE reader so emergency cancel can abort it mid-stream
+  const sseReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  const cancelRequestedRef = useRef(false);
 
   // Check service health once on mount
   useEffect(() => {
@@ -201,6 +208,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       setRecheckLog([]);
       setRecheckStartTime(null);
       setRecheckElapsed(0);
+      setInsertedIds([]);
+      cancelRequestedRef.current = false;
 
       let inserted = 0;
       let insertError: string | undefined;
@@ -213,9 +222,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
       if (res.body) {
         const reader = res.body.getReader();
+        sseReaderRef.current = reader;
         const decoder = new TextDecoder();
         let buf = "";
         while (true) {
+          // Emergency cancel: stop reading and exit
+          if (cancelRequestedRef.current) { reader.cancel(); break; }
           const { done, value } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
@@ -229,6 +241,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 setInsertProgress({ inserted: 0, total: event.total, phase: "inserting" });
               } else if (event.type === "progress") {
                 setInsertProgress({ inserted: event.inserted, total: event.total, phase: "inserting" });
+                // Capture inserted IDs so emergency cancel can clean them up
+                if (event.insertedIds?.length) setInsertedIds(event.insertedIds);
               } else if (event.type === "recheck") {
                 setInsertProgress((prev) => prev ? { ...prev, phase: "rechecking" } : { inserted: 0, total: 0, phase: "rechecking" });
                 setRecheckLog([]);
@@ -257,10 +271,53 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       setUploadError(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } finally {
+      sseReaderRef.current = null;
       setConfirming(false);
+      setCancelling(false);
       setParseProgress(null);
       setInsertProgress(null);
     }
+  }
+
+  async function handleEmergencyCancel() {
+    if (cancelling) return; // already cancelling
+    setCancelling(true);
+    cancelRequestedRef.current = true;
+    // Abort the SSE reader immediately
+    sseReaderRef.current?.cancel();
+
+    // Snapshot the IDs before state clears
+    const idsToDelete = insertedIds.length > 0 ? [...insertedIds] : [];
+
+    // Reset in-progress UI state
+    setInsertProgress(null);
+    setRecheckStartTime(null);
+    setRecheckLog([]);
+
+    // Delete the inserted rows from the DB
+    if (idsToDelete.length > 0) {
+      try {
+        await fetch("/api/cancel-insert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: idsToDelete }),
+        });
+      } catch {
+        // best-effort; DB will still have stale rows but won't block anything
+      }
+    }
+
+    // Notify other page components that bookings changed
+    window.dispatchEvent(new CustomEvent("bookings-uploaded", { detail: { count: 0 } }));
+
+    setInsertedIds([]);
+    setPreviewRows(null);
+    setUploadError(null);
+    setUploadResults([{
+      fileName: uploadFiles.map((f) => f.name).join(", "),
+      inserted: 0,
+      error: `Cancelled — ${idsToDelete.length} inserted row(s) removed`,
+    }]);
   }
 
   function handleCancelUpload() {
@@ -336,17 +393,24 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 </span>
               )}
               {confirming && (
-                <span className="text-xs text-blue-600 flex flex-col gap-0.5 max-w-[320px]">
+                <span className="text-xs text-blue-600 flex flex-col gap-0.5 max-w-[260px]">
                   {insertProgress?.phase === "rechecking" ? (
                     <>
                       <span className="flex items-center gap-1.5">
-                        <svg className="animate-spin h-3 w-3 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                        </svg>
-                        AI assigning vans… {recheckElapsed > 0 && <span className="text-zinc-400">({recheckElapsed}s)</span>}
+                        {cancelling ? (
+                          <svg className="animate-spin h-3 w-3 shrink-0 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                          </svg>
+                        ) : (
+                          <svg className="animate-spin h-3 w-3 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                          </svg>
+                        )}
+                        {cancelling ? <span className="text-red-600">Cancelling…</span> : <>AI assigning vans… {recheckElapsed > 0 && <span className="text-zinc-400">({recheckElapsed}s)</span>}</>}
                       </span>
-                      {recheckLog.length > 0 && (
+                      {!cancelling && recheckLog.length > 0 && (
                         <span className="text-[10px] text-zinc-500 truncate">
                           {recheckLog[recheckLog.length - 1]}
                         </span>
@@ -361,6 +425,19 @@ export function UploadProvider({ children }: { children: ReactNode }) {
               )}
             </div>
             <div className="flex items-center gap-1">
+              {/* Emergency cancel — only shown while AI scheduler is running */}
+              {confirming && insertProgress?.phase === "rechecking" && !cancelling && (
+                <button
+                  onClick={handleEmergencyCancel}
+                  className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-red-600 border border-red-300 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                  title="Stop scheduling and remove inserted invoices"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd"/>
+                  </svg>
+                  Cancel
+                </button>
+              )}
               {/* Minimise / restore */}
               <button
                 onClick={() => { setMinimised((m) => !m); setFullscreen(false); }}
@@ -501,16 +578,22 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                 {insertProgress.phase === "rechecking" ? (
                   <>
                     <div className="flex items-center gap-2 text-sm font-medium text-indigo-700">
-                      <svg className="animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <svg className={`animate-spin h-4 w-4 shrink-0 ${cancelling ? "text-red-500" : ""}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                       </svg>
-                      <span>AI assigning vans…</span>
-                      {recheckElapsed > 0 && (
-                        <span className="text-zinc-400 font-mono text-xs">{recheckElapsed}s</span>
+                      {cancelling ? (
+                        <span className="text-red-600">Cancelling — removing inserted invoices…</span>
+                      ) : (
+                        <>
+                          <span>AI assigning vans…</span>
+                          {recheckElapsed > 0 && (
+                            <span className="text-zinc-400 font-mono text-xs">{recheckElapsed}s</span>
+                          )}
+                        </>
                       )}
                     </div>
-                    {recheckLog.length > 0 ? (
+                    {!cancelling && (recheckLog.length > 0 ? (
                       <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-2.5 max-h-48 overflow-y-auto space-y-1">
                         {recheckLog.map((line, i) => (
                           <div key={i} className="text-[11px] font-mono text-zinc-600 leading-relaxed">{line}</div>
@@ -518,6 +601,18 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                       </div>
                     ) : (
                       <p className="text-xs text-zinc-400">Waiting for AI response…</p>
+                    ))}
+                    {/* Emergency cancel button — prominent in the body */}
+                    {!cancelling && (
+                      <button
+                        onClick={handleEmergencyCancel}
+                        className="flex items-center gap-2 px-3 py-2 w-full justify-center text-sm font-semibold text-red-700 border border-red-300 bg-red-50 hover:bg-red-100 active:bg-red-200 rounded-lg transition-colors mt-1"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd"/>
+                        </svg>
+                        Emergency Cancel — Stop &amp; Remove Inserted Invoices
+                      </button>
                     )}
                   </>
                 ) : (
