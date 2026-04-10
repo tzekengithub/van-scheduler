@@ -244,6 +244,8 @@ export function parseRawText(text: string): ParsedBooking[] {
 
     // ── Collect route lines until we find a date ──
     const routeLines: string[] = [];
+    // Declare here so pre-date "(Alphard)" / "(One-Way…)" annotations are also captured
+    const annotationLines: string[] = [];
     let travelDate: string | null = null;
     let dateParts: { day: string; month: string; year: string } | null = null;
     let j = i + 1;
@@ -251,7 +253,12 @@ export function parseRawText(text: string): ParsedBooking[] {
     while (j < lines.length && j <= i + 10) {
       const next = lines[j];
       if (isStop(next) || isRowNum(next)) break;
-      if (isSkippable(next)) { j++; continue; }
+      if (isSkippable(next)) {
+        // Capture annotation lines (e.g. "(Alphard)", "(One-Way Ride Only)")
+        // that appear BEFORE the date line — they would otherwise be silently dropped.
+        if (next.startsWith("(")) annotationLines.push(next);
+        j++; continue;
+      }
       const dp = extractDateParts(next);
       const iso = dp ? parseDateString(next) : null;
       if (iso && dp) {
@@ -268,7 +275,7 @@ export function parseRawText(text: string): ParsedBooking[] {
 
     // ── Collect up to 3 numeric tokens; capture annotation "(…)" lines ──
     const numTokens: string[] = [];
-    const annotationLines: string[] = [];
+    // annotationLines already declared above — additional ones appended below
 
     while (j < lines.length && numTokens.length < 3) {
       const next = lines[j];

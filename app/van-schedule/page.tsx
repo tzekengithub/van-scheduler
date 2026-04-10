@@ -88,6 +88,14 @@ function isOutsourced(b: BookingRow): boolean {
   return v === "outsourced" || v === "O";
 }
 
+function tripDestinationFlags(b: BookingRow): { sg: boolean; th: boolean } {
+  const combined = `${b.fromLocation ?? ""} ${b.toLocation ?? ""}`.toLowerCase();
+  return {
+    sg: combined.includes("singapore"),
+    th: combined.includes("thailand"),
+  };
+}
+
 /** True only when outsourced AND the company name is filled in — has its own calendar row. */
 function isConfirmedOutsourced(b: BookingRow): boolean {
   return isOutsourced(b) && (b.outsourcedCompany?.trim() ?? "") !== "";
@@ -1005,6 +1013,16 @@ export default function VanSchedulePage() {
                                        b.tripType === "day_trip"     ? "🟡 Day Trip" : "🟠 Trip"}
                                     </div>
                                   )}
+                                  {(() => {
+                                    const { sg, th } = tripDestinationFlags(b);
+                                    if (!sg && !th) return null;
+                                    return (
+                                      <div className="text-[10px] leading-tight mt-0.5 font-semibold">
+                                        {sg && <span title="Singapore trip">🇸🇬</span>}
+                                        {th && <span title="Thailand trip">🇹🇭</span>}
+                                      </div>
+                                    );
+                                  })()}
                                   {!isOutsourced && bks.length > 1 && bi === 0 && (
                                     <div className="text-[10px] font-bold mt-0.5">⚠️ CONFLICT +{bks.length - 1}</div>
                                   )}

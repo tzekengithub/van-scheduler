@@ -157,6 +157,9 @@ export async function runConstraintChecks(logger?: (msg: string) => void): Promi
   log("Check 4/5 — fixing Alphard exclusivity violations…");
   await fixAlphardViolations(log);
 
+  log("Check 4b/5 — fixing Singapore/Thailand capability violations…");
+  await fixCapabilityViolations(log);
+
   log("Check 5/5 — rescuing any booking incorrectly outsourced when a free van exists…");
   await rescueIncorrectOutsources(log);
 
@@ -362,6 +365,78 @@ async function fixAlphardViolations(log: (msg: string) => void): Promise<void> {
     .where(inArray(bookings.id, violations));
 
   log(`  cleared ${violations.length} Alphard violation(s) — will be re-assigned or outsourced`);
+}
+
+/**
+ * Scan all auto-managed bookings and fix Singapore / Thailand capability violations:
+ *   - booking needs Singapore but van.singaporeEnabled != 1 → unassign
+ *   - booking needs Thailand but van.thailandEnabled != 1  → unassign
+ *
+ * Unassigned bookings are picked up by rescueIncorrectOutsources and, if still
+ * unassigned, by the final outsource step.  Manual-change bookings are never touched.
+ */
+async function fixCapabilityViolations(log: (msg: string) => void): Promise<void> {
+  const allAssigned = await db
+    .select({
+      id: bookings.id,
+      vanId: bookings.vanId,
+      travelDate: bookings.travelDate,
+      invoiceNo: bookings.invoiceNo,
+      fromLocation: bookings.fromLocation,
+      toLocation: bookings.toLocation,
+      manualChange: bookings.manualChange,
+    })
+    .from(bookings)
+    .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
+
+  if (allAssigned.length === 0) {
+    log("  no assigned auto-managed bookings to check ✓");
+    return;
+  }
+
+  const allVans = await db.select().from(vans);
+  const vanMap = new Map(allVans.map((v) => [v.id, v]));
+
+  const violations: number[] = [];
+  for (const b of allAssigned) {
+    const van = vanMap.get(b.vanId!);
+    if (!van) continue;
+    const { needsSingapore, needsThailand } = detectTripRequirements(
+      b.fromLocation ?? "",
+      b.toLocation ?? "",
+    );
+    if (needsSingapore && van.singaporeEnabled !== 1) {
+      log(
+        `[fixCapability] id=${b.id} date=${b.travelDate} inv=${b.invoiceNo ?? "?"}: ` +
+        `Singapore trip assigned to non-SG van ${van.vanNumber} — unassigning`
+      );
+      violations.push(b.id);
+    } else if (needsThailand && van.thailandEnabled !== 1) {
+      log(
+        `[fixCapability] id=${b.id} date=${b.travelDate} inv=${b.invoiceNo ?? "?"}: ` +
+        `Thailand trip assigned to non-TH van ${van.vanNumber} — unassigning`
+      );
+      violations.push(b.id);
+    }
+  }
+
+  if (violations.length === 0) {
+    log("  no Singapore/Thailand capability violations found ✓");
+    return;
+  }
+
+  await db
+    .update(bookings)
+    .set({
+      vanId: null,
+      vehiclePlate: null,
+      driverName: null,
+      driverContact: null,
+      inHouseOrOutsourced: "I",
+    })
+    .where(inArray(bookings.id, violations));
+
+  log(`  cleared ${violations.length} capability violation(s) — will be re-assigned or outsourced`);
 }
 
 /**
