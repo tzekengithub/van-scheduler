@@ -249,39 +249,10 @@ export async function aiRecheckAllVans(
       }
     }
 
-    // ── Step 4: Narrow working set when newIds is provided ────────────────────
-    // Instead of sending every unprotected booking to the AI, only send:
-    //   1. The newly uploaded bookings (primary targets)
-    //   2. Existing unprotected bookings that share a travel date with a new
-    //      booking (so the AI can bump lower-priority ones if needed)
-    // All other existing assignments are pre-seeded into committedVanDates so
-    // the AI still knows those slots are taken — without bloating the payload.
-    let workingSet: typeof unprotected;
-    if (newIdSet && newIdSet.size > 0) {
-      const newBookings = unprotected.filter((b) => newIdSet.has(b.id));
-      const newDates = new Set(newBookings.map((b) => b.travelDate));
-
-      const sameDateExisting = unprotected.filter(
-        (b) => !newIdSet.has(b.id) && newDates.has(b.travelDate),
-      );
-
-      // Pre-seed committed context with every OTHER existing assigned booking
-      // that is not part of the working set — AI sees their slots as taken.
-      for (const b of unprotected) {
-        if (!newIdSet.has(b.id) && !newDates.has(b.travelDate) && b.vanId) {
-          committedVanDates.add(`${b.vanId}::${b.travelDate}`);
-          if (b.invoiceNo)
-            committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId);
-        }
-      }
-
-      workingSet = [...newBookings, ...sameDateExisting];
-      emit(
-        `⚡ Targeted mode: ${newBookings.length} new booking(s) + ${sameDateExisting.length} same-date existing (${unprotected.length - workingSet.length} others pre-committed)`,
-      );
-    } else {
-      workingSet = unprotected;
-    }
+    // ── Step 4: Working set — all unprotected bookings ───────────────────────
+    // Always send the full set so the AI can see every booking and make
+    // globally optimal decisions (bumping, workload balance, etc.).
+    const workingSet = unprotected;
 
     if (workingSet.length === 0) {
       return { summary: "No bookings to assign.", log, reasoning: [] };
@@ -445,27 +416,35 @@ export async function aiRecheckAllVans(
           if (!respondedIds.has(id)) throw new Error(`AI omitted bookingId ${id}`);
         }
 
-        // Check no double-booking within this chunk vs committed (protected) slots.
-        // We only error on conflicts with PROTECTED (manualChange=1 or confirmed
-        // outsource) bookings — the AI is allowed to reassign unprotected bookings
-        // to different vans (bumping), so intra-chunk conflicts between unprotected
-        // bookings are resolved by the AI's own bump logic.
+        // Check no double-booking within this chunk vs committed slots.
+        // committedVanDates contains: (1) truly protected bookings
+        // (manualChange=1 or confirmed outsource), (2) prior-batch assignments,
+        // and (3) pre-seeded non-working-set bookings in targeted mode.
+        // Rather than failing the entire batch on the first conflict, redirect
+        // conflicting assignments to the outsourced list so the rescue pass
+        // below can try to find a free van for them.
         const newVanDates = new Map<string, number>(); // key → bookingId
-        const unprotectedIds = new Set(chunk.map((b) => b.id));
+        const validAssignments: typeof parsed.assignments = [];
         for (const a of parsed.assignments) {
           const b = chunk.find((x) => x.id === a.bookingId);
           if (!b) continue;
           const key = `${a.vanId}::${b.travelDate}`;
-          // Only throw if the conflict is with a PROTECTED committed slot
           if (committedVanDates.has(key)) {
-            throw new Error(
-              `Double-booking with protected slot: van ${a.vanId} on ${b.travelDate}`,
-            );
+            // AI tried to reuse an already-committed slot — move to outsourced
+            // so the rescue pass can attempt to find a free alternative van.
+            emit(`⚠ #${b.id} (${b.travelDate}): AI tried to reuse van ${a.vanId} which is already committed — will try to find a free van`);
+            parsed.outsourced.push({
+              bookingId: b.id,
+              reasoning: `Committed-slot conflict: van ${a.vanId} is already assigned on ${b.travelDate}. Rescue pass will attempt a free alternative.`,
+            });
+          } else {
+            // Within the chunk, allow the last assignment for a key to win
+            // (AI may have bumped an earlier one to a different van)
+            newVanDates.set(key, a.bookingId);
+            validAssignments.push(a);
           }
-          // Within the chunk, allow the last assignment for a key to win
-          // (AI may have bumped an earlier one to a different van)
-          newVanDates.set(key, a.bookingId);
         }
+        parsed = { ...parsed, assignments: validAssignments };
 
         chunkResult = parsed;
 
@@ -542,13 +521,20 @@ export async function aiRecheckAllVans(
         emit(
           `⚠ Batch ${ci + 1} failed (${chunkErr.message}) — rules engine handling this batch…`,
         );
-        await runReassign(
-          chunk.map((b) => b.id),
-          (msg) => {
-            log.push(msg);
-            logger?.(msg);
-          },
-        );
+        try {
+          await runReassign(
+            chunk.map((b) => b.id),
+            (msg) => {
+              log.push(msg);
+              logger?.(msg);
+            },
+          );
+        } catch (reassignErr: any) {
+          // runReassign calls smartAssignVan which makes its own AI call — that can
+          // also fail (e.g. empty response, network error). Don't let it abort the
+          // whole scheduler session; just log and move on to the next batch.
+          emit(`⚠ Rules-engine fallback also failed (${reassignErr.message}) — skipping batch ${ci + 1}`);
+        }
 
         // Refresh committed context from DB so subsequent batches stay accurate
         const nowAssigned = await db
