@@ -18,7 +18,7 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, isNotNull } from "drizzle-orm";
-import { recheckAllVans } from "@/lib/recheck";
+import { recheckAllVans, runConstraintChecks } from "@/lib/recheck";
 import { runReassign } from "@/lib/reassign";
 import { getActiveRules } from "@/lib/scheduling-rules";
 
@@ -35,8 +35,8 @@ export interface AiRecheckResult {
   reasoning: AiReasoningEntry[];
 }
 
-/** Max bookings per AI request — keeps token usage low and avoids timeouts. */
-const CHUNK_SIZE = 25;
+/** Max bookings per AI request — larger = fewer round trips = faster overall. */
+const CHUNK_SIZE = 50;
 
 const SYSTEM_PROMPT = `You are a van scheduling optimizer for a Malaysian transport company
 called Excellent Travel. You assign vans to trip bookings.
@@ -213,10 +213,6 @@ export async function aiRecheckAllVans(
     const unprotected = allBookings.filter((b) => !isProtected(b));
     const newIdSet = newIds ? new Set(newIds) : null;
 
-    if (unprotected.length === 0) {
-      return { summary: "No bookings to assign.", log, reasoning: [] };
-    }
-
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
 
@@ -238,36 +234,7 @@ export async function aiRecheckAllVans(
 
     const vanMap = new Map(allVans.map((v) => [v.id, v]));
 
-    // ── Step 3: Sort bookings — priority tier first, then date + invoice ───────
-    // Tier 1 (multi-day / day_trip) → Tier 2 (trip/round_trip/tpri) → Tier 3 (one_way_ride)
-    // Within the same tier sort by date then invoice so higher-priority trips
-    // claim vans before lower-priority ones in each batch.
-    const tripTier = (b: (typeof unprotected)[0]): number => {
-      const t = (b.tripType ?? "trip").toLowerCase();
-      if (t === "day_trip") return 0;
-      if (t === "one_way_ride") return 2;
-      return 1; // trip, round_trip, tpri, etc.
-    };
-
-    const sorted = [...unprotected].sort(
-      (a, b) =>
-        tripTier(a) - tripTier(b) ||
-        a.travelDate.localeCompare(b.travelDate) ||
-        (a.invoiceNo ?? "").localeCompare(b.invoiceNo ?? "") ||
-        (a.vehicleIndex ?? 1) - (b.vehicleIndex ?? 1),
-    );
-
-    // ── Step 4: Chunk into batches ─────────────────────────────────────────────
-    const chunks: (typeof sorted)[] = [];
-    for (let i = 0; i < sorted.length; i += CHUNK_SIZE) {
-      chunks.push(sorted.slice(i, i + CHUNK_SIZE));
-    }
-
-    emit(
-      `📦 ${unprotected.length} booking(s) → ${chunks.length} batch(es) of up to ${CHUNK_SIZE}`,
-    );
-
-    // ── Step 5: Committed context — tracks what's locked across batches ────────
+    // ── Step 3: Committed context — tracks what's locked across batches ────────
     // Pre-seed with protected bookings so the AI never double-books them.
     const committedVanDates = new Set<string>(); // "vanId::date"
     const committedInvoiceVans = new Map<string, number>(); // "invoiceNo::vi" → vanId
@@ -281,10 +248,77 @@ export async function aiRecheckAllVans(
       }
     }
 
+    // ── Step 4: Narrow working set when newIds is provided ────────────────────
+    // Instead of sending every unprotected booking to the AI, only send:
+    //   1. The newly uploaded bookings (primary targets)
+    //   2. Existing unprotected bookings that share a travel date with a new
+    //      booking (so the AI can bump lower-priority ones if needed)
+    // All other existing assignments are pre-seeded into committedVanDates so
+    // the AI still knows those slots are taken — without bloating the payload.
+    let workingSet: typeof unprotected;
+    if (newIdSet && newIdSet.size > 0) {
+      const newBookings = unprotected.filter((b) => newIdSet.has(b.id));
+      const newDates = new Set(newBookings.map((b) => b.travelDate));
+
+      const sameDateExisting = unprotected.filter(
+        (b) => !newIdSet.has(b.id) && newDates.has(b.travelDate),
+      );
+
+      // Pre-seed committed context with every OTHER existing assigned booking
+      // that is not part of the working set — AI sees their slots as taken.
+      for (const b of unprotected) {
+        if (!newIdSet.has(b.id) && !newDates.has(b.travelDate) && b.vanId) {
+          committedVanDates.add(`${b.vanId}::${b.travelDate}`);
+          if (b.invoiceNo)
+            committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId);
+        }
+      }
+
+      workingSet = [...newBookings, ...sameDateExisting];
+      emit(
+        `⚡ Targeted mode: ${newBookings.length} new booking(s) + ${sameDateExisting.length} same-date existing (${unprotected.length - workingSet.length} others pre-committed)`,
+      );
+    } else {
+      workingSet = unprotected;
+    }
+
+    if (workingSet.length === 0) {
+      return { summary: "No bookings to assign.", log, reasoning: [] };
+    }
+
+    // ── Step 5: Sort bookings — priority tier first, then date + invoice ───────
+    // Tier 1 (multi-day / day_trip) → Tier 2 (trip/round_trip/tpri) → Tier 3 (one_way_ride)
+    // Within the same tier sort by date then invoice so higher-priority trips
+    // claim vans before lower-priority ones in each batch.
+    const tripTier = (b: (typeof unprotected)[0]): number => {
+      const t = (b.tripType ?? "trip").toLowerCase();
+      if (t === "day_trip") return 0;
+      if (t === "one_way_ride") return 2;
+      return 1; // trip, round_trip, tpri, etc.
+    };
+
+    const sorted = [...workingSet].sort(
+      (a, b) =>
+        tripTier(a) - tripTier(b) ||
+        a.travelDate.localeCompare(b.travelDate) ||
+        (a.invoiceNo ?? "").localeCompare(b.invoiceNo ?? "") ||
+        (a.vehicleIndex ?? 1) - (b.vehicleIndex ?? 1),
+    );
+
+    // ── Step 6: Chunk into batches ─────────────────────────────────────────────
+    const chunks: (typeof sorted)[] = [];
+    for (let i = 0; i < sorted.length; i += CHUNK_SIZE) {
+      chunks.push(sorted.slice(i, i + CHUNK_SIZE));
+    }
+
+    emit(
+      `📦 ${workingSet.length} booking(s) to process → ${chunks.length} batch(es) of up to ${CHUNK_SIZE}`,
+    );
+
     const allReasoning: AiReasoningEntry[] = [];
     const summaries: string[] = [];
 
-    // ── Step 6: Process each batch ─────────────────────────────────────────────
+    // ── Step 7: Process each batch ─────────────────────────────────────────────
     for (let ci = 0; ci < chunks.length; ci++) {
       const chunk = chunks[ci];
       emit(
@@ -358,7 +392,7 @@ export async function aiRecheckAllVans(
               "HTTP-Referer": "https://van-scheduler.vercel.app",
             },
             body: JSON.stringify({
-              model: "google/gemini-2.5-pro-preview",
+              model: "google/gemini-2.5-flash-preview",
               temperature: 0,
               response_format: { type: "json_object" },
               messages: [
@@ -433,8 +467,74 @@ export async function aiRecheckAllVans(
         }
 
         chunkResult = parsed;
+
+        // ── Rescue pass: catch AI mistakes where a free van actually exists ──────
+        // The AI sometimes outsources a booking even though a capable van is free.
+        // Before touching the DB, re-verify every outsourced booking.
+        {
+          const chunkSlots = new Set<string>(); // "vanId::date" claimed by this chunk
+          for (const a of chunkResult.assignments) {
+            const b = chunk.find((x) => x.id === a.bookingId);
+            if (b) chunkSlots.add(`${a.vanId}::${b.travelDate}`);
+          }
+
+          const rescuedAssignments: typeof chunkResult.assignments = [];
+          const trulyOutsourced: typeof chunkResult.outsourced = [];
+
+          for (const out of chunkResult.outsourced) {
+            const b = chunk.find((x) => x.id === out.bookingId)!;
+
+            // Never rescue: Car trips, confirmed outsources, or manual-locked bookings
+            if ((b.vehicleCategory ?? "Van") === "Car") { trulyOutsourced.push(out); continue; }
+            if (b.inHouseOrOutsourced === "O" && (b.outsourcedCompany ?? "").trim() !== "") { trulyOutsourced.push(out); continue; }
+            if (b.manualChange === 1) { trulyOutsourced.push(out); continue; }
+
+            const locStr = `${b.fromLocation ?? ""} ${b.toLocation ?? ""} ${b.details ?? ""}`.toLowerCase();
+            const needsSingapore = locStr.includes("singapore");
+            const needsThailand =
+              locStr.includes("thailand") || locStr.includes("hatyai") ||
+              locStr.includes("hat yai") || locStr.includes("padang besar");
+            const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+
+            let freeVan: (typeof allVans)[number] | null = null;
+            for (const van of allVans) {
+              if (needsSingapore && van.singaporeEnabled !== 1) continue;
+              if (needsThailand && van.thailandEnabled !== 1) continue;
+              const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+              if (isAlphardBooking && !isVanAlphard) continue;
+              if (!isAlphardBooking && isVanAlphard) continue;
+              const key = `${van.id}::${b.travelDate}`;
+              if (!committedVanDates.has(key) && !chunkSlots.has(key)) {
+                freeVan = van;
+                break;
+              }
+            }
+
+            if (freeVan) {
+              rescuedAssignments.push({
+                bookingId: b.id,
+                vanId: freeVan.id,
+                reasoning: `Rescued by post-check: ${freeVan.vanNumber} was free on ${b.travelDate} — AI incorrectly outsourced.`,
+              });
+              chunkSlots.add(`${freeVan.id}::${b.travelDate}`);
+              emit(`🔧 Rescued #${b.id} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) → van ${freeVan.vanNumber}`);
+            } else {
+              trulyOutsourced.push(out);
+            }
+          }
+
+          if (rescuedAssignments.length > 0) {
+            emit(`🔧 Rescue pass recovered ${rescuedAssignments.length} booking(s) the AI incorrectly outsourced`);
+            chunkResult = {
+              assignments: [...chunkResult.assignments, ...rescuedAssignments],
+              outsourced: trulyOutsourced,
+              summary: chunkResult.summary,
+            };
+          }
+        }
+
         emit(
-          `⏳ Batch ${ci + 1} — writing ${parsed.assignments.length} assignment(s)…`,
+          `⏳ Batch ${ci + 1} — writing ${chunkResult.assignments.length} assignment(s), ${chunkResult.outsourced.length} outsourced…`,
         );
       } catch (chunkErr: any) {
         // Per-chunk fallback: rules engine handles only this batch's IDs
@@ -468,68 +568,79 @@ export async function aiRecheckAllVans(
         continue; // next batch
       }
 
-      // ── Write assignments to DB + update committed context ───────────────────
-      for (const assignment of chunkResult.assignments) {
-        const van = vanMap.get(assignment.vanId);
-        if (!van) continue;
-        const b = chunk.find((x) => x.id === assignment.bookingId)!;
+      // ── Write assignments to DB in parallel + update committed context ────────
+      await Promise.all(
+        chunkResult.assignments.map(async (assignment) => {
+          const van = vanMap.get(assignment.vanId);
+          if (!van) return;
+          const b = chunk.find((x) => x.id === assignment.bookingId)!;
 
-        await db
-          .update(bookings)
-          .set({
-            vanId: assignment.vanId,
-            vehiclePlate: van.vanNumber ?? "",
-            driverName: van.driverName ?? "",
-            driverContact: van.driverContact ?? "",
-            inHouseOrOutsourced: "I",
-            outsourcedCompany: "",
-          })
-          .where(eq(bookings.id, assignment.bookingId));
+          await db
+            .update(bookings)
+            .set({
+              vanId: assignment.vanId,
+              vehiclePlate: van.vanNumber ?? "",
+              driverName: van.driverName ?? "",
+              driverContact: van.driverContact ?? "",
+              inHouseOrOutsourced: "I",
+              outsourcedCompany: "",
+            })
+            .where(eq(bookings.id, assignment.bookingId));
 
-        committedVanDates.add(`${assignment.vanId}::${b.travelDate}`);
-        if (b.invoiceNo)
-          committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, assignment.vanId);
+          committedVanDates.add(`${assignment.vanId}::${b.travelDate}`);
+          if (b.invoiceNo)
+            committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, assignment.vanId);
 
-        emit(
-          `✓ Assigned ${van.vanNumber} (${van.driverName ?? "?"}) → ${b.invoiceNo ?? `#${b.id}`} on ${b.travelDate}`,
-        );
-        allReasoning.push({
-          bookingId: assignment.bookingId,
-          van: van.vanNumber,
-          action: "assigned",
-          reasoning: assignment.reasoning,
-        });
-      }
+          emit(
+            `✓ Assigned ${van.vanNumber} (${van.driverName ?? "?"}) → ${b.invoiceNo ?? `#${b.id}`} on ${b.travelDate}`,
+          );
+          allReasoning.push({
+            bookingId: assignment.bookingId,
+            van: van.vanNumber,
+            action: "assigned",
+            reasoning: assignment.reasoning,
+          });
+        }),
+      );
 
-      for (const outsourced of chunkResult.outsourced) {
-        const b = chunk.find((x) => x.id === outsourced.bookingId)!;
-        await db
-          .update(bookings)
-          .set({
-            vanId: null,
-            vehiclePlate: "",
-            driverName: "",
-            driverContact: "",
-            inHouseOrOutsourced: "O",
-            outsourcedCompany: "",
-          })
-          .where(eq(bookings.id, outsourced.bookingId));
+      await Promise.all(
+        chunkResult.outsourced.map(async (outsourced) => {
+          const b = chunk.find((x) => x.id === outsourced.bookingId)!;
+          await db
+            .update(bookings)
+            .set({
+              vanId: null,
+              vehiclePlate: "",
+              driverName: "",
+              driverContact: "",
+              inHouseOrOutsourced: "O",
+              outsourcedCompany: "",
+            })
+            .where(eq(bookings.id, outsourced.bookingId));
 
-        emit(
-          `⚠ Outsourced #${outsourced.bookingId} (${b.travelDate} ${b.fromLocation}→${b.toLocation}): ${outsourced.reasoning}`,
-        );
-        allReasoning.push({
-          bookingId: outsourced.bookingId,
-          van: null,
-          action: "outsourced",
-          reasoning: outsourced.reasoning,
-        });
-      }
+          emit(
+            `⚠ Outsourced #${outsourced.bookingId} (${b.travelDate} ${b.fromLocation}→${b.toLocation}): ${outsourced.reasoning}`,
+          );
+          allReasoning.push({
+            bookingId: outsourced.bookingId,
+            van: null,
+            action: "outsourced",
+            reasoning: outsourced.reasoning,
+          });
+        }),
+      );
 
       if (chunkResult.summary) summaries.push(chunkResult.summary);
     }
 
-    // ── Step 7: Combine summaries ──────────────────────────────────────────────
+    // ── Step 8: Constraint checks — fix any mistakes the AI made ─────────────
+    // Runs enforce-invoice-consistency, eliminate-double-bookings, and marks
+    // any still-unassigned bookings as outsourced. Guarantees hard rules are
+    // always satisfied regardless of AI output quality.
+    emit("🔒 Running constraint checks to verify AI output…");
+    await runConstraintChecks((msg) => emit(msg));
+
+    // ── Step 9: Combine summaries ──────────────────────────────────────────────
     const summary =
       summaries.length === 0
         ? "All bookings processed."

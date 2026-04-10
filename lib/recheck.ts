@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, isNull, isNotNull, inArray, notInArray, ne, asc } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray, ne, asc } from "drizzle-orm";
 import { runReassign } from "@/lib/reassign";
 import { detectTripRequirements } from "@/lib/van-assignment";
 
@@ -131,6 +131,58 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
 }
 
 /**
+ * Run only the constraint-enforcement steps (4–7) without resetting assignments.
+ *
+ * Called after the AI scheduler writes its results to guarantee hard rules are met:
+ * - Same invoice → same van
+ * - No double-bookings
+ * - All still-unassigned in-house bookings marked as outsourced
+ *
+ * Safe to run after any external scheduler (AI) that may have left inconsistencies.
+ */
+export async function runConstraintChecks(logger?: (msg: string) => void): Promise<void> {
+  const log = (msg: string) => { console.log(msg); logger?.(msg); };
+
+  log("━━━ CONSTRAINT CHECK STARTED ━━━");
+
+  log("Check 1/4 — enforcing same invoice = same van…");
+  await enforceInvoiceVanConsistency(log);
+
+  log("Check 2/4 — assigning free vans to same-day same-invoice conflicts…");
+  await assignFreeVanToSameDayConflicts(log);
+
+  log("Check 3/4 — eliminating double-bookings…");
+  await eliminateDoubleBookings(log);
+
+  log("Check 4/4 — rescuing any booking incorrectly outsourced when a free van exists…");
+  await rescueIncorrectOutsources(log);
+
+  log("Check 5/5 — marking still-unassigned bookings as outsourced…");
+  const stillUnassigned = await db
+    .select({ id: bookings.id })
+    .from(bookings)
+    .where(
+      and(
+        isNull(bookings.vanId),
+        eq(bookings.manualChange, 0),
+        eq(bookings.inHouseOrOutsourced, "I"),
+      )
+    );
+
+  if (stillUnassigned.length > 0) {
+    await db
+      .update(bookings)
+      .set({ inHouseOrOutsourced: "O" })
+      .where(inArray(bookings.id, stillUnassigned.map((b) => b.id)));
+    log(`  marked ${stillUnassigned.length} booking(s) as outsourced`);
+  } else {
+    log("  all bookings assigned ✓");
+  }
+
+  log("━━━ CONSTRAINT CHECK COMPLETE ━━━");
+}
+
+/**
  * For unassigned auto-managed in-house bookings that share the same
  * (invoiceNo, vehicleIndex, travelDate) with an already-assigned booking,
  * try to assign any randomly-selected free capable van instead of falling
@@ -157,28 +209,32 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
   }
 
   const allVans = await db.select().from(vans).orderBy(vans.id);
+
+  // Pre-load all assigned bookings once to build in-memory lookup structures.
+  // This replaces O(N×M) per-booking DB queries with a single fetch + Set lookups.
+  const allAssigned = await db
+    .select({ id: bookings.id, vanId: bookings.vanId, travelDate: bookings.travelDate, invoiceNo: bookings.invoiceNo, vehicleIndex: bookings.vehicleIndex })
+    .from(bookings)
+    .where(isNotNull(bookings.vanId));
+
+  // "vanId::date" → true — for checking if a van is free on a date
+  const occupiedSlots = new Set<string>(allAssigned.map((b) => `${b.vanId}::${b.travelDate}`));
+  // "invoiceNo::vehicleIndex::date" — keys where a sibling with a van already exists
+  const assignedSiblingKeys = new Set<string>(
+    allAssigned
+      .filter((b) => b.invoiceNo)
+      .map((b) => `${b.invoiceNo}::${b.vehicleIndex ?? 1}::${b.travelDate}`)
+  );
+
   let fixed = 0;
 
   for (const b of unassigned) {
     if (!b.invoiceNo) continue;
 
     // Is there another booking with the same (invoiceNo, vehicleIndex, travelDate)
-    // that already has a van?  That's the conflict scenario the user described.
-    const [sibling] = await db
-      .select({ id: bookings.id })
-      .from(bookings)
-      .where(
-        and(
-          eq(bookings.invoiceNo, b.invoiceNo),
-          eq(bookings.vehicleIndex, b.vehicleIndex ?? 1),
-          eq(bookings.travelDate, b.travelDate),
-          isNotNull(bookings.vanId),
-          ne(bookings.id, b.id),
-        )
-      )
-      .limit(1);
-
-    if (!sibling) continue; // not the same-day same-invoice conflict — leave for step 7
+    // that already has a van?  Check in-memory instead of querying DB.
+    const siblingKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}::${b.travelDate}`;
+    if (!assignedSiblingKeys.has(siblingKey)) continue; // leave for step 7
 
     log(
       `[assignFreeVan] ${b.invoiceNo} vi=${b.vehicleIndex ?? 1} date=${b.travelDate} id=${b.id} — same-day conflict with assigned sibling, picking random free van…`
@@ -201,20 +257,7 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
       const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
       if (isAlphardBooking && !isVanAlphard) continue;
       if (!isAlphardBooking && isVanAlphard) continue;
-
-      const [conflict] = await db
-        .select({ id: bookings.id })
-        .from(bookings)
-        .where(
-          and(
-            eq(bookings.vanId, van.id),
-            eq(bookings.travelDate, b.travelDate),
-            ne(bookings.id, b.id),
-          )
-        )
-        .limit(1);
-
-      if (!conflict) {
+      if (!occupiedSlots.has(`${van.id}::${b.travelDate}`)) {
         freeVan = van;
         break;
       }
@@ -230,6 +273,7 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
           driverContact: freeVan.driverContact ?? "",
         })
         .where(eq(bookings.id, b.id));
+      occupiedSlots.add(`${freeVan.id}::${b.travelDate}`);
       log(
         `[assignFreeVan] id=${b.id} → van ${freeVan.id} (${freeVan.vanNumber ?? "?"})`
       );
@@ -245,6 +289,101 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
     log(`  resolved ${fixed} same-day conflict(s) by assigning free van(s)`);
   } else {
     log("  no same-day conflict resolutions needed ✓");
+  }
+}
+
+/**
+ * Safety net: finds every unprotected booking that has no van assigned and is
+ * NOT a confirmed outsource (outsourcedCompany filled) or a Car trip, then
+ * tries to assign a free capable van.
+ *
+ * This catches cases where the AI scheduler incorrectly outsourced a booking
+ * when a free van was actually available. The function is idempotent — if a
+ * booking genuinely cannot be assigned (all capable vans are taken), it is
+ * left untouched so the final "mark as outsourced" step handles it.
+ */
+async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<void> {
+  // Unprotected = manualChange=0, no confirmed outsource company, not a Car trip
+  const candidates = await db.select().from(bookings).where(
+    and(
+      isNull(bookings.vanId),
+      eq(bookings.manualChange, 0),
+    )
+  );
+
+  const toRescue = candidates.filter((b) => {
+    if ((b.vehicleCategory ?? "Van") === "Car") return false; // always outsourced
+    if (b.inHouseOrOutsourced === "O" && (b.outsourcedCompany ?? "").trim() !== "") return false; // confirmed
+    return true;
+  });
+
+  if (toRescue.length === 0) {
+    log("  no incorrectly-outsourced bookings found ✓");
+    return;
+  }
+
+  log(`  found ${toRescue.length} unprotected unassigned booking(s) — checking for free vans…`);
+
+  const allVans = await db.select().from(vans).orderBy(vans.id);
+
+  // Build occupied-slot index from currently assigned bookings (single query)
+  const allAssigned = await db
+    .select({ vanId: bookings.vanId, travelDate: bookings.travelDate })
+    .from(bookings)
+    .where(isNotNull(bookings.vanId));
+
+  const occupiedSlots = new Set<string>(allAssigned.map((b) => `${b.vanId}::${b.travelDate}`));
+
+  let rescued = 0;
+
+  for (const b of toRescue) {
+    const { needsSingapore, needsThailand } = detectTripRequirements(
+      b.fromLocation ?? "",
+      b.toLocation ?? "",
+    );
+    const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+
+    let freeVan: (typeof allVans)[number] | null = null;
+    for (const van of allVans) {
+      if (needsSingapore && van.singaporeEnabled !== 1) continue;
+      if (needsThailand && van.thailandEnabled !== 1) continue;
+      const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+      if (isAlphardBooking && !isVanAlphard) continue;
+      if (!isAlphardBooking && isVanAlphard) continue;
+      if (!occupiedSlots.has(`${van.id}::${b.travelDate}`)) {
+        freeVan = van;
+        break;
+      }
+    }
+
+    if (freeVan) {
+      await db
+        .update(bookings)
+        .set({
+          vanId: freeVan.id,
+          vehiclePlate: freeVan.vanNumber ?? "",
+          driverName: freeVan.driverName ?? "",
+          driverContact: freeVan.driverContact ?? "",
+          inHouseOrOutsourced: "I",
+          outsourcedCompany: "",
+        })
+        .where(eq(bookings.id, b.id));
+      occupiedSlots.add(`${freeVan.id}::${b.travelDate}`);
+      log(
+        `[rescue] id=${b.id} date=${b.travelDate} ${b.fromLocation}→${b.toLocation} → van ${freeVan.id} (${freeVan.vanNumber ?? "?"})`,
+      );
+      rescued++;
+    } else {
+      log(
+        `[rescue] id=${b.id} date=${b.travelDate} — all capable vans taken, cannot rescue`,
+      );
+    }
+  }
+
+  if (rescued > 0) {
+    log(`  rescued ${rescued} booking(s) from incorrect outsource`);
+  } else {
+    log("  no rescuable bookings — all outsources are genuine ✓");
   }
 }
 
@@ -276,6 +415,13 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
     .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
 
   const allVans = await db.select().from(vans);
+
+  // In-memory occupied slot map: "vanId::date" → bookingId
+  // Used to check van availability without extra DB queries per candidate van.
+  const occupiedSlots = new Map<string, number>();
+  for (const b of assigned) {
+    occupiedSlots.set(`${b.vanId}::${b.travelDate}`, b.id);
+  }
 
   // Group by (invoiceNo, vehicleIndex)
   const bySlot = new Map<string, typeof assigned>();
@@ -338,22 +484,17 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       ...capableVans.filter((v) => !vanSet.has(v.id)),
     ];
 
+    const bookingIdSet = new Set(bookingIds);
+
     let targetVan: typeof allVans[number] | null = null;
     for (const van of vanPriority) {
-      // Check if this van has ANY other booking on ANY of the group's dates
-      const [blocker] = await db
-        .select({ id: bookings.id })
-        .from(bookings)
-        .where(
-          and(
-            eq(bookings.vanId, van.id),
-            inArray(bookings.travelDate, dates),
-            notInArray(bookings.id, bookingIds),
-          )
-        )
-        .limit(1);
+      // Check in-memory: does this van have any other booking on any of the group's dates?
+      const blocked = dates.some((date) => {
+        const slotBookingId = occupiedSlots.get(`${van.id}::${date}`);
+        return slotBookingId !== undefined && !bookingIdSet.has(slotBookingId);
+      });
 
-      if (!blocker) {
+      if (!blocked) {
         targetVan = van;
         break;
       }
@@ -365,10 +506,9 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       continue;
     }
 
-    // Move all rows not already on targetVan
-    let moved = 0;
-    for (const b of rows) {
-      if (b.vanId === targetVan.id) continue;
+    // Move all rows not already on targetVan — single batch UPDATE
+    const toMove = rows.filter((b) => b.vanId !== targetVan!.id);
+    if (toMove.length > 0) {
       await db
         .update(bookings)
         .set({
@@ -377,10 +517,15 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
           driverName: targetVan.driverName ?? "",
           driverContact: targetVan.driverContact ?? "",
         })
-        .where(eq(bookings.id, b.id));
-      log(`[enforceInvoice] ${slotKey} id=${b.id} date=${b.travelDate} → van ${targetVan.id} (${targetVan.vanNumber})`);
-      moved++;
+        .where(inArray(bookings.id, toMove.map((b) => b.id)));
+
+      for (const b of toMove) {
+        occupiedSlots.delete(`${b.vanId}::${b.travelDate}`);
+        occupiedSlots.set(`${targetVan.id}::${b.travelDate}`, b.id);
+        log(`[enforceInvoice] ${slotKey} id=${b.id} date=${b.travelDate} → van ${targetVan.id} (${targetVan.vanNumber})`);
+      }
     }
+    const moved = toMove.length;
     log(`[enforceInvoice] ${slotKey}: consolidated to van ${targetVan.id} (${targetVan.vanNumber ?? "?"}), moved ${moved} booking(s)`);
     fixed += moved;
   }
@@ -434,6 +579,12 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
   // Collect all vans once for free-van lookup
   const allVans = await db.select().from(vans).orderBy(vans.id);
 
+  // In-memory occupied slot index — avoids per-van DB queries inside the loop.
+  // Keys: "vanId::date". Pre-seed from allAssigned; update as victims are moved.
+  const occupiedSlots = new Set<string>(
+    allAssigned.map((b) => `${b.vanId}::${b.travelDate}`)
+  );
+
   let fixed = 0;
 
   for (const [key, entries] of byVanDate) {
@@ -456,7 +607,7 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
     for (let i = 1; i < sorted.length; i++) {
       const victim = sorted[i];
 
-      // Find a free, capability-matching van for the victim
+      // Find a free, capability-matching van for the victim using in-memory index
       const { needsSingapore, needsThailand } = detectTripRequirements(
         victim.fromLocation ?? "",
         victim.toLocation ?? "",
@@ -470,18 +621,7 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
         const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
         if (isAlphardBooking && !isVanAlphard) continue;
         if (!isAlphardBooking && isVanAlphard) continue;
-        const [conflict] = await db
-          .select({ id: bookings.id })
-          .from(bookings)
-          .where(
-            and(
-              eq(bookings.vanId, van.id),
-              eq(bookings.travelDate, date),
-              ne(bookings.id, victim.id),
-            )
-          )
-          .limit(1);
-        if (!conflict) { freeVan = van; break; }
+        if (!occupiedSlots.has(`${van.id}::${date}`)) { freeVan = van; break; }
       }
 
       if (freeVan) {
@@ -494,6 +634,8 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
             driverContact: freeVan.driverContact ?? "",
           })
           .where(eq(bookings.id, victim.id));
+        // sorted[0] still holds victim.vanId::date — only add freeVan's new slot
+        occupiedSlots.add(`${freeVan.id}::${date}`);
         log(
           `[eliminateDoubleBookings] displaced id=${victim.id} date=${date} → van ${freeVan.id} (${freeVan.vanNumber})`
         );
