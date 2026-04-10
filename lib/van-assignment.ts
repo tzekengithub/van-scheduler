@@ -41,15 +41,21 @@ export async function smartAssignVan(
   const bookedVanIds = new Set(bookedOnDate.map((b) => b.vanId));
 
   // ── Gather last drop-off location per van (continuity hint) ────────────────
+  // Single query: fetch all bookings ordered by date desc, take first hit per van
+  const recentBookings = await db
+    .select({ vanId: bookings.vanId, toLocation: bookings.toLocation })
+    .from(bookings)
+    .where(isNotNull(bookings.vanId))
+    .orderBy(desc(bookings.travelDate));
+
   const vanLastDropOff: Record<number, string | null> = {};
+  for (const b of recentBookings) {
+    if (b.vanId != null && !(b.vanId in vanLastDropOff)) {
+      vanLastDropOff[b.vanId] = b.toLocation;
+    }
+  }
   for (const van of allVans) {
-    const [last] = await db
-      .select({ toLocation: bookings.toLocation })
-      .from(bookings)
-      .where(eq(bookings.vanId, van.id))
-      .orderBy(desc(bookings.travelDate))
-      .limit(1);
-    vanLastDropOff[van.id] = last?.toLocation ?? null;
+    if (!(van.id in vanLastDropOff)) vanLastDropOff[van.id] = null;
   }
 
   // ── Alphard hard constraint pre-checks ────────────────────────────────────
@@ -166,13 +172,42 @@ ${JSON.stringify(vanContext, null, 2)}`;
     throw new Error(`AI returned non-JSON: ${content.slice(0, 200)}`);
   }
 
-  if (result.outsource || result.vanId == null) return { outsource: true };
+  if (result.outsource || result.vanId == null) {
+    // AI said outsource — but verify by checking for any free capable van.
+    // eligibleVans is pre-filtered for Alphard exclusivity and sorted by id
+    // (allVans comes from orderBy(vans.id)), so this is deterministic.
+    // Never trust a blind AI outsource when a free van actually exists.
+    const { needsSingapore, needsThailand } = detectTripRequirements(fromLocation, toLocation);
+    const fallback = eligibleVans.find(
+      (v) =>
+        !bookedVanIds.has(v.id) &&
+        (!needsSingapore || v.singaporeEnabled === 1) &&
+        (!needsThailand || v.thailandEnabled === 1),
+    );
+    if (fallback) return fallback.id; // free capable van exists — AI was wrong
+    return { outsource: true };
+  }
 
-  // Safety check — make sure returned ID actually exists, is free, and obeys Alphard rules
+  // Safety check — make sure returned ID actually exists, is free, and obeys Alphard rules.
+  // If the AI returns an invalid / already-booked van, fall back deterministically rather
+  // than outsourcing: pick the first eligible free van by id before giving up.
   const chosenVan = allVans.find((v) => v.id === result.vanId);
-  if (!chosenVan || bookedVanIds.has(chosenVan.id)) return { outsource: true };
-  if (isAlphardTrip && !isAlphardVan(chosenVan)) return { outsource: true };
-  if (!isAlphardTrip && isAlphardVan(chosenVan)) return { outsource: true };
+  if (
+    !chosenVan ||
+    bookedVanIds.has(chosenVan.id) ||
+    (isAlphardTrip && !isAlphardVan(chosenVan)) ||
+    (!isAlphardTrip && isAlphardVan(chosenVan))
+  ) {
+    const { needsSingapore, needsThailand } = detectTripRequirements(fromLocation, toLocation);
+    const fallback = eligibleVans.find(
+      (v) =>
+        !bookedVanIds.has(v.id) &&
+        (!needsSingapore || v.singaporeEnabled === 1) &&
+        (!needsThailand || v.thailandEnabled === 1),
+    );
+    if (fallback) return fallback.id;
+    return { outsource: true };
+  }
 
   return chosenVan.id;
 }

@@ -179,6 +179,9 @@ export async function runConstraintChecks(logger?: (msg: string) => void): Promi
     log("  all bookings assigned ✓");
   }
 
+  log("Check 6/6 — final validation (double-bookings, unnecessary outsources, capability rules)…");
+  await validateFinalSchedule(log);
+
   log("━━━ CONSTRAINT CHECK COMPLETE ━━━");
 }
 
@@ -247,11 +250,11 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
 
     const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
 
-    // Shuffle all vans so the selection is random
-    const shuffled = [...allVans].sort(() => Math.random() - 0.5);
-
+    // Iterate in deterministic order (allVans already sorted by id).
+    // Removed the previous Math.random() shuffle — randomness caused different
+    // van assignments on every run for the same input data.
     let freeVan: typeof allVans[number] | null = null;
-    for (const van of shuffled) {
+    for (const van of allVans) {
       if (needsSingapore && van.singaporeEnabled !== 1) continue;
       if (needsThailand && van.thailandEnabled !== 1) continue;
       const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
@@ -304,12 +307,13 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
  */
 async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<void> {
   // Unprotected = manualChange=0, no confirmed outsource company, not a Car trip
+  // ORDER BY id for deterministic processing — same input → same result every run.
   const candidates = await db.select().from(bookings).where(
     and(
       isNull(bookings.vanId),
       eq(bookings.manualChange, 0),
     )
-  );
+  ).orderBy(asc(bookings.id));
 
   const toRescue = candidates.filter((b) => {
     if ((b.vehicleCategory ?? "Van") === "Car") return false; // always outsourced
@@ -542,13 +546,18 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
  * that have more than one booking assigned.
  */
 async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void> {
+  // Lower number = higher priority = keeps the van when two bookings conflict.
+  // Must mirror the business tiers in priorityRank (reassign.ts):
+  //   Tier 1 day_trip → Tier 2 trip/round_trip/tpri → Tier 3 one_way_ride (LOWEST)
   function slotPriority(tripType: string | null | undefined, manualChange: number): number {
-    if (manualChange === 1) return -1; // manual always wins
+    if (manualChange === 1) return -1; // manual/protected always wins
     switch (tripType) {
-      case "day_trip":     return 0;
-      case "one_way_ride": return 1;
-      case "round_trip":   return 2;
-      default:             return 3;
+      case "day_trip":     return 0; // Tier 1 — highest, always keeps van
+      case "trip":         return 1; // Tier 2 — standard
+      case "round_trip":   return 1; // Tier 2 — standard
+      case "tpri":         return 1; // Tier 2 — standard
+      case "one_way_ride": return 2; // Tier 3 — LOWEST, displaced first
+      default:             return 1; // unknown → treat as standard
     }
   }
 
@@ -664,5 +673,123 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
     log(`[eliminateDoubleBookings] resolved ${fixed} double-booking violation(s)`);
   } else {
     log("  no double-bookings found ✓");
+  }
+}
+
+/**
+ * Read-only final validation pass.
+ *
+ * Checks the DB state after all scheduling passes complete and logs any
+ * remaining violations. Does NOT modify data — violations here indicate
+ * a scheduling bug that should be investigated.
+ *
+ * Checks:
+ *   1. No van double-booked on the same date
+ *   2. No unprotected booking outsourced when a free capable van exists
+ *   3. All assigned vans satisfy capability/exclusivity rules (SG/TH/Alphard)
+ */
+export async function validateFinalSchedule(log: (msg: string) => void): Promise<void> {
+  const allB = await db.select().from(bookings).orderBy(asc(bookings.id));
+  const allV = await db.select().from(vans).orderBy(vans.id);
+
+  let violations = 0;
+
+  // ── Check 1: double-bookings ────────────────────────────────────────────────
+  const vanDateMap = new Map<string, number[]>();
+  for (const b of allB) {
+    if (!b.vanId) continue;
+    const key = `${b.vanId}::${b.travelDate}`;
+    if (!vanDateMap.has(key)) vanDateMap.set(key, []);
+    vanDateMap.get(key)!.push(b.id);
+  }
+  let doubleBookings = 0;
+  for (const [key, ids] of vanDateMap) {
+    if (ids.length > 1) {
+      log(`[VALIDATION FAIL] double-booking: ${key} → ids=[${ids.join(",")}]`);
+      doubleBookings++;
+      violations++;
+    }
+  }
+  if (doubleBookings === 0) log("  ✓ no double-bookings");
+
+  // ── Check 2: outsourced when a free capable van existed ─────────────────────
+  // Build occupied-slot set from assigned bookings
+  const occupiedSlots = new Set<string>(
+    allB.filter((b) => b.vanId).map((b) => `${b.vanId}::${b.travelDate}`)
+  );
+  const needlessOutsources: number[] = [];
+  for (const b of allB) {
+    if (b.manualChange === 1) continue;
+    if ((b.vehicleCategory ?? "Van") === "Car") continue;
+    if (b.inHouseOrOutsourced !== "O") continue;
+    if ((b.outsourcedCompany ?? "").trim() !== "") continue; // confirmed outsource
+
+    const { needsSingapore, needsThailand } = detectTripRequirements(
+      b.fromLocation ?? "",
+      b.toLocation ?? "",
+    );
+    const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+
+    const freeVanExists = allV.some((v) => {
+      if (needsSingapore && v.singaporeEnabled !== 1) return false;
+      if (needsThailand && v.thailandEnabled !== 1) return false;
+      const isVanAlphard = (v.vehicleType ?? "").toLowerCase() === "toyota alphard";
+      if (isAlphardBooking && !isVanAlphard) return false;
+      if (!isAlphardBooking && isVanAlphard) return false;
+      return !occupiedSlots.has(`${v.id}::${b.travelDate}`);
+    });
+
+    if (freeVanExists) {
+      log(`[VALIDATION WARN] #${b.id} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) outsourced unnecessarily — a free capable van exists`);
+      needlessOutsources.push(b.id);
+      violations++;
+    }
+  }
+  if (needlessOutsources.length === 0) log("  ✓ no unnecessary outsourcing");
+
+  // ── Check 3: capability violations on assigned bookings ─────────────────────
+  let capViolations = 0;
+  for (const b of allB) {
+    if (!b.vanId) continue;
+    const van = allV.find((v) => v.id === b.vanId);
+    if (!van) {
+      log(`[VALIDATION FAIL] #${b.id} assigned to non-existent van ${b.vanId}`);
+      capViolations++;
+      violations++;
+      continue;
+    }
+    const { needsSingapore, needsThailand } = detectTripRequirements(
+      b.fromLocation ?? "",
+      b.toLocation ?? "",
+    );
+    if (needsSingapore && van.singaporeEnabled !== 1) {
+      log(`[VALIDATION FAIL] #${b.id} needs Singapore-capable van but van ${b.vanId} is not enabled`);
+      capViolations++;
+      violations++;
+    }
+    if (needsThailand && van.thailandEnabled !== 1) {
+      log(`[VALIDATION FAIL] #${b.id} needs Thailand-capable van but van ${b.vanId} is not enabled`);
+      capViolations++;
+      violations++;
+    }
+    const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+    const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+    if (isAlphardBooking && !isVanAlphard) {
+      log(`[VALIDATION FAIL] #${b.id} is an Alphard trip but assigned to regular van ${b.vanId}`);
+      capViolations++;
+      violations++;
+    }
+    if (!isAlphardBooking && isVanAlphard) {
+      log(`[VALIDATION FAIL] #${b.id} is not an Alphard trip but assigned to Alphard van ${b.vanId}`);
+      capViolations++;
+      violations++;
+    }
+  }
+  if (capViolations === 0) log("  ✓ all capability rules satisfied");
+
+  if (violations === 0) {
+    log("  ✓ final schedule validation passed — no violations");
+  } else {
+    log(`[VALIDATION] ${violations} violation(s) found — see above`);
   }
 }

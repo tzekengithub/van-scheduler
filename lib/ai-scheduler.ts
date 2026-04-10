@@ -203,7 +203,8 @@ export async function aiRecheckAllVans(
 
   try {
     // ── Step 1: Fetch all data ──────────────────────────────────────────────────
-    const allVans = await db.select().from(vans);
+    // Sort vans by id so rescue-pass van selection is deterministic across runs.
+    const allVans = await db.select().from(vans).orderBy(vans.id);
     const allBookings = await db.select().from(bookings);
 
     const isProtected = (b: (typeof allBookings)[0]) =>
