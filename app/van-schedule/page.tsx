@@ -14,6 +14,9 @@ interface Van {
   vanNumber: string;
   driverName: string | null;
   driverContact: string | null;
+  singaporeEnabled: number | null;
+  thailandEnabled: number | null;
+  vehicleType: string | null;
 }
 
 interface BookingRow {
@@ -305,9 +308,16 @@ export default function VanSchedulePage() {
 
   // Van rows: registered vans, then extra unrecognised plates, then outsource companies
   const vanRows = useMemo(() => [
-    ...vans.map((v) => ({ plate: v.vanNumber, label: v.driverName ?? "", isOutsourced: false })),
-    ...extraPlates.map((p) => ({ plate: p, label: "", isOutsourced: false })),
-    ...[...outsourcedCompanyNames].sort().map((name) => ({ plate: name, label: "Outsourced", isOutsourced: true })),
+    ...vans.map((v) => ({
+      plate: v.vanNumber,
+      label: v.driverName ?? "",
+      isOutsourced: false,
+      sgEnabled: v.singaporeEnabled === 1,
+      thEnabled: v.thailandEnabled === 1,
+      isAlphard: (v.vehicleType ?? "").toLowerCase() === "toyota alphard",
+    })),
+    ...extraPlates.map((p) => ({ plate: p, label: "", isOutsourced: false, sgEnabled: false, thEnabled: false, isAlphard: false })),
+    ...[...outsourcedCompanyNames].sort().map((name) => ({ plate: name, label: "Outsourced", isOutsourced: true, sgEnabled: false, thEnabled: false, isAlphard: false })),
   ], [vans, extraPlates, outsourcedCompanyNames]);
 
   // Multi-day invoice color stripes — assign a distinct color to each invoice
@@ -919,7 +929,7 @@ export default function VanSchedulePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {vanRows.map(({ plate, label, isOutsourced }) => {
+                  {vanRows.map(({ plate, label, isOutsourced, sgEnabled, thEnabled, isAlphard }) => {
                     const dayMap = bookingMap.get(plate) ?? new Map<number, BookingRow[]>();
                     return (
                       <tr
@@ -934,9 +944,18 @@ export default function VanSchedulePage() {
                             </>
                           ) : (
                             <>
-                              <div className="font-semibold text-zinc-900 text-xs">{plate}</div>
+                              <div className="font-semibold text-zinc-900 text-xs flex items-center gap-1">
+                                {plate}
+                                {isAlphard && <span title="Toyota Alphard" className="text-[11px]">🚐</span>}
+                              </div>
                               {label && (
                                 <div className="text-zinc-400 text-[10px] truncate max-w-[140px]">{label}</div>
+                              )}
+                              {(sgEnabled || thEnabled) && (
+                                <div className="flex items-center gap-0.5 mt-0.5">
+                                  {sgEnabled && <span title="Singapore capable" className="text-[11px]">🇸🇬</span>}
+                                  {thEnabled && <span title="Thailand capable" className="text-[11px]">🇹🇭</span>}
+                                </div>
                               )}
                             </>
                           )}
