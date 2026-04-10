@@ -143,6 +143,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   }, [uploadOpen]);
 
   async function handleFilesSelected(files: File[]) {
+    if (files.length > 20) {
+      setUploadError(`Too many files selected (${files.length}). Please upload a maximum of 20 PDFs at a time.`);
+      return;
+    }
     setUploadFiles(files);
     setPreviewRows(null);
     setUploadError(null);
@@ -565,7 +569,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                     }}
                   />
                   <p className="text-sm text-zinc-500">
-                    {serviceReady ? "Drop one or more PDFs here, or click to select" : "Start the PDF service above before uploading"}
+                    {serviceReady ? "Drop PDFs here, or click to select (max 20 files)" : "Start the PDF service above before uploading"}
                   </p>
                   <p className="text-xs text-zinc-400 mt-1">Invoice PDFs only</p>
                 </div>
