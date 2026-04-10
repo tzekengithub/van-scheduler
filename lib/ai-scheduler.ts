@@ -438,6 +438,32 @@ export async function aiRecheckAllVans(
               reasoning: `Committed-slot conflict: van ${a.vanId} is already assigned on ${b.travelDate}. Rescue pass will attempt a free alternative.`,
             });
           } else {
+            // Alphard exclusivity guard — catch AI mistakes before writing to DB.
+            // isAlphardTrip=1 bookings must use Toyota Alphard vans; all other
+            // bookings must NOT use Toyota Alphard vans.  If the AI violates this,
+            // re-queue the booking as outsourced so the rescue pass can find the
+            // correct van type.
+            const assignedVan = vanMap.get(a.vanId);
+            if (assignedVan) {
+              const isVanAlphard = (assignedVan.vehicleType ?? "").toLowerCase() === "toyota alphard";
+              const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+              if (isAlphardBooking && !isVanAlphard) {
+                emit(`⚠ #${b.id} (${b.travelDate}): AI assigned regular van ${assignedVan.vanNumber} to Alphard booking — re-queuing for correct assignment`);
+                parsed.outsourced.push({
+                  bookingId: b.id,
+                  reasoning: `Alphard violation: booking requires Toyota Alphard but AI assigned regular van ${assignedVan.vanNumber}. Rescue pass will find a Toyota Alphard.`,
+                });
+                continue;
+              }
+              if (!isAlphardBooking && isVanAlphard) {
+                emit(`⚠ #${b.id} (${b.travelDate}): AI assigned Alphard van ${assignedVan.vanNumber} to non-Alphard booking — re-queuing for correct assignment`);
+                parsed.outsourced.push({
+                  bookingId: b.id,
+                  reasoning: `Alphard violation: non-Alphard booking cannot use Toyota Alphard van ${assignedVan.vanNumber}. Rescue pass will find a regular van.`,
+                });
+                continue;
+              }
+            }
             // Within the chunk, allow the last assignment for a key to win
             // (AI may have bumped an earlier one to a different van)
             newVanDates.set(key, a.bookingId);

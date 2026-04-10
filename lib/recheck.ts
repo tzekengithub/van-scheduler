@@ -145,19 +145,22 @@ export async function runConstraintChecks(logger?: (msg: string) => void): Promi
 
   log("━━━ CONSTRAINT CHECK STARTED ━━━");
 
-  log("Check 1/4 — enforcing same invoice = same van…");
+  log("Check 1/5 — enforcing same invoice = same van…");
   await enforceInvoiceVanConsistency(log);
 
-  log("Check 2/4 — assigning free vans to same-day same-invoice conflicts…");
+  log("Check 2/5 — assigning free vans to same-day same-invoice conflicts…");
   await assignFreeVanToSameDayConflicts(log);
 
-  log("Check 3/4 — eliminating double-bookings…");
+  log("Check 3/5 — eliminating double-bookings…");
   await eliminateDoubleBookings(log);
 
-  log("Check 4/4 — rescuing any booking incorrectly outsourced when a free van exists…");
+  log("Check 4/5 — fixing Alphard exclusivity violations…");
+  await fixAlphardViolations(log);
+
+  log("Check 5/5 — rescuing any booking incorrectly outsourced when a free van exists…");
   await rescueIncorrectOutsources(log);
 
-  log("Check 5/5 — marking still-unassigned bookings as outsourced…");
+  log("Check 6/6 — marking still-unassigned bookings as outsourced…");
   const stillUnassigned = await db
     .select({ id: bookings.id })
     .from(bookings)
@@ -179,7 +182,7 @@ export async function runConstraintChecks(logger?: (msg: string) => void): Promi
     log("  all bookings assigned ✓");
   }
 
-  log("Check 6/6 — final validation (double-bookings, unnecessary outsources, capability rules)…");
+  log("Check 7/7 — final validation (double-bookings, unnecessary outsources, capability rules)…");
   await validateFinalSchedule(log);
 
   log("━━━ CONSTRAINT CHECK COMPLETE ━━━");
@@ -293,6 +296,72 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
   } else {
     log("  no same-day conflict resolutions needed ✓");
   }
+}
+
+/**
+ * Scan all assigned auto-managed bookings and fix any Alphard exclusivity
+ * violations:
+ *   - isAlphardTrip=1 assigned to a non-Alphard van → unassign it
+ *   - isAlphardTrip=0 assigned to a Toyota Alphard van → unassign it
+ *
+ * Unassigned bookings are picked up by rescueIncorrectOutsources (which
+ * respects Alphard rules) and, if still unassigned, by the final outsource
+ * step.  Manual-change bookings are never touched.
+ */
+async function fixAlphardViolations(log: (msg: string) => void): Promise<void> {
+  const allAssigned = await db
+    .select({
+      id: bookings.id,
+      vanId: bookings.vanId,
+      travelDate: bookings.travelDate,
+      invoiceNo: bookings.invoiceNo,
+      isAlphardTrip: bookings.isAlphardTrip,
+      manualChange: bookings.manualChange,
+    })
+    .from(bookings)
+    .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
+
+  if (allAssigned.length === 0) {
+    log("  no assigned auto-managed bookings to check ✓");
+    return;
+  }
+
+  const allVans = await db.select().from(vans);
+  const vanMap = new Map(allVans.map((v) => [v.id, v]));
+
+  const violations: number[] = [];
+  for (const b of allAssigned) {
+    const van = vanMap.get(b.vanId!);
+    if (!van) continue;
+    const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+    const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+    if (isAlphardBooking !== isVanAlphard) {
+      log(
+        `[fixAlphard] id=${b.id} date=${b.travelDate} inv=${b.invoiceNo ?? "?"}: ` +
+        `${isAlphardBooking ? "Alphard booking" : "regular booking"} incorrectly assigned to ` +
+        `${isVanAlphard ? "Alphard" : "regular"} van ${van.vanNumber} — unassigning`
+      );
+      violations.push(b.id);
+    }
+  }
+
+  if (violations.length === 0) {
+    log("  no Alphard violations found ✓");
+    return;
+  }
+
+  await db
+    .update(bookings)
+    .set({
+      vanId: null,
+      vehiclePlate: null,
+      driverName: null,
+      driverContact: null,
+      inHouseOrOutsourced: "I",
+    })
+    .where(inArray(bookings.id, violations));
+
+  log(`  cleared ${violations.length} Alphard violation(s) — will be re-assigned or outsourced`);
 }
 
 /**
