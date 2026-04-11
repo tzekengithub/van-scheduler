@@ -313,15 +313,20 @@ export async function aiRecheckAllVans(
     const committedInvoiceVans = new Map<string, number>(); // "invoiceNo::vi" → vanId
 
     for (const b of allBookings) {
-      if (isProtected(b) && b.vanId) {
-        committedSlots.set(`${b.vanId}::${b.travelDate}`, {
-          bookingId: b.id,
-          tripType: b.tripType ?? "trip",
-          locked: true,
-        });
-        if (b.invoiceNo) {
-          committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId);
-        }
+      if (!b.vanId) continue;
+      const locked = isProtected(b);
+      // Pre-seed ALL existing van assignments — not just protected ones.
+      // Non-protected bookings are marked locked=false (bumpable) so later
+      // batches can see that a slot is taken by a lower-priority booking and
+      // bump it rather than blindly assigning the same van and creating a
+      // double-booking that the constraint checker has to resolve.
+      committedSlots.set(`${b.vanId}::${b.travelDate}`, {
+        bookingId: b.id,
+        tripType: b.tripType ?? "trip",
+        locked,
+      });
+      if (b.invoiceNo) {
+        committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId);
       }
     }
 
