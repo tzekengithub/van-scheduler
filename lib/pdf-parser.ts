@@ -296,12 +296,18 @@ export function parseRawText(text: string): ParsedBooking[] {
       }
     }
 
-    // Look ahead after numeric tokens for any remaining annotation lines
+    // Look ahead after numeric tokens for any remaining annotation lines.
+    // Only hard-stop at the next row number ("2.", "3."…) or COMPANY POLICY.
+    // Do NOT break on unrecognised lines — PyMuPDF sometimes splits a single
+    // bracketed annotation across two lines (e.g. "[Maximum 10 hrs…" on one
+    // line and "will be charged if more than 10 hrs]" on the next), and the
+    // continuation line would previously terminate the scan before reaching
+    // "(Alphard)" or "(One-Way Ride Only)" on the line after it.
     for (let k = j; k < lines.length; k++) {
       const l = lines[k];
       if (isStop(l) || isRowNum(l)) break;
-      if (l.startsWith("(")) { annotationLines.push(l); continue; }
-      if (!isSkippable(l)) break;
+      if (l.startsWith("(")) annotationLines.push(l);
+      // all other lines (bracket continuations, etc.) are silently skipped
     }
 
     // Join all annotation lines into one string for detection
