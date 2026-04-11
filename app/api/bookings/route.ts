@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, desc, asc } from "drizzle-orm";
-import { recheckAllVans } from "@/lib/recheck";
-import { aiRecheckAllVans } from "@/lib/ai-scheduler";
 
 export async function GET(request: NextRequest) {
   try {
@@ -133,16 +131,6 @@ export async function DELETE(request: NextRequest) {
     if (deleted.length === 0) {
       return NextResponse.json({ error: `No bookings found for invoice ${invoiceNo}` }, { status: 404 });
     }
-
-    // Rules engine runs synchronously for immediate consistency (fast).
-    await recheckAllVans();
-
-    // AI recheck runs in the background — deleted bookings free van slots that
-    // may allow previously-outsourced trips to be brought back in-house.
-    // The response returns immediately; the DB is updated seconds later.
-    aiRecheckAllVans().catch((err) =>
-      console.error("[bg AI recheck after invoice delete]", err)
-    );
 
     return NextResponse.json({ deleted: deleted.length, invoiceNo });
   } catch (error) {
