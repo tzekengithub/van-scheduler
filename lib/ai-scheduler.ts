@@ -441,7 +441,13 @@ export async function aiRecheckAllVans(
         passengerCount: b.passengerCount ?? 0,
         manualChange: b.manualChange ?? 0,
         currentVanId: b.vanId ?? null,
-        inHouseOrOutsourced: b.inHouseOrOutsourced ?? "I",
+        // Auto-outsourced bookings (no company) are still unassigned — show as "I"
+        // so the AI doesn't treat the prior outsource status as a reason to skip them.
+        // Only "O" with a non-empty outsourcedCompany is a confirmed / protected outsource.
+        inHouseOrOutsourced:
+          b.inHouseOrOutsourced === "O" && (b.outsourcedCompany ?? "").trim() === ""
+            ? "I"
+            : (b.inHouseOrOutsourced ?? "I"),
         outsourcedCompany: b.outsourcedCompany ?? "",
         // true = just uploaded, needs assignment from scratch
         // false = already has a van, only move if a higher-priority new trip needs the slot
