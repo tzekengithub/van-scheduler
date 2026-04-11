@@ -517,16 +517,54 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
   log(`  found ${toRescue.length} unprotected unassigned booking(s) — checking for free vans…`);
 
   const allVans = await db.select().from(vans).orderBy(vans.id);
+  const vanMap = new Map(allVans.map((v) => [v.id, v]));
 
-  // Build occupied-slot index from currently assigned bookings (single query)
+  // Load all currently assigned bookings with full info — needed so we can
+  // decide which occupants are bumpable (priority or SG/TH override) and
+  // filter out victims that themselves need the same SG/TH specialty.
   const allAssigned = await db
-    .select({ vanId: bookings.vanId, travelDate: bookings.travelDate })
+    .select({
+      id: bookings.id,
+      vanId: bookings.vanId,
+      travelDate: bookings.travelDate,
+      tripType: bookings.tripType,
+      fromLocation: bookings.fromLocation,
+      toLocation: bookings.toLocation,
+      isAlphardTrip: bookings.isAlphardTrip,
+      manualChange: bookings.manualChange,
+      inHouseOrOutsourced: bookings.inHouseOrOutsourced,
+      outsourcedCompany: bookings.outsourcedCompany,
+    })
     .from(bookings)
     .where(isNotNull(bookings.vanId));
 
-  const occupiedSlots = new Set<string>(allAssigned.map((b) => `${b.vanId}::${b.travelDate}`));
+  type Occupant = {
+    id: number;
+    tripType: string;
+    fromLocation: string;
+    toLocation: string;
+    isAlphardTrip: number;
+    locked: boolean;
+  };
+  const occupants = new Map<string, Occupant>();
+  for (const r of allAssigned) {
+    const locked =
+      r.manualChange === 1 ||
+      (r.inHouseOrOutsourced === "O" && (r.outsourcedCompany ?? "").trim() !== "");
+    occupants.set(`${r.vanId}::${r.travelDate}`, {
+      id: r.id,
+      tripType: r.tripType ?? "trip",
+      fromLocation: r.fromLocation ?? "",
+      toLocation: r.toLocation ?? "",
+      isAlphardTrip: r.isAlphardTrip ?? 0,
+      locked,
+    });
+  }
 
   let rescued = 0;
+  // Victims displaced by a bump get retried once at the end (free-van only,
+  // no further bumping rights) to guarantee termination.
+  const bumpedVictimIds: number[] = [];
 
   for (const b of toRescue) {
     const { needsSingapore, needsThailand } = detectTripRequirements(
@@ -535,6 +573,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
     );
     const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
 
+    // ── 1. Free van search ──────────────────────────────────────────────────
     let freeVan: (typeof allVans)[number] | null = null;
     for (const van of allVans) {
       if (needsSingapore && van.singaporeEnabled !== 1) continue;
@@ -542,7 +581,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
       const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
       if (isAlphardBooking && !isVanAlphard) continue;
       if (!isAlphardBooking && isVanAlphard) continue;
-      if (!occupiedSlots.has(`${van.id}::${b.travelDate}`)) {
+      if (!occupants.has(`${van.id}::${b.travelDate}`)) {
         freeVan = van;
         break;
       }
@@ -560,14 +599,177 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
           outsourcedCompany: "",
         })
         .where(eq(bookings.id, b.id));
-      occupiedSlots.add(`${freeVan.id}::${b.travelDate}`);
+      occupants.set(`${freeVan.id}::${b.travelDate}`, {
+        id: b.id,
+        tripType: b.tripType ?? "trip",
+        fromLocation: b.fromLocation ?? "",
+        toLocation: b.toLocation ?? "",
+        isAlphardTrip: b.isAlphardTrip ?? 0,
+        locked: false,
+      });
       log(
         `[rescue] id=${b.id} date=${b.travelDate} ${b.fromLocation}→${b.toLocation} → van ${freeVan.id} (${freeVan.vanNumber ?? "?"})`,
       );
       rescued++;
+      continue;
+    }
+
+    // ── 2. No free van — try to bump a lower-priority / non-specialty occupant ─
+    // Path 1: priority bump — any non-one_way_ride booking may displace a
+    //         same-date one_way_ride on a capability-matching van.
+    // Path 2: SG/TH override bump — a booking needing Singapore or Thailand
+    //         capability may displace ANY non-SG/TH booking on a capable van,
+    //         regardless of the victim's priority tier. Victims that themselves
+    //         need the same specialty are never chosen (no zero-sum swap).
+    let victimKey: string | null = null;
+    let victimInfo: Occupant | null = null;
+    let bumpLabel = "";
+
+    if ((b.tripType ?? "trip") !== "one_way_ride") {
+      for (const [key, occ] of occupants) {
+        if (occ.locked) continue;
+        if (occ.tripType !== "one_way_ride") continue;
+        const [vanIdStr, date] = key.split("::");
+        if (date !== b.travelDate) continue;
+        const van = vanMap.get(Number(vanIdStr));
+        if (!van) continue;
+        if (needsSingapore && van.singaporeEnabled !== 1) continue;
+        if (needsThailand && van.thailandEnabled !== 1) continue;
+        const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+        if (isAlphardBooking && !isVanAlphard) continue;
+        if (!isAlphardBooking && isVanAlphard) continue;
+        victimKey = key;
+        victimInfo = occ;
+        bumpLabel = "priority bump";
+        break;
+      }
+    }
+
+    if (!victimKey && (needsSingapore || needsThailand)) {
+      for (const [key, occ] of occupants) {
+        if (occ.locked) continue;
+        const [vanIdStr, date] = key.split("::");
+        if (date !== b.travelDate) continue;
+        const van = vanMap.get(Number(vanIdStr));
+        if (!van) continue;
+        if (needsSingapore && van.singaporeEnabled !== 1) continue;
+        if (needsThailand && van.thailandEnabled !== 1) continue;
+        const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+        if (isAlphardBooking && !isVanAlphard) continue;
+        if (!isAlphardBooking && isVanAlphard) continue;
+        const victimReq = detectTripRequirements(occ.fromLocation, occ.toLocation);
+        if (needsSingapore && victimReq.needsSingapore) continue;
+        if (needsThailand && victimReq.needsThailand) continue;
+        victimKey = key;
+        victimInfo = occ;
+        bumpLabel = "SG/TH override bump";
+        break;
+      }
+    }
+
+    if (victimKey && victimInfo) {
+      const [vanIdStr] = victimKey.split("::");
+      const bumpVanId = Number(vanIdStr);
+      const bumpVan = vanMap.get(bumpVanId)!;
+
+      await db
+        .update(bookings)
+        .set({
+          vanId: null,
+          vehiclePlate: "",
+          driverName: "",
+          driverContact: "",
+          inHouseOrOutsourced: "I",
+          outsourcedCompany: "",
+        })
+        .where(eq(bookings.id, victimInfo.id));
+
+      await db
+        .update(bookings)
+        .set({
+          vanId: bumpVanId,
+          vehiclePlate: bumpVan.vanNumber ?? "",
+          driverName: bumpVan.driverName ?? "",
+          driverContact: bumpVan.driverContact ?? "",
+          inHouseOrOutsourced: "I",
+          outsourcedCompany: "",
+        })
+        .where(eq(bookings.id, b.id));
+
+      occupants.set(victimKey, {
+        id: b.id,
+        tripType: b.tripType ?? "trip",
+        fromLocation: b.fromLocation ?? "",
+        toLocation: b.toLocation ?? "",
+        isAlphardTrip: b.isAlphardTrip ?? 0,
+        locked: false,
+      });
+
+      log(
+        `[rescue] id=${b.id} ${bumpLabel}: displaced ${victimInfo.tripType} id=${victimInfo.id} → van ${bumpVanId} (${bumpVan.vanNumber ?? "?"})`,
+      );
+      rescued++;
+      bumpedVictimIds.push(victimInfo.id);
+      continue;
+    }
+
+    log(
+      `[rescue] id=${b.id} date=${b.travelDate} — all capable vans taken, cannot rescue`,
+    );
+  }
+
+  // ── Second pass: retry displaced victims with free-van search only ───────
+  // No bumping rights in this pass to guarantee termination.
+  for (const vid of bumpedVictimIds) {
+    const [v] = await db.select().from(bookings).where(eq(bookings.id, vid)).limit(1);
+    if (!v || v.vanId != null || v.manualChange === 1) continue;
+
+    const { needsSingapore, needsThailand } = detectTripRequirements(
+      v.fromLocation ?? "",
+      v.toLocation ?? "",
+    );
+    const isAlphardBooking = (v.isAlphardTrip ?? 0) === 1;
+
+    let freeVan: (typeof allVans)[number] | null = null;
+    for (const van of allVans) {
+      if (needsSingapore && van.singaporeEnabled !== 1) continue;
+      if (needsThailand && van.thailandEnabled !== 1) continue;
+      const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+      if (isAlphardBooking && !isVanAlphard) continue;
+      if (!isAlphardBooking && isVanAlphard) continue;
+      if (!occupants.has(`${van.id}::${v.travelDate}`)) {
+        freeVan = van;
+        break;
+      }
+    }
+
+    if (freeVan) {
+      await db
+        .update(bookings)
+        .set({
+          vanId: freeVan.id,
+          vehiclePlate: freeVan.vanNumber ?? "",
+          driverName: freeVan.driverName ?? "",
+          driverContact: freeVan.driverContact ?? "",
+          inHouseOrOutsourced: "I",
+          outsourcedCompany: "",
+        })
+        .where(eq(bookings.id, v.id));
+      occupants.set(`${freeVan.id}::${v.travelDate}`, {
+        id: v.id,
+        tripType: v.tripType ?? "trip",
+        fromLocation: v.fromLocation ?? "",
+        toLocation: v.toLocation ?? "",
+        isAlphardTrip: v.isAlphardTrip ?? 0,
+        locked: false,
+      });
+      log(
+        `[rescue] RETRY-OK id=${v.id} date=${v.travelDate} → van ${freeVan.id} (${freeVan.vanNumber ?? "?"})`,
+      );
+      rescued++;
     } else {
       log(
-        `[rescue] id=${b.id} date=${b.travelDate} — all capable vans taken, cannot rescue`,
+        `[rescue] RETRY-CONFLICT id=${v.id} date=${v.travelDate} — no free van after bump, will be outsourced`,
       );
     }
   }
