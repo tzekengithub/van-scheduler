@@ -92,10 +92,10 @@ function isOutsourced(b: BookingRow): boolean {
 }
 
 function tripDestinationFlags(b: BookingRow): { sg: boolean; th: boolean } {
-  const combined = `${b.fromLocation ?? ""} ${b.toLocation ?? ""}`.toLowerCase();
+  const combined = `${b.fromLocation ?? ""} ${b.toLocation ?? ""} ${b.details ?? ""}`.toLowerCase();
   return {
     sg: combined.includes("singapore"),
-    th: combined.includes("thailand"),
+    th: combined.includes("thailand") || combined.includes("hatyai") || combined.includes("hat yai") || combined.includes("padang besar"),
   };
 }
 
