@@ -73,17 +73,32 @@ export async function runReassign(
   });
 
   // Pre-load all currently assigned bookings for bump candidate lookup.
-  // Keyed by "travelDate::tripType" → [{id, vanId}]. Updated as the loop runs.
+  // Keyed by "travelDate::tripType" → [{id, vanId, from, to}]. Updated as the loop runs.
+  // fromLocation/toLocation are needed so the SG/TH override bump can skip victims
+  // that themselves need the same specialty (no zero-sum swaps).
   const existingAssigned = await db
-    .select({ id: bookings.id, vanId: bookings.vanId, travelDate: bookings.travelDate, tripType: bookings.tripType })
+    .select({
+      id: bookings.id,
+      vanId: bookings.vanId,
+      travelDate: bookings.travelDate,
+      tripType: bookings.tripType,
+      fromLocation: bookings.fromLocation,
+      toLocation: bookings.toLocation,
+    })
     .from(bookings)
     .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
 
-  const bumpIndex = new Map<string, Array<{ id: number; vanId: number }>>();
+  type BumpEntry = { id: number; vanId: number; fromLocation: string; toLocation: string };
+  const bumpIndex = new Map<string, Array<BumpEntry>>();
   for (const b of existingAssigned) {
     const key = `${b.travelDate}::${b.tripType ?? "trip"}`;
     if (!bumpIndex.has(key)) bumpIndex.set(key, []);
-    bumpIndex.get(key)!.push({ id: b.id, vanId: b.vanId! });
+    bumpIndex.get(key)!.push({
+      id: b.id,
+      vanId: b.vanId!,
+      fromLocation: b.fromLocation ?? "",
+      toLocation: b.toLocation ?? "",
+    });
   }
 
   let assigned = 0;
@@ -122,7 +137,12 @@ export async function runReassign(
 
       const assignKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
       if (!bumpIndex.has(assignKey)) bumpIndex.set(assignKey, []);
-      bumpIndex.get(assignKey)!.push({ id: b.id, vanId });
+      bumpIndex.get(assignKey)!.push({
+        id: b.id,
+        vanId,
+        fromLocation: b.fromLocation ?? "",
+        toLocation: b.toLocation ?? "",
+      });
 
       log(`[runReassign] OK      id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → van ${vanId} (${van?.vanNumber ?? "?"})`);
       assigned++;
@@ -172,7 +192,12 @@ export async function runReassign(
           bumpIndex.set(victimKey, (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id));
           const winnerKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
           if (!bumpIndex.has(winnerKey)) bumpIndex.set(winnerKey, []);
-          bumpIndex.get(winnerKey)!.push({ id: b.id, vanId: bumpedVanId });
+          bumpIndex.get(winnerKey)!.push({
+            id: b.id,
+            vanId: bumpedVanId,
+            fromLocation: b.fromLocation ?? "",
+            toLocation: b.toLocation ?? "",
+          });
 
           log(`[runReassign] BUMP    ${b.tripType} id=${b.id} date=${b.travelDate} displaced ${bumpType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`);
 
@@ -180,6 +205,84 @@ export async function runReassign(
           assigned++;
           bumped = true;
           break;
+        }
+      }
+
+      // ── SG/TH override bump ─────────────────────────────────────────────
+      // If no same-priority victim was found and this booking needs Singapore
+      // or Thailand capability, the LOCATION-BASED OVERRIDE rule allows it to
+      // displace ANY non-SG/TH booking on a capable van, regardless of the
+      // victim's priority tier. This ensures SG/TH trips are outsourced ONLY
+      // when every capable van is already holding another SG/TH trip.
+      if (!bumped && (needsSingapore || needsThailand)) {
+        // Collect all same-date candidates across both tripType buckets.
+        const allSameDate: Array<BumpEntry & { tripType: string }> = [];
+        for (const [key, entries] of bumpIndex.entries()) {
+          const [date, tripType] = key.split("::");
+          if (date !== b.travelDate) continue;
+          for (const e of entries) {
+            if (e.id === b.id) continue;
+            allSameDate.push({ ...e, tripType });
+          }
+        }
+
+        const victim = allSameDate.find((c) => {
+          const van = vanMap.get(c.vanId);
+          if (!van) return false;
+          // Van must have the needed capability and correct vehicle type.
+          if (needsSingapore && van.singaporeEnabled !== 1) return false;
+          if (needsThailand && van.thailandEnabled !== 1) return false;
+          const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+          if (isAlphard && !isVanAlphard) return false;
+          if (!isAlphard && isVanAlphard) return false;
+          // Victim must NOT itself need the same specialty — otherwise the
+          // displaced booking would immediately need the same kind of van.
+          const victimReq = detectTripRequirements(c.fromLocation, c.toLocation);
+          if (needsSingapore && victimReq.needsSingapore) return false;
+          if (needsThailand && victimReq.needsThailand) return false;
+          return true;
+        });
+
+        if (victim) {
+          const bumpedVanId = victim.vanId;
+          const van = vanMap.get(bumpedVanId);
+
+          await db
+            .update(bookings)
+            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
+            .where(eq(bookings.id, victim.id));
+
+          await db
+            .update(bookings)
+            .set({
+              vanId: bumpedVanId,
+              vehiclePlate: van?.vanNumber ?? "",
+              driverName: van?.driverName ?? "",
+              driverContact: van?.driverContact ?? "",
+            })
+            .where(eq(bookings.id, b.id));
+
+          const victimKey = `${b.travelDate}::${victim.tripType}`;
+          bumpIndex.set(
+            victimKey,
+            (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id),
+          );
+          const winnerKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
+          if (!bumpIndex.has(winnerKey)) bumpIndex.set(winnerKey, []);
+          bumpIndex.get(winnerKey)!.push({
+            id: b.id,
+            vanId: bumpedVanId,
+            fromLocation: b.fromLocation ?? "",
+            toLocation: b.toLocation ?? "",
+          });
+
+          log(
+            `[runReassign] SG/TH OVERRIDE BUMP id=${b.id} (needs${needsSingapore ? "SG" : "TH"}) displaced ${victim.tripType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`,
+          );
+
+          bumpedIds.push(victim.id);
+          assigned++;
+          bumped = true;
         }
       }
 
