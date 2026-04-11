@@ -17,7 +17,7 @@
 
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, isNotNull } from "drizzle-orm";
+import { eq, isNotNull, inArray } from "drizzle-orm";
 import { recheckAllVans, runConstraintChecks, runMidLayerChecks } from "@/lib/recheck";
 import { runReassign } from "@/lib/reassign";
 import { getActiveRules } from "@/lib/scheduling-rules";
@@ -213,6 +213,40 @@ export async function aiRecheckAllVans(
 
     const unprotected = allBookings.filter((b) => !isProtected(b));
     const newIdSet = newIds ? new Set(newIds) : null;
+
+    // ── Step 1.5 (full-recheck mode only): Reset all auto assignments ──────────
+    // When called without newIds (manual Recheck button), start from a clean
+    // slate: clear van assignments for all non-protected bookings so the AI
+    // assigns everything fresh — exactly like uploading new bookings from scratch.
+    // Car trips are excluded (they stay outsourced; the AI will outsource them
+    // again immediately per the hard constraint).
+    if (!newIds) {
+      const toReset = unprotected.filter((b) => b.vehicleCategory !== "Car");
+      if (toReset.length > 0) {
+        const toResetIds = toReset.map((b) => b.id);
+        emit(`🔄 Full recheck — resetting ${toResetIds.length} booking(s) to clean slate…`);
+        await db
+          .update(bookings)
+          .set({
+            vanId: null,
+            vehiclePlate: null,
+            driverName: null,
+            driverContact: null,
+            inHouseOrOutsourced: "I",
+            outsourcedCompany: null,
+          })
+          .where(inArray(bookings.id, toResetIds));
+        // Mirror in-memory so isNew detection sees vanId = null for all of them
+        for (const b of toReset) {
+          b.vanId = null;
+          b.vehiclePlate = null;
+          b.driverName = null;
+          b.driverContact = null;
+          b.inHouseOrOutsourced = "I";
+          b.outsourcedCompany = null;
+        }
+      }
+    }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
