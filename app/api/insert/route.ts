@@ -53,6 +53,7 @@ export async function POST(request: NextRequest) {
             outsourcedCompany: booking.outsourcedCompany,
             tripType: booking.tripType,
             isAlphardTrip: booking.isAlphardTrip,
+            is15PaxTrip: booking.is15PaxTrip,
             vehicleCategory: booking.vehicleCategory,
             vehicleIndex: booking.vehicleIndex,
             numberOfVehicles: booking.numberOfVehicles,

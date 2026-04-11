@@ -95,10 +95,9 @@ export async function POST(request: NextRequest) {
         // Signal how many rows are about to be inserted
         send({ type: "parsed", total: allParsed.length });
 
-        // Insert bookings one-by-one, streaming progress after each insert
-        for (let i = 0; i < allParsed.length; i++) {
-          const booking = allParsed[i];
-          await db.insert(bookings).values({
+        // Batch-insert all bookings in a single DB round trip
+        await db.insert(bookings).values(
+          allParsed.map((booking) => ({
             travelDate: booking.travelDate,
             fromLocation: booking.fromLocation,
             toLocation: booking.toLocation,
@@ -124,12 +123,13 @@ export async function POST(request: NextRequest) {
             outsourcedCompany: booking.outsourcedCompany,
             tripType: booking.tripType,
             isAlphardTrip: booking.isAlphardTrip,
+            is15PaxTrip: booking.is15PaxTrip,
             vehicleCategory: booking.vehicleCategory,
             vehicleIndex: booking.vehicleIndex,
             numberOfVehicles: booking.numberOfVehicles,
-          });
-          send({ type: "progress", inserted: i + 1, total: allParsed.length });
-        }
+          }))
+        );
+        send({ type: "progress", inserted: allParsed.length, total: allParsed.length });
 
         // Run a full van schedule recheck — assigns vans to all unassigned bookings
         send({ type: "recheck" });

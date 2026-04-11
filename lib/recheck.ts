@@ -297,6 +297,7 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
     );
 
     const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+    const b15Pax = (b.is15PaxTrip ?? 0) === 1;
 
     // Iterate in deterministic order (allVans already sorted by id).
     // Removed the previous Math.random() shuffle — randomness caused different
@@ -308,6 +309,7 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
       const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
       if (isAlphardBooking && !isVanAlphard) continue;
       if (!isAlphardBooking && isVanAlphard) continue;
+      if (b15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
       if (!occupiedSlots.has(`${van.id}::${b.travelDate}`)) {
         freeVan = van;
         break;
@@ -428,6 +430,7 @@ async function fixCapabilityViolations(log: (msg: string) => void): Promise<void
       invoiceNo: bookings.invoiceNo,
       fromLocation: bookings.fromLocation,
       toLocation: bookings.toLocation,
+      is15PaxTrip: bookings.is15PaxTrip,
       manualChange: bookings.manualChange,
     })
     .from(bookings)
@@ -459,6 +462,12 @@ async function fixCapabilityViolations(log: (msg: string) => void): Promise<void
       log(
         `[fixCapability] id=${b.id} date=${b.travelDate} inv=${b.invoiceNo ?? "?"}: ` +
         `Thailand trip assigned to non-TH van ${van.vanNumber} — unassigning`
+      );
+      violations.push(b.id);
+    } else if ((b.is15PaxTrip ?? 0) === 1 && (van.maxPaxCapacity ?? 0) < 15) {
+      log(
+        `[fixCapability] id=${b.id} date=${b.travelDate} inv=${b.invoiceNo ?? "?"}: ` +
+        `15-pax trip assigned to van ${van.vanNumber} with capacity ${van.maxPaxCapacity ?? 0} — unassigning`
       );
       violations.push(b.id);
     }
@@ -531,6 +540,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
       fromLocation: bookings.fromLocation,
       toLocation: bookings.toLocation,
       isAlphardTrip: bookings.isAlphardTrip,
+      is15PaxTrip: bookings.is15PaxTrip,
       manualChange: bookings.manualChange,
       inHouseOrOutsourced: bookings.inHouseOrOutsourced,
       outsourcedCompany: bookings.outsourcedCompany,
@@ -544,6 +554,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
     fromLocation: string;
     toLocation: string;
     isAlphardTrip: number;
+    is15PaxTrip: number;
     locked: boolean;
   };
   const occupants = new Map<string, Occupant>();
@@ -557,6 +568,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
       fromLocation: r.fromLocation ?? "",
       toLocation: r.toLocation ?? "",
       isAlphardTrip: r.isAlphardTrip ?? 0,
+      is15PaxTrip: r.is15PaxTrip ?? 0,
       locked,
     });
   }
@@ -572,6 +584,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
       b.toLocation ?? "",
     );
     const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+    const needs15Pax = (b.is15PaxTrip ?? 0) === 1;
 
     // ── 1. Free van search ──────────────────────────────────────────────────
     let freeVan: (typeof allVans)[number] | null = null;
@@ -581,6 +594,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
       const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
       if (isAlphardBooking && !isVanAlphard) continue;
       if (!isAlphardBooking && isVanAlphard) continue;
+      if (needs15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
       if (!occupants.has(`${van.id}::${b.travelDate}`)) {
         freeVan = van;
         break;
@@ -605,6 +619,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
         fromLocation: b.fromLocation ?? "",
         toLocation: b.toLocation ?? "",
         isAlphardTrip: b.isAlphardTrip ?? 0,
+        is15PaxTrip: b.is15PaxTrip ?? 0,
         locked: false,
       });
       log(
@@ -638,6 +653,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
         const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
         if (isAlphardBooking && !isVanAlphard) continue;
         if (!isAlphardBooking && isVanAlphard) continue;
+        if (needs15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
         victimKey = key;
         victimInfo = occ;
         bumpLabel = "priority bump";
@@ -663,6 +679,26 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
         victimKey = key;
         victimInfo = occ;
         bumpLabel = "SG/TH override bump";
+        break;
+      }
+    }
+
+    if (!victimKey && needs15Pax) {
+      for (const [key, occ] of occupants) {
+        if (occ.locked) continue;
+        const [vanIdStr, date] = key.split("::");
+        if (date !== b.travelDate) continue;
+        const van = vanMap.get(Number(vanIdStr));
+        if (!van) continue;
+        if ((van.maxPaxCapacity ?? 0) < 15) continue;
+        const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+        if (isAlphardBooking && !isVanAlphard) continue;
+        if (!isAlphardBooking && isVanAlphard) continue;
+        // Only displace non-15-pax occupants — no zero-sum swaps
+        if ((occ.is15PaxTrip ?? 0) === 1) continue;
+        victimKey = key;
+        victimInfo = occ;
+        bumpLabel = "15-pax override bump";
         break;
       }
     }
@@ -702,6 +738,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
         fromLocation: b.fromLocation ?? "",
         toLocation: b.toLocation ?? "",
         isAlphardTrip: b.isAlphardTrip ?? 0,
+        is15PaxTrip: b.is15PaxTrip ?? 0,
         locked: false,
       });
 
@@ -729,6 +766,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
       v.toLocation ?? "",
     );
     const isAlphardBooking = (v.isAlphardTrip ?? 0) === 1;
+    const v15Pax = (v.is15PaxTrip ?? 0) === 1;
 
     let freeVan: (typeof allVans)[number] | null = null;
     for (const van of allVans) {
@@ -737,6 +775,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
       const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
       if (isAlphardBooking && !isVanAlphard) continue;
       if (!isAlphardBooking && isVanAlphard) continue;
+      if (v15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
       if (!occupants.has(`${van.id}::${v.travelDate}`)) {
         freeVan = van;
         break;
@@ -761,6 +800,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
         fromLocation: v.fromLocation ?? "",
         toLocation: v.toLocation ?? "",
         isAlphardTrip: v.isAlphardTrip ?? 0,
+        is15PaxTrip: v.is15PaxTrip ?? 0,
         locked: false,
       });
       log(
@@ -1011,6 +1051,7 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
       fromLocation: bookings.fromLocation,
       toLocation: bookings.toLocation,
       isAlphardTrip: bookings.isAlphardTrip,
+      is15PaxTrip: bookings.is15PaxTrip,
     })
     .from(bookings)
     .where(isNotNull(bookings.vanId))
@@ -1061,6 +1102,7 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
         victim.toLocation ?? "",
       );
       const isAlphardBooking = (victim.isAlphardTrip ?? 0) === 1;
+      const victim15Pax = (victim.is15PaxTrip ?? 0) === 1;
       let freeVan: (typeof allVans)[number] | null = null;
       for (const van of allVans) {
         if (van.id === victim.vanId) continue;
@@ -1069,6 +1111,7 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
         const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
         if (isAlphardBooking && !isVanAlphard) continue;
         if (!isAlphardBooking && isVanAlphard) continue;
+        if (victim15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
         if (!occupiedSlots.has(`${van.id}::${date}`)) { freeVan = van; break; }
       }
 
@@ -1170,6 +1213,7 @@ export async function validateFinalSchedule(log: (msg: string) => void): Promise
       b.toLocation ?? "",
     );
     const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+    const val15Pax = (b.is15PaxTrip ?? 0) === 1;
 
     const freeVanExists = allV.some((v) => {
       if (needsSingapore && v.singaporeEnabled !== 1) return false;
@@ -1177,6 +1221,7 @@ export async function validateFinalSchedule(log: (msg: string) => void): Promise
       const isVanAlphard = (v.vehicleType ?? "").toLowerCase() === "toyota alphard";
       if (isAlphardBooking && !isVanAlphard) return false;
       if (!isAlphardBooking && isVanAlphard) return false;
+      if (val15Pax && (v.maxPaxCapacity ?? 0) < 15) return false;
       return !occupiedSlots.has(`${v.id}::${b.travelDate}`);
     });
 
@@ -1222,6 +1267,11 @@ export async function validateFinalSchedule(log: (msg: string) => void): Promise
     }
     if (!isAlphardBooking && isVanAlphard) {
       log(`[VALIDATION FAIL] #${b.id} is not an Alphard trip but assigned to Alphard van ${b.vanId}`);
+      capViolations++;
+      violations++;
+    }
+    if ((b.is15PaxTrip ?? 0) === 1 && (van.maxPaxCapacity ?? 0) < 15) {
+      log(`[VALIDATION FAIL] #${b.id} is a 15-pax trip but van ${b.vanId} has capacity ${van.maxPaxCapacity ?? 0}`);
       capViolations++;
       violations++;
     }

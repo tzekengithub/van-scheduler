@@ -64,6 +64,12 @@ HARD CONSTRAINTS — never violate these under any circumstance
   vehicleType is "toyota alphard". Alphard vans are exclusively for
   Alphard-flagged trips — they must NOT appear as options for any
   regular trip, including "select free van" scenarios.
+- Bookings with is15PaxTrip = 1: ONLY assign vans whose maxPaxCapacity >= 15.
+  A 15-pax booking must not be assigned to any van with fewer than 15 seats.
+  Regular bookings (is15PaxTrip = 0) MAY use a 15-seater van when it is free,
+  but a 15-pax booking has OVERRIDE PRIORITY on 15-seater vans — it may displace
+  any non-15-pax trip currently on a 15-seater, regardless of that trip's tier,
+  if that is the only way to assign a 15-seater in-house.
 
 ════════════════════════════════════════════════════════════
 TRIP TYPE PRIORITY
@@ -288,6 +294,7 @@ export async function aiRecheckAllVans(
       vehicleType: v.vehicleType ?? "van",
       singaporeEnabled: v.singaporeEnabled === 1,
       thailandEnabled: v.thailandEnabled === 1,
+      maxPaxCapacity: v.maxPaxCapacity ?? 4,
     }));
 
     const customRules = await getActiveRules();
@@ -439,6 +446,7 @@ export async function aiRecheckAllVans(
         tripType: b.tripType ?? "trip",
         vehicleCategory: b.vehicleCategory ?? "Van",
         isAlphardTrip: b.isAlphardTrip ?? 0,
+        is15PaxTrip: b.is15PaxTrip ?? 0,
         invoiceNo: b.invoiceNo ?? "",
         vehicleIndex: b.vehicleIndex ?? 1,
         numberOfVehicles: b.numberOfVehicles ?? 1,

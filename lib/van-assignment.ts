@@ -23,6 +23,7 @@ export async function smartAssignVan(
   tripType?: string | null,
   isAlphardTrip?: boolean,
   vehicleCategory?: string | null,
+  is15PaxTrip?: boolean,
 ): Promise<AssignResult> {
   // Car trips (5-Seater / 7-Seater) are always outsourced — never assign a van
   if (vehicleCategory === "Car") {
@@ -61,6 +62,8 @@ export async function smartAssignVan(
   // ── Alphard hard constraint pre-checks ────────────────────────────────────
   const isAlphardVan = (van: typeof allVans[number]) =>
     (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+  const is15SeaterVan = (van: typeof allVans[number]) =>
+    (van.maxPaxCapacity ?? 0) >= 15;
 
   if (isAlphardTrip) {
     const alphardVans = allVans.filter(isAlphardVan);
@@ -70,6 +73,17 @@ export async function smartAssignVan(
     const freeAlphards = alphardVans.filter((v) => !bookedVanIds.has(v.id));
     if (freeAlphards.length === 0) {
       return { outsource: true, reason: "All Toyota Alphards are fully booked for this time slot" };
+    }
+  }
+
+  if (is15PaxTrip) {
+    const seaterVans = allVans.filter(is15SeaterVan);
+    if (seaterVans.length === 0) {
+      return { outsource: true, reason: "No 15-seater van available for this 15-pax trip" };
+    }
+    const freeSeaters = seaterVans.filter((v) => !bookedVanIds.has(v.id));
+    if (freeSeaters.length === 0) {
+      return { outsource: true, reason: "All 15-seater vans are fully booked for this time slot" };
     }
   }
 
@@ -90,10 +104,12 @@ export async function smartAssignVan(
     existingInvoiceVanId = prior?.vanId ?? null;
   }
 
-  // ── Build van context for the AI (pre-filtered by Alphard eligibility) ────
-  const eligibleVans = allVans.filter((van) =>
-    isAlphardTrip ? isAlphardVan(van) : !isAlphardVan(van)
-  );
+  // ── Build van context for the AI (pre-filtered by Alphard + 15-pax eligibility) ────
+  const eligibleVans = allVans.filter((van) => {
+    if (isAlphardTrip ? !isAlphardVan(van) : isAlphardVan(van)) return false;
+    if (is15PaxTrip && !is15SeaterVan(van)) return false;
+    return true;
+  });
   const vanContext = eligibleVans.map((van) => ({
     id: van.id,
     plate: van.vanNumber,
@@ -101,6 +117,7 @@ export async function smartAssignVan(
     freeOnDate: !bookedVanIds.has(van.id),
     singaporeEnabled: van.singaporeEnabled === 1,
     thailandEnabled: van.thailandEnabled === 1,
+    is15Seater: is15SeaterVan(van),
     lastDropOffLocation: vanLastDropOff[van.id] ?? null,
     preferredForThisInvoice: van.id === existingInvoiceVanId,
   }));
@@ -117,6 +134,7 @@ HARD RULES (never break these):
 3. Routes involving Thailand require thailandEnabled=true on the van.
 4. If no suitable free van exists, return outsource=true.
 5. Only vans in the list below are eligible for this booking (vehicle-type filtering is pre-applied).
+6. If the booking is a 15-pax trip, only assign vans where is15Seater=true.
 
 SOFT PREFERENCES (apply when multiple vans are eligible):
 - If preferredForThisInvoice=true on a free van, prefer it (keeps multi-day invoices on the same van).
@@ -174,21 +192,21 @@ ${JSON.stringify(vanContext, null, 2)}`;
 
   if (result.outsource || result.vanId == null) {
     // AI said outsource — but verify by checking for any free capable van.
-    // eligibleVans is pre-filtered for Alphard exclusivity and sorted by id
-    // (allVans comes from orderBy(vans.id)), so this is deterministic.
+    // eligibleVans is pre-filtered for Alphard/15-pax exclusivity and sorted by id.
     // Never trust a blind AI outsource when a free van actually exists.
     const { needsSingapore, needsThailand } = detectTripRequirements(fromLocation, toLocation);
     const fallback = eligibleVans.find(
       (v) =>
         !bookedVanIds.has(v.id) &&
         (!needsSingapore || v.singaporeEnabled === 1) &&
-        (!needsThailand || v.thailandEnabled === 1),
+        (!needsThailand || v.thailandEnabled === 1) &&
+        (!is15PaxTrip || is15SeaterVan(v)),
     );
     if (fallback) return fallback.id; // free capable van exists — AI was wrong
     return { outsource: true };
   }
 
-  // Safety check — make sure returned ID actually exists, is free, and obeys Alphard rules.
+  // Safety check — make sure returned ID actually exists, is free, and obeys all rules.
   // If the AI returns an invalid / already-booked van, fall back deterministically rather
   // than outsourcing: pick the first eligible free van by id before giving up.
   const chosenVan = allVans.find((v) => v.id === result.vanId);
@@ -196,14 +214,16 @@ ${JSON.stringify(vanContext, null, 2)}`;
     !chosenVan ||
     bookedVanIds.has(chosenVan.id) ||
     (isAlphardTrip && !isAlphardVan(chosenVan)) ||
-    (!isAlphardTrip && isAlphardVan(chosenVan))
+    (!isAlphardTrip && isAlphardVan(chosenVan)) ||
+    (is15PaxTrip && !is15SeaterVan(chosenVan))
   ) {
     const { needsSingapore, needsThailand } = detectTripRequirements(fromLocation, toLocation);
     const fallback = eligibleVans.find(
       (v) =>
         !bookedVanIds.has(v.id) &&
         (!needsSingapore || v.singaporeEnabled === 1) &&
-        (!needsThailand || v.thailandEnabled === 1),
+        (!needsThailand || v.thailandEnabled === 1) &&
+        (!is15PaxTrip || is15SeaterVan(v)),
     );
     if (fallback) return fallback.id;
     return { outsource: true };

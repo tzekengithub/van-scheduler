@@ -19,6 +19,10 @@ interface TestCase {
   alphardCount?: number;
   /** Expected vehicleCategory of the last booking */
   lastVehicleCategory?: string;
+  /** Number of bookings expected to have is15PaxTrip === 1 */
+  pax15Count?: number;
+  /** Expected is15PaxTrip of the first booking */
+  first15PaxTrip?: number;
 }
 
 const TEST_CASES: TestCase[] = [
@@ -82,6 +86,19 @@ const TEST_CASES: TestCase[] = [
     rowCount: 2,
     firstAmount: 850,
     firstDetails: "Kuantan",
+  },
+  {
+    // 15-pax invoice: 3 KL Day Trip rows, all annotated "(15 Pax)" + "(One-Way Ride Only)"
+    file: "15 pax invoice .pdf",
+    invoiceNo: "INV2026040026",
+    clientName: "Daro International",
+    clientPhone: "+60 13-369 2619",
+    rowCount: 3,
+    firstAmount: 800,
+    lastAmount: 800,
+    firstDetails: "KL Day Trip",
+    pax15Count: 3,          // all 3 rows must be detected as 15-pax
+    first15PaxTrip: 1,
   },
   {
     // Alphard invoice with 7 booking rows (row 1 has 2 vehicles → 8 expanded bookings)
@@ -177,6 +194,16 @@ async function runTests() {
       if (tc.lastVehicleCategory !== undefined)
         check("lastVehicleCategory", bLast?.vehicleCategory === tc.lastVehicleCategory,
           bLast?.vehicleCategory, tc.lastVehicleCategory);
+
+      if (tc.pax15Count !== undefined) {
+        const actual15 = bookings.filter((b) => b.is15PaxTrip === 1).length;
+        check("pax15Count", actual15 === tc.pax15Count,
+          actual15, String(tc.pax15Count));
+      }
+
+      if (tc.first15PaxTrip !== undefined)
+        check("first15PaxTrip", b0?.is15PaxTrip === tc.first15PaxTrip,
+          b0?.is15PaxTrip, String(tc.first15PaxTrip));
 
       if (fileErrors.length === 0) {
         console.log(`  PASS  ${tc.file}`);

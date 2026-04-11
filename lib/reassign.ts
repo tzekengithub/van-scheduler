@@ -84,11 +84,12 @@ export async function runReassign(
       tripType: bookings.tripType,
       fromLocation: bookings.fromLocation,
       toLocation: bookings.toLocation,
+      is15PaxTrip: bookings.is15PaxTrip,
     })
     .from(bookings)
     .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
 
-  type BumpEntry = { id: number; vanId: number; fromLocation: string; toLocation: string };
+  type BumpEntry = { id: number; vanId: number; fromLocation: string; toLocation: string; is15PaxTrip: number };
   const bumpIndex = new Map<string, Array<BumpEntry>>();
   for (const b of existingAssigned) {
     const key = `${b.travelDate}::${b.tripType ?? "trip"}`;
@@ -98,6 +99,7 @@ export async function runReassign(
       vanId: b.vanId!,
       fromLocation: b.fromLocation ?? "",
       toLocation: b.toLocation ?? "",
+      is15PaxTrip: b.is15PaxTrip ?? 0,
     });
   }
 
@@ -119,6 +121,7 @@ export async function runReassign(
       b.tripType,
       b.isAlphardTrip === 1,
       b.vehicleCategory,
+      (b.is15PaxTrip ?? 0) === 1,
     );
     const vanId = typeof assignResult === "number" ? assignResult : null;
 
@@ -144,6 +147,7 @@ export async function runReassign(
         vanId,
         fromLocation: b.fromLocation ?? "",
         toLocation: b.toLocation ?? "",
+        is15PaxTrip: b.is15PaxTrip ?? 0,
       });
 
       log(`[runReassign] OK      id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → van ${vanId} (${van?.vanNumber ?? "?"})`);
@@ -154,6 +158,7 @@ export async function runReassign(
       // (lowest priority first) for a same-date booking to displace.
       const { needsSingapore, needsThailand } = detectTripRequirements(b.fromLocation, b.toLocation);
       const isAlphard = b.isAlphardTrip === 1;
+      const needs15Pax = (b.is15PaxTrip ?? 0) === 1;
       const allowedBumpTypes = bumpableTypes(b.tripType);
 
       let bumped = false;
@@ -170,6 +175,7 @@ export async function runReassign(
           const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
           if (isAlphard && !isVanAlphard) return false;
           if (!isAlphard && isVanAlphard) return false;
+          if (needs15Pax && (van.maxPaxCapacity ?? 0) < 15) return false;
           return true;
         }) ?? null;
 
@@ -201,6 +207,7 @@ export async function runReassign(
             vanId: bumpedVanId,
             fromLocation: b.fromLocation ?? "",
             toLocation: b.toLocation ?? "",
+            is15PaxTrip: b.is15PaxTrip ?? 0,
           });
 
           log(`[runReassign] BUMP    ${b.tripType} id=${b.id} date=${b.travelDate} displaced ${bumpType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`);
@@ -280,10 +287,83 @@ export async function runReassign(
             vanId: bumpedVanId,
             fromLocation: b.fromLocation ?? "",
             toLocation: b.toLocation ?? "",
+            is15PaxTrip: b.is15PaxTrip ?? 0,
           });
 
           log(
             `[runReassign] SG/TH OVERRIDE BUMP id=${b.id} (needs${needsSingapore ? "SG" : "TH"}) displaced ${victim.tripType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`,
+          );
+
+          bumpedIds.push(victim.id);
+          assigned++;
+          bumped = true;
+        }
+      }
+
+      // ── 15-pax override bump ─────────────────────────────────────────────
+      // A 15-pax booking that cannot find a free 15-seater may displace ANY
+      // non-15-pax booking currently occupying a 15-seater van on the same date,
+      // regardless of that booking's priority tier.  This mirrors the SG/TH rule:
+      // the 15-seater should only outsource when every 15-seater is already held
+      // by another 15-pax trip.
+      if (!bumped && needs15Pax) {
+        const allSameDate: Array<BumpEntry & { tripType: string }> = [];
+        for (const [key, entries] of bumpIndex.entries()) {
+          const [date, tripType] = key.split("::");
+          if (date !== b.travelDate) continue;
+          for (const e of entries) {
+            if (e.id === b.id) continue;
+            allSameDate.push({ ...e, tripType });
+          }
+        }
+
+        const victim = allSameDate.find((c) => {
+          const van = vanMap.get(c.vanId);
+          if (!van) return false;
+          if ((van.maxPaxCapacity ?? 0) < 15) return false;
+          const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+          if (isAlphard && !isVanAlphard) return false;
+          if (!isAlphard && isVanAlphard) return false;
+          // Only displace non-15-pax occupants — never bump another 15-pax trip
+          if ((c.is15PaxTrip ?? 0) === 1) return false;
+          return true;
+        });
+
+        if (victim) {
+          const bumpedVanId = victim.vanId;
+          const van = vanMap.get(bumpedVanId);
+
+          await db
+            .update(bookings)
+            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "I", outsourcedCompany: "" })
+            .where(eq(bookings.id, victim.id));
+
+          await db
+            .update(bookings)
+            .set({
+              vanId: bumpedVanId,
+              vehiclePlate: van?.vanNumber ?? "",
+              driverName: van?.driverName ?? "",
+              driverContact: van?.driverContact ?? "",
+              inHouseOrOutsourced: "I",
+              outsourcedCompany: "",
+            })
+            .where(eq(bookings.id, b.id));
+
+          const victimKey = `${b.travelDate}::${victim.tripType}`;
+          bumpIndex.set(victimKey, (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id));
+          const winnerKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
+          if (!bumpIndex.has(winnerKey)) bumpIndex.set(winnerKey, []);
+          bumpIndex.get(winnerKey)!.push({
+            id: b.id,
+            vanId: bumpedVanId,
+            fromLocation: b.fromLocation ?? "",
+            toLocation: b.toLocation ?? "",
+            is15PaxTrip: 1,
+          });
+
+          log(
+            `[runReassign] 15-PAX OVERRIDE BUMP id=${b.id} displaced ${victim.tripType} id=${victim.id} on 15-seater → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`,
           );
 
           bumpedIds.push(victim.id);
@@ -329,6 +409,7 @@ export async function runReassign(
         b.tripType,
         b.isAlphardTrip === 1,
         b.vehicleCategory,
+        (b.is15PaxTrip ?? 0) === 1,
       );
       const vanId = typeof retryResult === "number" ? retryResult : null;
 

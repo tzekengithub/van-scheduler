@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, numeric } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, numeric, index } from "drizzle-orm/pg-core";
 
 export const vans = pgTable("vans", {
   id: serial("id").primaryKey(),
@@ -46,8 +46,13 @@ export const bookings = pgTable("bookings", {
   vehicleIndex: integer("vehicle_index").default(1),
   numberOfVehicles: integer("number_of_vehicles").default(1),
   isAlphardTrip: integer("is_alphard_trip").notNull().default(0),
+  is15PaxTrip: integer("is_15_pax_trip").notNull().default(0),
   vehicleCategory: text("vehicle_category").default("Van"),
-});
+}, (table) => [
+  index("idx_bookings_travel_date").on(table.travelDate),
+  index("idx_bookings_van_date").on(table.vanId, table.travelDate),
+  index("idx_bookings_invoice_no").on(table.invoiceNo),
+]);
 
 export type Van = typeof vans.$inferSelect;
 export type NewVan = typeof vans.$inferInsert;

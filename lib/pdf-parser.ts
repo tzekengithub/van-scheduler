@@ -28,6 +28,8 @@ export interface ParsedBooking {
   tripType: TripType;
   isAlphardTrip: 0 | 1;
   vehicleCategory: "Van" | "Alphard" | "Car";
+  /** 1 = requires a 15-seater van (maxPaxCapacity >= 15); 0 = standard van */
+  is15PaxTrip: 0 | 1;
 }
 
 /**
@@ -117,6 +119,20 @@ function detectVehicleCategory(bookingDetails: string, annotationLine: string): 
   ) return "Car";
   if (lowerAnnot.includes("alphard") || lowerDetails.includes("alphard")) return "Alphard";
   return "Van";
+}
+
+/**
+ * Detect if a booking requires a 15-seater van.
+ * Triggers on annotation/details containing "15 pax", "15pax", or "15-seater".
+ */
+function detect15PaxTrip(bookingDetails: string, annotationLine: string): 0 | 1 {
+  const haystack = `${bookingDetails} ${annotationLine}`.toLowerCase();
+  if (
+    haystack.includes("15 pax") ||
+    haystack.includes("15pax") ||
+    haystack.includes("15-seater")
+  ) return 1;
+  return 0;
 }
 
 /**
@@ -379,6 +395,9 @@ export function parseRawText(text: string): ParsedBooking[] {
     // ── Determine vehicle category (Van / Alphard / Car) ──
     const vehicleCategory = detectVehicleCategory(bookingDetails, annotationLine);
 
+    // ── Determine if 15-pax trip ──
+    const is15PaxTrip = detect15PaxTrip(bookingDetails, annotationLine);
+
     // ── Expand: one row per vehicle ──
     const baseRow = {
       travelDate,
@@ -405,6 +424,7 @@ export function parseRawText(text: string): ParsedBooking[] {
       tripType,
       isAlphardTrip: (vehicleCategory === "Alphard" ? 1 : 0) as 0 | 1,
       vehicleCategory,
+      is15PaxTrip,
     } as const;
 
     for (let vi = 1; vi <= numberOfVehicles; vi++) {
