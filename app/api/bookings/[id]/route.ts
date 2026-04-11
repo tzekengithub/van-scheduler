@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { recheckAllVans } from "@/lib/recheck";
+import { aiRecheckAllVans } from "@/lib/ai-scheduler";
 
 export async function PATCH(
   request: NextRequest,
@@ -130,10 +131,16 @@ export async function DELETE(
 
     await db.delete(bookings).where(eq(bookings.id, id));
 
-    // Recheck the entire van schedule after deletion.
+    // Rules engine runs synchronously for immediate consistency (fast).
     // A deleted booking may free a van that allows other bookings to move from
     // outsourced back to in-house, or resolves cross-invoice conflicts.
     await recheckAllVans();
+
+    // AI recheck runs in the background so freed van slots are optimally
+    // redistributed without making the caller wait.
+    aiRecheckAllVans().catch((err) =>
+      console.error("[bg AI recheck after booking delete]", err)
+    );
 
     return NextResponse.json({ message: "Booking deleted" });
   } catch (error) {
