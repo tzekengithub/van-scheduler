@@ -159,6 +159,28 @@ Outsource ONLY when ALL of the following are true:
 Do NOT blindly outsource. Think step by step. Show your work in reasoning.
 
 ════════════════════════════════════════════════════════════
+CROSS-BATCH BUMPING — bumpable committed slots
+════════════════════════════════════════════════════════════
+The COMMITTED SLOTS section in each request lists two groups:
+• "locked" — manualChange=1 or confirmed outsource. NEVER reuse these.
+• "bumpable" — assigned by the scheduler in a prior batch. You MAY
+  displace these if your booking is strictly higher priority:
+    – Tier 1 (day_trip/multi-day) bumps Tier 2 or Tier 3
+    – Tier 2 (trip/round_trip) bumps Tier 3 (one_way_ride) ONLY
+    – Tier 3 cannot bump anything
+
+How to cross-batch bump:
+1. Assign the freed van to your higher-priority booking in "assignments"
+   as normal.
+2. Add the displaced bookingId to the top-level "bumped" array.
+3. Do NOT add the bumped bookingId to "outsourced" — the system will
+   automatically re-queue it for a new van.
+
+Only bump when there is truly no free van available — always check all
+free vans first. Never bump a higher-tier booking to make room for a
+lower-tier one.
+
+════════════════════════════════════════════════════════════
 OUTPUT — return ONLY this JSON shape, nothing else
 ════════════════════════════════════════════════════════════
 {
@@ -175,10 +197,17 @@ OUTPUT — return ONLY this JSON shape, nothing else
       "reasoning": "one concise sentence explaining why no van was available after bumping"
     }
   ],
+  "bumped": [
+    {
+      "bookingId": 789,
+      "reason": "one concise sentence — e.g. displaced by higher-priority trip on same date"
+    }
+  ],
   "summary": "2-3 sentence plain English overview of the full schedule, highlighting any outsourced jobs, bumps, or notable decisions"
 }
 
-Every bookingId from the input must appear in either assignments or outsourced. Never omit a booking from the output.`;
+Every bookingId from the input must appear in either assignments or outsourced. Never omit a booking from the output.
+The "bumped" array contains bookingIds from COMMITTED slots (prior batches), not from the current input — it may be empty or omitted if no cross-batch bump is needed.`;
 
 /**
  * Run the AI scheduler.
@@ -271,17 +300,33 @@ export async function aiRecheckAllVans(
 
     // ── Step 3: Committed context — tracks what's locked across batches ────────
     // Pre-seed with protected bookings so the AI never double-books them.
-    const committedVanDates = new Set<string>(); // "vanId::date"
+    //
+    // committedSlots stores per-slot metadata so later batches know whether a
+    // slot can be bumped by a higher-priority booking (locked=false) or is
+    // permanently fixed (locked=true: manualChange / confirmed outsource).
+    interface CommittedSlotInfo {
+      bookingId: number;
+      tripType: string;
+      locked: boolean; // true = manualChange or confirmed outsource — never bumpable
+    }
+    const committedSlots = new Map<string, CommittedSlotInfo>(); // "vanId::date"
     const committedInvoiceVans = new Map<string, number>(); // "invoiceNo::vi" → vanId
 
     for (const b of allBookings) {
       if (isProtected(b) && b.vanId) {
-        committedVanDates.add(`${b.vanId}::${b.travelDate}`);
+        committedSlots.set(`${b.vanId}::${b.travelDate}`, {
+          bookingId: b.id,
+          tripType: b.tripType ?? "trip",
+          locked: true,
+        });
         if (b.invoiceNo) {
           committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId);
         }
       }
     }
+
+    // Tracks bookings displaced by cross-batch bumping — re-queued after all layers.
+    const bumpedToRequeue: number[] = [];
 
     // ── Step 4: Working set — all unprotected bookings ───────────────────────
     // Always send the full set so the AI can see every booking and make
@@ -404,19 +449,30 @@ export async function aiRecheckAllVans(
       }));
 
       // Build committed-context section for this batch
+      // Split into locked slots (never bumpable) and bumpable slots (can be
+      // displaced by a strictly higher-priority booking in the current chunk).
       let committedSection = "";
-      if (committedVanDates.size > 0 || committedInvoiceVans.size > 0) {
-        const takenSlots = [...committedVanDates].map((k) => {
-          const [vanId, date] = k.split("::");
-          return { vanId: Number(vanId), date };
-        });
+      if (committedSlots.size > 0 || committedInvoiceVans.size > 0) {
+        const lockedSlots: { vanId: number; date: string }[] = [];
+        const bumpableSlots: { vanId: number; date: string; bookingId: number; tripType: string }[] = [];
+        for (const [key, info] of committedSlots.entries()) {
+          const [vanId, date] = key.split("::");
+          if (info.locked) {
+            lockedSlots.push({ vanId: Number(vanId), date });
+          } else {
+            bumpableSlots.push({ vanId: Number(vanId), date, bookingId: info.bookingId, tripType: info.tripType });
+          }
+        }
         const invoiceBindings = [...committedInvoiceVans.entries()].map(([k, vanId]) => {
           const [invoiceNo, vi] = k.split("::");
           return { invoiceNo, vehicleIndex: Number(vi), vanId };
         });
         committedSection =
-          `\n\nCOMMITTED ASSIGNMENTS — already locked, do not reuse these van+date slots:\n` +
-          `Van+date taken: ${JSON.stringify(takenSlots)}\n` +
+          `\n\nCOMMITTED SLOTS:\n` +
+          `Locked — never reuse: ${JSON.stringify(lockedSlots)}\n` +
+          (bumpableSlots.length > 0
+            ? `Bumpable — may displace if your booking is strictly higher priority (add displaced bookingId to "bumped"): ${JSON.stringify(bumpableSlots)}\n`
+            : "") +
           `Invoice→van bindings: ${JSON.stringify(invoiceBindings)}`;
       }
 
@@ -431,6 +487,7 @@ export async function aiRecheckAllVans(
       let chunkResult: {
         assignments: Array<{ bookingId: number; vanId: number; reasoning: string }>;
         outsourced: Array<{ bookingId: number; reasoning: string }>;
+        bumped?: Array<{ bookingId: number; reason?: string }>;
         summary: string;
       } | null = null;
 
@@ -478,6 +535,7 @@ export async function aiRecheckAllVans(
         type ChunkResponse = {
           assignments: Array<{ bookingId: number; vanId: number; reasoning: string }>;
           outsourced: Array<{ bookingId: number; reasoning: string }>;
+          bumped?: Array<{ bookingId: number; reason?: string }>;
           summary: string;
         };
         let parsed: ChunkResponse;
@@ -501,8 +559,63 @@ export async function aiRecheckAllVans(
           if (!respondedIds.has(id)) throw new Error(`AI omitted bookingId ${id}`);
         }
 
+        // ── Process cross-batch bumps requested by the AI ───────────────────────
+        // The AI may include a "bumped" array with bookingIds from prior batches
+        // that it wants to displace to free up their van for a higher-priority trip.
+        // We validate the bump is legal (not locked, strictly lower priority than
+        // the booking that claims the freed slot) then clear the displaced booking.
+        {
+          const bumpedArr: Array<{ bookingId: number; reason?: string }> =
+            Array.isArray(parsed.bumped) ? parsed.bumped : [];
+
+          for (const bump of bumpedArr) {
+            const slotEntry = [...committedSlots.entries()].find(([, v]) => v.bookingId === bump.bookingId);
+            if (!slotEntry) {
+              emit(`⚠ Bump requested for unknown committed slot #${bump.bookingId} — ignored`);
+              continue;
+            }
+            const [slotKey, slotInfo] = slotEntry;
+            if (slotInfo.locked) {
+              emit(`⚠ Cannot bump locked booking #${bump.bookingId} (manualChange or confirmed outsource) — ignored`);
+              continue;
+            }
+            // Validate priority: find which assignment in this chunk claims the freed van
+            const [vanIdStr, date] = slotKey.split("::");
+            const claimingAssignment = parsed.assignments.find((a) => {
+              const bk = chunk.find((x) => x.id === a.bookingId);
+              return bk && `${a.vanId}::${bk.travelDate}` === slotKey;
+            });
+            if (claimingAssignment) {
+              const claimingBooking = chunk.find((x) => x.id === claimingAssignment.bookingId);
+              const priorityOf = (t: string) =>
+                t === "day_trip" ? 0 : t === "one_way_ride" ? 2 : 1;
+              const claimPri = priorityOf(claimingBooking?.tripType ?? "trip");
+              const bumpedPri = priorityOf(slotInfo.tripType);
+              if (claimPri >= bumpedPri) {
+                emit(`⚠ Bump rejected: #${bump.bookingId} (${slotInfo.tripType}) has equal or higher priority than claiming booking — ignored`);
+                continue;
+              }
+            }
+            // Execute bump: clear the displaced booking's van
+            const bumpedBk = allBookings.find((x) => x.id === bump.bookingId);
+            if (bumpedBk) {
+              await db
+                .update(bookings)
+                .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "I", outsourcedCompany: "" })
+                .where(eq(bookings.id, bump.bookingId));
+              bumpedBk.vanId = null;
+              bumpedBk.vehiclePlate = "";
+              bumpedBk.driverName = "";
+              bumpedBk.inHouseOrOutsourced = "I";
+            }
+            committedSlots.delete(slotKey);
+            bumpedToRequeue.push(bump.bookingId);
+            emit(`🔀 Bumped #${bump.bookingId} (${slotInfo.tripType} on ${date}, van ${vanIdStr}) — will be requeued`);
+          }
+        }
+
         // Check no double-booking within this chunk vs committed slots.
-        // committedVanDates contains: (1) truly protected bookings
+        // committedSlots contains: (1) truly protected bookings
         // (manualChange=1 or confirmed outsource), (2) prior-batch assignments,
         // and (3) pre-seeded non-working-set bookings in targeted mode.
         // Rather than failing the entire batch on the first conflict, redirect
@@ -514,7 +627,7 @@ export async function aiRecheckAllVans(
           const b = chunk.find((x) => x.id === a.bookingId);
           if (!b) continue;
           const key = `${a.vanId}::${b.travelDate}`;
-          if (committedVanDates.has(key)) {
+          if (committedSlots.has(key)) {
             // AI tried to reuse an already-committed slot — move to outsourced
             // so the rescue pass can attempt to find a free alternative van.
             emit(`⚠ #${b.id} (${b.travelDate}): AI tried to reuse van ${a.vanId} which is already committed — will try to find a free van`);
@@ -595,7 +708,7 @@ export async function aiRecheckAllVans(
               if (isAlphardBooking && !isVanAlphard) continue;
               if (!isAlphardBooking && isVanAlphard) continue;
               const key = `${van.id}::${b.travelDate}`;
-              if (!committedVanDates.has(key) && !chunkSlots.has(key)) {
+              if (!committedSlots.has(key) && !chunkSlots.has(key)) {
                 freeVan = van;
                 break;
               }
@@ -650,15 +763,26 @@ export async function aiRecheckAllVans(
         // Refresh committed context from DB so subsequent batches stay accurate
         const nowAssigned = await db
           .select({
+            id: bookings.id,
             vanId: bookings.vanId,
             travelDate: bookings.travelDate,
             invoiceNo: bookings.invoiceNo,
             vehicleIndex: bookings.vehicleIndex,
+            tripType: bookings.tripType,
+            manualChange: bookings.manualChange,
+            outsourcedCompany: bookings.outsourcedCompany,
           })
           .from(bookings)
           .where(isNotNull(bookings.vanId));
         for (const b of nowAssigned) {
-          committedVanDates.add(`${b.vanId}::${b.travelDate}`);
+          const locked =
+            b.manualChange === 1 ||
+            (b.outsourcedCompany != null && b.outsourcedCompany.trim() !== "");
+          committedSlots.set(`${b.vanId}::${b.travelDate}`, {
+            bookingId: b.id,
+            tripType: b.tripType ?? "trip",
+            locked,
+          });
           if (b.invoiceNo)
             committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId!);
         }
@@ -685,7 +809,11 @@ export async function aiRecheckAllVans(
             })
             .where(eq(bookings.id, assignment.bookingId));
 
-          committedVanDates.add(`${assignment.vanId}::${b.travelDate}`);
+          committedSlots.set(`${assignment.vanId}::${b.travelDate}`, {
+            bookingId: b.id,
+            tripType: b.tripType ?? "trip",
+            locked: false,
+          });
           if (b.invoiceNo)
             committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, assignment.vanId);
 
@@ -735,22 +863,34 @@ export async function aiRecheckAllVans(
       emit(`\n🔍 Post-layer rescan for ${layer.label}…`);
       await runMidLayerChecks(layer.label, (msg) => emit(msg));
 
-      // Refresh committedVanDates + committedInvoiceVans from DB so the next layer
+      // Refresh committedSlots + committedInvoiceVans from DB so the next layer
       // sees the corrected (post-rescan) state as its locked context.
+      // Fetch tripType + lock fields so bumpability is preserved across layers.
       const nowAssigned = await db
         .select({
+          id: bookings.id,
           vanId: bookings.vanId,
           travelDate: bookings.travelDate,
           invoiceNo: bookings.invoiceNo,
           vehicleIndex: bookings.vehicleIndex,
+          tripType: bookings.tripType,
+          manualChange: bookings.manualChange,
+          outsourcedCompany: bookings.outsourcedCompany,
         })
         .from(bookings)
         .where(isNotNull(bookings.vanId));
 
-      committedVanDates.clear();
+      committedSlots.clear();
       committedInvoiceVans.clear();
       for (const b of nowAssigned) {
-        committedVanDates.add(`${b.vanId}::${b.travelDate}`);
+        const locked =
+          b.manualChange === 1 ||
+          (b.outsourcedCompany != null && b.outsourcedCompany.trim() !== "");
+        committedSlots.set(`${b.vanId}::${b.travelDate}`, {
+          bookingId: b.id,
+          tripType: b.tripType ?? "trip",
+          locked,
+        });
         if (b.invoiceNo)
           committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId!);
       }
@@ -758,13 +898,71 @@ export async function aiRecheckAllVans(
       // have no vanId but must still block their slots
       for (const b of allBookings) {
         if (isProtected(b) && b.vanId) {
-          committedVanDates.add(`${b.vanId}::${b.travelDate}`);
+          committedSlots.set(`${b.vanId}::${b.travelDate}`, {
+            bookingId: b.id,
+            tripType: b.tripType ?? "trip",
+            locked: true,
+          });
           if (b.invoiceNo)
             committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId);
         }
       }
       emit(`✅ ${layer.label} complete — committed slots refreshed from DB`);
     } // end layer loop (li)
+
+    // ── Step 7.5: Requeue pass — re-assign bookings displaced by cross-batch bumps ──
+    // Bumped bookings had their vans cleared; give them the next free slot now
+    // that higher-priority bookings have all been committed.
+    if (bumpedToRequeue.length > 0) {
+      emit(`\n🔄 Requeue pass — finding new vans for ${bumpedToRequeue.length} bumped booking(s)…`);
+      for (const bid of bumpedToRequeue) {
+        const b = allBookings.find((x) => x.id === bid);
+        if (!b) continue;
+        const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
+        const locStr = `${b.fromLocation ?? ""} ${b.toLocation ?? ""} ${b.details ?? ""}`.toLowerCase();
+        const needsSingapore = locStr.includes("singapore");
+        const needsThailand =
+          locStr.includes("thailand") || locStr.includes("hatyai") ||
+          locStr.includes("hat yai") || locStr.includes("padang besar");
+
+        let freeVan: (typeof allVans)[number] | null = null;
+        for (const van of allVans) {
+          if (needsSingapore && van.singaporeEnabled !== 1) continue;
+          if (needsThailand && van.thailandEnabled !== 1) continue;
+          const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+          if (isAlphardBooking && !isVanAlphard) continue;
+          if (!isAlphardBooking && isVanAlphard) continue;
+          const key = `${van.id}::${b.travelDate}`;
+          if (!committedSlots.has(key)) { freeVan = van; break; }
+        }
+
+        if (freeVan) {
+          await db
+            .update(bookings)
+            .set({
+              vanId: freeVan.id,
+              vehiclePlate: freeVan.vanNumber ?? "",
+              driverName: freeVan.driverName ?? "",
+              driverContact: freeVan.driverContact ?? "",
+              inHouseOrOutsourced: "I",
+              outsourcedCompany: "",
+            })
+            .where(eq(bookings.id, bid));
+          committedSlots.set(`${freeVan.id}::${b.travelDate}`, {
+            bookingId: bid,
+            tripType: b.tripType ?? "trip",
+            locked: false,
+          });
+          emit(`✓ Requeued #${bid} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) → ${freeVan.vanNumber}`);
+        } else {
+          await db
+            .update(bookings)
+            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "O", outsourcedCompany: "" })
+            .where(eq(bookings.id, bid));
+          emit(`⚠ Requeued #${bid} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) — no free van, outsourced`);
+        }
+      }
+    }
 
     // ── Step 8: Constraint checks — fix any mistakes the AI made ─────────────
     // Runs enforce-invoice-consistency, eliminate-double-bookings, and marks
