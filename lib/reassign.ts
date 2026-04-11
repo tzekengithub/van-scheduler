@@ -4,44 +4,23 @@ import { eq, and, isNull, isNotNull, inArray, asc, ne, or } from "drizzle-orm";
 import { smartAssignVan, AssignResult, detectTripRequirements } from "@/lib/van-assignment";
 
 /**
- * Priority rank for processing order and bumping.
- * Lower number = higher priority = processed first = harder to bump.
+ * Two priority tiers — the only trip types the system uses:
+ *   Tier 1: "trip"         — processed first, can bump one_way_ride
+ *   Tier 2: "one_way_ride" — processed last, displaced first
  *
- * Business tiers (highest → lowest):
- *   Tier 1: day_trip
- *   Tier 2: trip, round_trip, tpri  (standard)
- *   Tier 3: one_way_ride            (LOWEST — processed last, bumped first)
+ * Lower number = higher priority.
  */
 function priorityRank(tripType: string | null | undefined): number {
-  switch (tripType) {
-    case "day_trip":     return 0; // Tier 1 — highest, processed first, can bump others
-    case "trip":         return 1; // Tier 2 — standard
-    case "round_trip":   return 1; // Tier 2 — standard (same as trip)
-    case "tpri":         return 1; // Tier 2 — standard (same as trip)
-    case "one_way_ride": return 2; // Tier 3 — LOWEST, processed last, bumped first
-    default:             return 1; // unknown → treat as standard tier
-  }
+  return tripType === "one_way_ride" ? 1 : 0; // everything else is Tier 1
 }
 
-// All trip types that can be displaced, ordered lowest priority first.
-// Used by the bump search: we try to displace the most disposable type first.
-const BUMP_TYPES = ["one_way_ride", "trip", "tpri", "round_trip"] as const;
-
 /**
- * Returns the list of trip types that `tripType` is allowed to bump.
- * Rule: a booking may only displace bookings of strictly LOWER priority.
- *   Tier 1 (day_trip)            → may bump Tier 2 + Tier 3
- *   Tier 2 (trip/round_trip/tpri)→ may bump Tier 3 (one_way_ride) only
- *   Tier 3 (one_way_ride)        → may not bump anything
+ * Returns the trip types a booking may displace.
+ *   trip        → may bump one_way_ride
+ *   one_way_ride→ may not bump anything
  */
 function bumpableTypes(tripType: string | null | undefined): readonly string[] {
-  switch (tripType) {
-    case "day_trip":   return BUMP_TYPES;               // bumps Tier 2 + Tier 3
-    case "trip":
-    case "round_trip":
-    case "tpri":       return ["one_way_ride"] as const; // bumps Tier 3 only
-    default:           return [] as const;               // one_way_ride / unknown → no bumping
-  }
+  return tripType === "one_way_ride" ? [] : ["one_way_ride"];
 }
 
 /**
@@ -51,13 +30,12 @@ function bumpableTypes(tripType: string | null | undefined): readonly string[] {
  *                     If omitted, process ALL bookings where vanId IS NULL
  *                     and manualChange = 0.
  *
- * Processing order within each date: day_trip → trip/round_trip/tpri → one_way_ride.
+ * Processing order within each date: trip → one_way_ride.
  * Higher-priority bookings claim free vans first.
  *
- * Bumping: if a booking cannot find a free van, it displaces the lowest-priority
- * already-assigned booking it outranks on the same date. The bumped booking is
- * retried in a second pass (without bumping rights). No free van → must bump.
- * No bumpable booking → outsource (genuine capacity overrun).
+ * Bumping: if a trip cannot find a free van it MUST displace a same-date
+ * one_way_ride. The displaced booking is retried in a second pass (without
+ * bumping rights). Only outsource when no van and no bumpable booking exist.
  *
  * Rows with manualChange = 1 are never touched (neither bumped nor reassigned).
  */

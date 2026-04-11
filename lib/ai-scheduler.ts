@@ -66,16 +66,17 @@ HARD CONSTRAINTS — never violate these under any circumstance
   regular trip, including "select free van" scenarios.
 
 ════════════════════════════════════════════════════════════
-TRIP TYPE PRIORITY TIERS (highest → lowest)
+TRIP TYPE PRIORITY
 ════════════════════════════════════════════════════════════
-Tier 1 — MULTI-DAY TRIPS  (tripType = "day_trip", OR the same invoiceNo
-  spans consecutive dates across multiple bookings)
-Tier 2 — STANDARD TRIPS   (tripType = "trip" or "round_trip" or "tpri")
-Tier 3 — ONE-WAY RIDES    (tripType = "one_way_ride") ← LOWEST PRIORITY
+The system has exactly two trip types:
+  HIGH  — "trip"         (full-day or multi-stop jobs)
+  LOW   — "one_way_ride" (point-to-point transfers) ← LOWEST PRIORITY
 
-Higher tiers ALWAYS beat lower tiers for van access.
-One-way rides are the least important trip type — if bumping a one-way
-ride frees a van for a higher-priority trip, you MUST do it.
+"trip" ALWAYS beats "one_way_ride" for van access.
+Multi-day invoices (same invoiceNo across multiple dates) are processed
+first so their van continuity can be established — but their individual
+bookings still follow the trip/one_way_ride priority within that group.
+If bumping a one_way_ride frees a van for a trip, you MUST do it.
 
 ════════════════════════════════════════════════════════════
 LOCATION-BASED OVERRIDE (Singapore / Thailand trips)
@@ -165,9 +166,8 @@ The COMMITTED SLOTS section in each request lists two groups:
 • "locked" — manualChange=1 or confirmed outsource. NEVER reuse these.
 • "bumpable" — assigned by the scheduler in a prior batch. You MAY
   displace these if your booking is strictly higher priority:
-    – Tier 1 (day_trip/multi-day) bumps Tier 2 or Tier 3
-    – Tier 2 (trip/round_trip) bumps Tier 3 (one_way_ride) ONLY
-    – Tier 3 cannot bump anything
+    – "trip" may bump "one_way_ride"
+    – "one_way_ride" cannot bump anything
 
 How to cross-batch bump:
 1. Assign the freed van to your higher-priority booking in "assignments"
@@ -342,14 +342,14 @@ export async function aiRecheckAllVans(
       return { summary: "No bookings to assign.", log, reasoning: [] };
     }
 
-    // ── Step 5: Split into 3 priority layers ──────────────────────────────────
-    // Layer 1 (highest): day_trips + invoices spanning 2+ distinct dates (multi-day tours)
-    // Layer 2 (standard): trip, round_trip, tpri
-    // Layer 3 (lowest):  one_way_ride
+    // ── Step 5: Split into 3 layers ───────────────────────────────────────────
+    // Layer 1: multi-day invoices (same invoiceNo spans 2+ dates) — processed
+    //          first so van continuity across dates is established.
+    // Layer 2: single-date "trip" bookings
+    // Layer 3: "one_way_ride" bookings (lowest priority, processed last)
     //
-    // Each layer is processed as a separate set of AI batches. Committed slots from
-    // Layer N are automatically available as locked context for Layer N+1, so
-    // higher-priority bookings always claim vans before lower-priority ones even run.
+    // Committed slots from Layer N are passed as locked context to Layer N+1,
+    // so higher-priority bookings always claim vans before lower-priority ones.
 
     // Detect multi-day invoices (same invoiceNo on 2+ distinct travel dates)
     const invoiceDateCount = new Map<string, Set<string>>();
@@ -369,24 +369,23 @@ export async function aiRecheckAllVans(
       (a.invoiceNo ?? "").localeCompare(b.invoiceNo ?? "") ||
       (a.vehicleIndex ?? 1) - (b.vehicleIndex ?? 1);
 
-    const isL1 = (b: (typeof workingSet)[0]) =>
-      (b.tripType ?? "").toLowerCase() === "day_trip" ||
+    const isMultiDay = (b: (typeof workingSet)[0]) =>
       multiDayInvoices.has(b.invoiceNo ?? "");
-    const isL3 = (b: (typeof workingSet)[0]) =>
+    const isOneWay = (b: (typeof workingSet)[0]) =>
       (b.tripType ?? "").toLowerCase() === "one_way_ride";
 
     const layers = [
       {
-        label: "Layer 1/3 — Day Trips + Multi-day Tours (highest priority)",
-        bookings: [...workingSet].filter(isL1).sort(byDate),
+        label: "Layer 1/3 — Multi-day invoices (van continuity first)",
+        bookings: [...workingSet].filter(isMultiDay).sort(byDate),
       },
       {
-        label: "Layer 2/3 — Standard Trips",
-        bookings: [...workingSet].filter((b) => !isL1(b) && !isL3(b)).sort(byDate),
+        label: "Layer 2/3 — Trips (high priority)",
+        bookings: [...workingSet].filter((b) => !isMultiDay(b) && !isOneWay(b)).sort(byDate),
       },
       {
         label: "Layer 3/3 — One-Way Rides (lowest priority)",
-        bookings: [...workingSet].filter(isL3).sort(byDate),
+        bookings: [...workingSet].filter((b) => !isMultiDay(b) && isOneWay(b)).sort(byDate),
       },
     ];
 
@@ -622,7 +621,7 @@ export async function aiRecheckAllVans(
             if (claimingAssignment) {
               const claimingBooking = chunk.find((x) => x.id === claimingAssignment.bookingId);
               const priorityOf = (t: string) =>
-                t === "day_trip" ? 0 : t === "one_way_ride" ? 2 : 1;
+                t === "one_way_ride" ? 1 : 0; // trip=0 (high), one_way_ride=1 (low)
               const claimPri = priorityOf(claimingBooking?.tripType ?? "trip");
               const bumpedPri = priorityOf(slotInfo.tripType);
               if (claimPri >= bumpedPri) {

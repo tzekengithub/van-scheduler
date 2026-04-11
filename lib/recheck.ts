@@ -88,7 +88,7 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   log(`  cleared ${toResetIds.length} booking(s)`);
 
   // ── Step 3: Reassign all cleared bookings ────────────────────────────────────
-  log("Step 3/7 — running van reassignment (priority: day_trip > one_way_ride > round_trip > trip)…");
+  log("Step 3/7 — running van reassignment (priority: trip > one_way_ride)…");
   const { assigned, conflicts } = await runReassign(undefined, log);
   log(`  reassignment done — assigned=${assigned} conflicts=${conflicts}`);
 
@@ -775,18 +775,10 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
  */
 async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void> {
   // Lower number = higher priority = keeps the van when two bookings conflict.
-  // Must mirror the business tiers in priorityRank (reassign.ts):
-  //   Tier 1 day_trip → Tier 2 trip/round_trip/tpri → Tier 3 one_way_ride (LOWEST)
+  // Two tiers: trip (0) beats one_way_ride (1). manualChange always wins.
   function slotPriority(tripType: string | null | undefined, manualChange: number): number {
     if (manualChange === 1) return -1; // manual/protected always wins
-    switch (tripType) {
-      case "day_trip":     return 0; // Tier 1 — highest, always keeps van
-      case "trip":         return 1; // Tier 2 — standard
-      case "round_trip":   return 1; // Tier 2 — standard
-      case "tpri":         return 1; // Tier 2 — standard
-      case "one_way_ride": return 2; // Tier 3 — LOWEST, displaced first
-      default:             return 1; // unknown → treat as standard
-    }
+    return tripType === "one_way_ride" ? 1 : 0;
   }
 
   // Load every booking that has a van assigned
