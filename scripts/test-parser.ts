@@ -15,6 +15,10 @@ interface TestCase {
   firstDetails?: string;
   lastDetails?: string;
   isRoundTrip0?: number;
+  /** Number of bookings expected to have vehicleCategory === "Alphard" */
+  alphardCount?: number;
+  /** Expected vehicleCategory of the last booking */
+  lastVehicleCategory?: string;
 }
 
 const TEST_CASES: TestCase[] = [
@@ -78,6 +82,22 @@ const TEST_CASES: TestCase[] = [
     rowCount: 2,
     firstAmount: 850,
     firstDetails: "Kuantan",
+  },
+  {
+    // Alphard invoice with 7 booking rows (row 1 has 2 vehicles → 8 expanded bookings)
+    // Rows 6 & 7 are Alphard trips; row 7 is also one-way.
+    file: "Alphard invoice multiple rows.pdf",
+    invoiceNo: "INV2026040023",
+    clientName: "叶吉",
+    clientPhone: "yjjx3113",        // WeChat ID present in clientDetails
+    rowCount: 8,
+    firstAmount: 700,               // row 1: 2 vehicles × 350 = 700
+    lastAmount: 800,                // row 7: Malacca - KLIA
+    vehicles: 2,                    // first booking's numberOfVehicles
+    firstDetails: "KLIA - KL",
+    lastDetails: "Malacca - KLIA",
+    alphardCount: 2,                // rows 6 & 7
+    lastVehicleCategory: "Alphard",
   },
 ];
 
@@ -147,6 +167,16 @@ async function runTests() {
       if (tc.isRoundTrip0 !== undefined)
         check("isRoundTrip[0]", b0?.isRoundTrip === tc.isRoundTrip0,
           b0?.isRoundTrip, String(tc.isRoundTrip0));
+
+      if (tc.alphardCount !== undefined) {
+        const actualAlphard = bookings.filter((b) => b.vehicleCategory === "Alphard").length;
+        check("alphardCount", actualAlphard === tc.alphardCount,
+          actualAlphard, String(tc.alphardCount));
+      }
+
+      if (tc.lastVehicleCategory !== undefined)
+        check("lastVehicleCategory", bLast?.vehicleCategory === tc.lastVehicleCategory,
+          bLast?.vehicleCategory, tc.lastVehicleCategory);
 
       if (fileErrors.length === 0) {
         console.log(`  PASS  ${tc.file}`);
