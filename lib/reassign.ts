@@ -23,11 +23,26 @@ function priorityRank(tripType: string | null | undefined): number {
   }
 }
 
-// Types that can be bumped by a day_trip, ordered LOWEST priority first.
-// one_way_ride is bumped first (most disposable per business rules),
-// then standard trips (trip/tpri/round_trip).
-// tpri is included so it participates in bumping like any other standard trip.
+// All trip types that can be displaced, ordered lowest priority first.
+// Used by the bump search: we try to displace the most disposable type first.
 const BUMP_TYPES = ["one_way_ride", "trip", "tpri", "round_trip"] as const;
+
+/**
+ * Returns the list of trip types that `tripType` is allowed to bump.
+ * Rule: a booking may only displace bookings of strictly LOWER priority.
+ *   Tier 1 (day_trip)            → may bump Tier 2 + Tier 3
+ *   Tier 2 (trip/round_trip/tpri)→ may bump Tier 3 (one_way_ride) only
+ *   Tier 3 (one_way_ride)        → may not bump anything
+ */
+function bumpableTypes(tripType: string | null | undefined): readonly string[] {
+  switch (tripType) {
+    case "day_trip":   return BUMP_TYPES;               // bumps Tier 2 + Tier 3
+    case "trip":
+    case "round_trip":
+    case "tpri":       return ["one_way_ride"] as const; // bumps Tier 3 only
+    default:           return [] as const;               // one_way_ride / unknown → no bumping
+  }
+}
 
 /**
  * Reassign vans to unassigned bookings.
@@ -36,12 +51,13 @@ const BUMP_TYPES = ["one_way_ride", "trip", "tpri", "round_trip"] as const;
  *                     If omitted, process ALL bookings where vanId IS NULL
  *                     and manualChange = 0.
  *
- * Processing order within each date: day_trip → one_way_ride → round_trip → trip.
- * This ensures Day Trips always get priority access to free vans.
+ * Processing order within each date: day_trip → trip/round_trip/tpri → one_way_ride.
+ * Higher-priority bookings claim free vans first.
  *
- * Bumping: if a day_trip cannot find a free van, it displaces the lowest-priority
- * already-assigned booking on the same date. The bumped booking is retried in a
- * second pass (without bumping rights).
+ * Bumping: if a booking cannot find a free van, it displaces the lowest-priority
+ * already-assigned booking it outranks on the same date. The bumped booking is
+ * retried in a second pass (without bumping rights). No free van → must bump.
+ * No bumpable booking → outsource (genuine capacity overrun).
  *
  * Rows with manualChange = 1 are never touched (neither bumped nor reassigned).
  */
@@ -126,37 +142,34 @@ export async function runReassign(
         })
         .where(eq(bookings.id, b.id));
 
-      // Track in bump index so later day_trips can see this assignment
       const assignKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
       if (!bumpIndex.has(assignKey)) bumpIndex.set(assignKey, []);
       bumpIndex.get(assignKey)!.push({ id: b.id, vanId });
 
-      log(
-        `[runReassign] OK      id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → van ${vanId} (${van?.vanNumber ?? "?"})`
-      );
+      log(`[runReassign] OK      id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → van ${vanId} (${van?.vanNumber ?? "?"})`);
       assigned++;
-    } else if (b.tripType === "day_trip") {
-      // ── Day Trip: try to bump a lower-priority booking on the same date ────
-      let bumped = false;
-      const { needsSingapore, needsThailand } = detectTripRequirements(
-        b.fromLocation, b.toLocation,
-      );
+    } else {
+      // ── No free van: attempt to bump a lower-priority booking ─────────────
+      // Rule: higher priority MUST get a van. Search bumpableTypes() in order
+      // (lowest priority first) for a same-date booking to displace.
+      const { needsSingapore, needsThailand } = detectTripRequirements(b.fromLocation, b.toLocation);
+      const isAlphard = b.isAlphardTrip === 1;
+      const allowedBumpTypes = bumpableTypes(b.tripType);
 
-      for (const bumpType of BUMP_TYPES) {
-        // Use in-memory index instead of DB query
+      let bumped = false;
+
+      for (const bumpType of allowedBumpTypes) {
         const candidates = (bumpIndex.get(`${b.travelDate}::${bumpType}`) ?? [])
           .filter((c) => c.id !== b.id && c.vanId != null);
 
-        // Only bump if the victim's van is capable and matches Alphard eligibility
-        const isDayTripAlphard = b.isAlphardTrip === 1;
         const victim = candidates.find((c) => {
           const van = vanMap.get(c.vanId!);
           if (!van) return false;
           if (needsSingapore && van.singaporeEnabled !== 1) return false;
           if (needsThailand && van.thailandEnabled !== 1) return false;
           const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-          if (isDayTripAlphard && !isVanAlphard) return false;
-          if (!isDayTripAlphard && isVanAlphard) return false;
+          if (isAlphard && !isVanAlphard) return false;
+          if (!isAlphard && isVanAlphard) return false;
           return true;
         }) ?? null;
 
@@ -164,15 +177,11 @@ export async function runReassign(
           const bumpedVanId = victim.vanId;
           const van = vanMap.get(bumpedVanId);
 
-          // Displace the victim
-          await db
-            .update(bookings)
+          await db.update(bookings)
             .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
             .where(eq(bookings.id, victim.id));
 
-          // Assign that van to this Day Trip
-          await db
-            .update(bookings)
+          await db.update(bookings)
             .set({
               vanId: bumpedVanId,
               vehiclePlate: van?.vanNumber ?? "",
@@ -181,16 +190,13 @@ export async function runReassign(
             })
             .where(eq(bookings.id, b.id));
 
-          // Update bump index: remove victim, add day_trip
           const victimKey = `${b.travelDate}::${bumpType}`;
           bumpIndex.set(victimKey, (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id));
-          const dayTripKey = `${b.travelDate}::day_trip`;
-          if (!bumpIndex.has(dayTripKey)) bumpIndex.set(dayTripKey, []);
-          bumpIndex.get(dayTripKey)!.push({ id: b.id, vanId: bumpedVanId });
+          const winnerKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
+          if (!bumpIndex.has(winnerKey)) bumpIndex.set(winnerKey, []);
+          bumpIndex.get(winnerKey)!.push({ id: b.id, vanId: bumpedVanId });
 
-          log(
-            `[runReassign] BUMP    day_trip id=${b.id} date=${b.travelDate} displaced ${bumpType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`
-          );
+          log(`[runReassign] BUMP    ${b.tripType} id=${b.id} date=${b.travelDate} displaced ${bumpType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`);
 
           bumpedIds.push(victim.id);
           assigned++;
@@ -200,88 +206,11 @@ export async function runReassign(
       }
 
       if (!bumped) {
-        // All same-date bookings are day_trips or manual — Day Trip is itself a conflict
-        await db
-          .update(bookings)
+        await db.update(bookings)
           .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
           .where(eq(bookings.id, b.id));
 
-        log(
-          `[runReassign] CONFLICT day_trip id=${b.id} date=${b.travelDate} → no bumpable booking found`
-        );
-        conflicts++;
-      }
-    } else {
-      // ── Standard trip (trip/round_trip/tpri): bump any one_way_ride on the
-      //    same date when no free van is available. Tier 2 always beats Tier 3
-      //    regardless of whether the route needs SG/TH capability. ────────────
-      const { needsSingapore, needsThailand } = detectTripRequirements(
-        b.fromLocation, b.toLocation,
-      );
-
-      let bumped = false;
-
-      const candidates = (bumpIndex.get(`${b.travelDate}::one_way_ride`) ?? [])
-        .filter((c) => c.id !== b.id && c.vanId != null);
-
-      const isAlphard = b.isAlphardTrip === 1;
-      const victim = candidates.find((c) => {
-        const van = vanMap.get(c.vanId!);
-        if (!van) return false;
-        if (needsSingapore && van.singaporeEnabled !== 1) return false;
-        if (needsThailand && van.thailandEnabled !== 1) return false;
-        const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-        if (isAlphard && !isVanAlphard) return false;
-        if (!isAlphard && isVanAlphard) return false;
-        return true;
-      }) ?? null;
-
-      if (victim && victim.vanId != null) {
-        const bumpedVanId = victim.vanId;
-        const van = vanMap.get(bumpedVanId);
-
-        // Displace the victim
-        await db
-          .update(bookings)
-          .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
-          .where(eq(bookings.id, victim.id));
-
-        // Assign that van to this trip
-        await db
-          .update(bookings)
-          .set({
-            vanId: bumpedVanId,
-            vehiclePlate: van?.vanNumber ?? "",
-            driverName: van?.driverName ?? "",
-            driverContact: van?.driverContact ?? "",
-          })
-          .where(eq(bookings.id, b.id));
-
-        // Update bump index
-        const victimKey = `${b.travelDate}::one_way_ride`;
-        bumpIndex.set(victimKey, (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id));
-        const tripKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
-        if (!bumpIndex.has(tripKey)) bumpIndex.set(tripKey, []);
-        bumpIndex.get(tripKey)!.push({ id: b.id, vanId: bumpedVanId });
-
-        log(
-          `[runReassign] BUMP    ${b.tripType} id=${b.id} date=${b.travelDate} displaced one_way_ride id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`
-        );
-
-        bumpedIds.push(victim.id);
-        assigned++;
-        bumped = true;
-      }
-
-      if (!bumped) {
-        await db
-          .update(bookings)
-          .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
-          .where(eq(bookings.id, b.id));
-
-        log(
-          `[runReassign] CONFLICT id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → no free van`
-        );
+        log(`[runReassign] CONFLICT id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} vi=${b.vehicleIndex} (${b.tripType ?? "?"}) → no free van and no bumpable booking`);
         conflicts++;
       }
     }
