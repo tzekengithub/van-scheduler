@@ -755,6 +755,47 @@ export async function aiRecheckAllVans(
               });
               chunkSlots.add(`${freeVan.id}::${b.travelDate}`);
               emit(`🔧 Rescued #${b.id} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) → van ${freeVan.vanNumber}`);
+            } else if ((b.tripType ?? "trip") !== "one_way_ride") {
+              // No free van but this is a trip — MUST bump a one_way_ride if one exists.
+              const bumpSlot = [...committedSlots.entries()].find(([key, info]) => {
+                if (info.locked) return false;
+                if (info.tripType !== "one_way_ride") return false;
+                const [, slotDate] = key.split("::");
+                if (slotDate !== b.travelDate) return false;
+                const slotVanId = Number(key.split("::")[0]);
+                const van = vanMap.get(slotVanId);
+                if (!van) return false;
+                if (needsSingapore && van.singaporeEnabled !== 1) return false;
+                if (needsThailand && van.thailandEnabled !== 1) return false;
+                const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+                if (isAlphardBooking && !isVanAlphard) return false;
+                if (!isAlphardBooking && isVanAlphard) return false;
+                return true;
+              });
+
+              if (bumpSlot) {
+                const [bumpKey, bumpInfo] = bumpSlot;
+                const bumpVanId = Number(bumpKey.split("::")[0]);
+                const bumpVan = vanMap.get(bumpVanId)!;
+                // Clear the bumped booking
+                await db.update(bookings)
+                  .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "I", outsourcedCompany: "" })
+                  .where(eq(bookings.id, bumpInfo.bookingId));
+                const displaced = allBookings.find((x) => x.id === bumpInfo.bookingId);
+                if (displaced) { displaced.vanId = null; displaced.inHouseOrOutsourced = "I"; }
+                committedSlots.delete(bumpKey);
+                bumpedToRequeue.push(bumpInfo.bookingId);
+                // Assign the freed van to the trip
+                rescuedAssignments.push({
+                  bookingId: b.id,
+                  vanId: bumpVanId,
+                  reasoning: `Rescue bump: displaced one_way_ride #${bumpInfo.bookingId} to assign trip to ${bumpVan.vanNumber}.`,
+                });
+                chunkSlots.add(bumpKey);
+                emit(`🔧 Rescue bump: trip #${b.id} (${b.travelDate}) displaced one_way_ride #${bumpInfo.bookingId} → van ${bumpVan.vanNumber}`);
+              } else {
+                trulyOutsourced.push(out);
+              }
             } else {
               trulyOutsourced.push(out);
             }
@@ -987,6 +1028,40 @@ export async function aiRecheckAllVans(
             locked: false,
           });
           emit(`✓ Requeued #${bid} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) → ${freeVan.vanNumber}`);
+        } else if ((b.tripType ?? "trip") !== "one_way_ride") {
+          // Trip with no free van — must bump a one_way_ride if one exists.
+          const bumpSlot = [...committedSlots.entries()].find(([key, info]) => {
+            if (info.locked) return false;
+            if (info.tripType !== "one_way_ride") return false;
+            if (key.split("::")[1] !== b.travelDate) return false;
+            const van = vanMap.get(Number(key.split("::")[0]));
+            if (!van) return false;
+            if (needsSingapore && van.singaporeEnabled !== 1) return false;
+            if (needsThailand && van.thailandEnabled !== 1) return false;
+            const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+            if (isAlphardBooking && !isVanAlphard) return false;
+            if (!isAlphardBooking && isVanAlphard) return false;
+            return true;
+          });
+          if (bumpSlot) {
+            const [bumpKey, bumpInfo] = bumpSlot;
+            const bumpVanId = Number(bumpKey.split("::")[0]);
+            const bumpVan = vanMap.get(bumpVanId)!;
+            await db.update(bookings)
+              .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "O", outsourcedCompany: "" })
+              .where(eq(bookings.id, bumpInfo.bookingId));
+            committedSlots.delete(bumpKey);
+            await db.update(bookings)
+              .set({ vanId: bumpVanId, vehiclePlate: bumpVan.vanNumber ?? "", driverName: bumpVan.driverName ?? "", driverContact: bumpVan.driverContact ?? "", inHouseOrOutsourced: "I", outsourcedCompany: "" })
+              .where(eq(bookings.id, bid));
+            committedSlots.set(bumpKey, { bookingId: bid, tripType: b.tripType ?? "trip", locked: false });
+            emit(`✓ Requeued #${bid} via bump: displaced one_way_ride #${bumpInfo.bookingId} → van ${bumpVan.vanNumber}`);
+          } else {
+            await db.update(bookings)
+              .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "O", outsourcedCompany: "" })
+              .where(eq(bookings.id, bid));
+            emit(`⚠ Requeued #${bid} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) — no free van and no bumpable one_way_ride, outsourced`);
+          }
         } else {
           await db
             .update(bookings)
