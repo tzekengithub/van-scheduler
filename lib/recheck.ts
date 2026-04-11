@@ -688,6 +688,19 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       continue;
     }
 
+    // Detect mixed Alphard/non-Alphard legs within the same invoice slot.
+    // A single van cannot serve both: Alphard legs require a Toyota Alphard
+    // van, regular legs require a non-Alphard van. Consolidating would force
+    // one side into a violation and trigger an infinite ping-pong with
+    // fixAlphardViolations. Leave the group split.
+    const alphardCount = rows.filter((r) => (r.isAlphardTrip ?? 0) === 1).length;
+    if (alphardCount > 0 && alphardCount < rows.length) {
+      log(
+        `[enforceInvoice] ${slotKey}: SKIP — group has ${alphardCount} Alphard leg(s) and ${rows.length - alphardCount} regular leg(s) (mixed type, cannot consolidate onto one van)`
+      );
+      continue;
+    }
+
     log(
       `[enforceInvoice] ${slotKey}: ${rows.length} bookings split across vans [${[...vanSet].join(",")}] on dates [${dates.join(",")}]`
     );
