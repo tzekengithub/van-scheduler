@@ -212,67 +212,65 @@ export async function runReassign(
         conflicts++;
       }
     } else {
-      // ── Standard trip (trip/round_trip/tpri): bump one_way_ride if a
-      //    Singapore- or Thailand-capable van is needed and all capable vans
-      //    are occupied by lower-priority one-way rides. ────────────────────
+      // ── Standard trip (trip/round_trip/tpri): bump any one_way_ride on the
+      //    same date when no free van is available. Tier 2 always beats Tier 3
+      //    regardless of whether the route needs SG/TH capability. ────────────
       const { needsSingapore, needsThailand } = detectTripRequirements(
         b.fromLocation, b.toLocation,
       );
 
       let bumped = false;
 
-      if (needsSingapore || needsThailand) {
-        const candidates = (bumpIndex.get(`${b.travelDate}::one_way_ride`) ?? [])
-          .filter((c) => c.id !== b.id && c.vanId != null);
+      const candidates = (bumpIndex.get(`${b.travelDate}::one_way_ride`) ?? [])
+        .filter((c) => c.id !== b.id && c.vanId != null);
 
-        const isAlphard = b.isAlphardTrip === 1;
-        const victim = candidates.find((c) => {
-          const van = vanMap.get(c.vanId!);
-          if (!van) return false;
-          if (needsSingapore && van.singaporeEnabled !== 1) return false;
-          if (needsThailand && van.thailandEnabled !== 1) return false;
-          const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-          if (isAlphard && !isVanAlphard) return false;
-          if (!isAlphard && isVanAlphard) return false;
-          return true;
-        }) ?? null;
+      const isAlphard = b.isAlphardTrip === 1;
+      const victim = candidates.find((c) => {
+        const van = vanMap.get(c.vanId!);
+        if (!van) return false;
+        if (needsSingapore && van.singaporeEnabled !== 1) return false;
+        if (needsThailand && van.thailandEnabled !== 1) return false;
+        const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+        if (isAlphard && !isVanAlphard) return false;
+        if (!isAlphard && isVanAlphard) return false;
+        return true;
+      }) ?? null;
 
-        if (victim && victim.vanId != null) {
-          const bumpedVanId = victim.vanId;
-          const van = vanMap.get(bumpedVanId);
+      if (victim && victim.vanId != null) {
+        const bumpedVanId = victim.vanId;
+        const van = vanMap.get(bumpedVanId);
 
-          // Displace the victim
-          await db
-            .update(bookings)
-            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
-            .where(eq(bookings.id, victim.id));
+        // Displace the victim
+        await db
+          .update(bookings)
+          .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
+          .where(eq(bookings.id, victim.id));
 
-          // Assign that van to this trip
-          await db
-            .update(bookings)
-            .set({
-              vanId: bumpedVanId,
-              vehiclePlate: van?.vanNumber ?? "",
-              driverName: van?.driverName ?? "",
-              driverContact: van?.driverContact ?? "",
-            })
-            .where(eq(bookings.id, b.id));
+        // Assign that van to this trip
+        await db
+          .update(bookings)
+          .set({
+            vanId: bumpedVanId,
+            vehiclePlate: van?.vanNumber ?? "",
+            driverName: van?.driverName ?? "",
+            driverContact: van?.driverContact ?? "",
+          })
+          .where(eq(bookings.id, b.id));
 
-          // Update bump index
-          const victimKey = `${b.travelDate}::one_way_ride`;
-          bumpIndex.set(victimKey, (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id));
-          const tripKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
-          if (!bumpIndex.has(tripKey)) bumpIndex.set(tripKey, []);
-          bumpIndex.get(tripKey)!.push({ id: b.id, vanId: bumpedVanId });
+        // Update bump index
+        const victimKey = `${b.travelDate}::one_way_ride`;
+        bumpIndex.set(victimKey, (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id));
+        const tripKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
+        if (!bumpIndex.has(tripKey)) bumpIndex.set(tripKey, []);
+        bumpIndex.get(tripKey)!.push({ id: b.id, vanId: bumpedVanId });
 
-          log(
-            `[runReassign] BUMP    ${b.tripType} id=${b.id} date=${b.travelDate} (sg=${needsSingapore} th=${needsThailand}) displaced one_way_ride id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`
-          );
+        log(
+          `[runReassign] BUMP    ${b.tripType} id=${b.id} date=${b.travelDate} displaced one_way_ride id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`
+        );
 
-          bumpedIds.push(victim.id);
-          assigned++;
-          bumped = true;
-        }
+        bumpedIds.push(victim.id);
+        assigned++;
+        bumped = true;
       }
 
       if (!bumped) {
