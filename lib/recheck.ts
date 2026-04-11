@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, isNull, isNotNull, inArray, ne, asc } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray, ne, asc, sql } from "drizzle-orm";
 import { runReassign } from "@/lib/reassign";
 import { detectTripRequirements } from "@/lib/van-assignment";
 
@@ -92,6 +92,10 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   const { assigned, conflicts } = await runReassign(undefined, log);
   log(`  reassignment done — assigned=${assigned} conflicts=${conflicts}`);
 
+  // ── Step 3b: Remove duplicate (invoiceNo, vehicleIndex, travelDate) rows ─────
+  log("Step 3b/7 — removing duplicate invoice-slot rows from re-uploads…");
+  await deduplicateSameDaySlots(log);
+
   // ── Step 4: Enforce same-invoice-same-van ────────────────────────────────────
   log("Step 4/7 — enforcing same invoice = same van per (invoiceNo, vehicleIndex)…");
   await enforceInvoiceVanConsistency(log);
@@ -144,6 +148,9 @@ export async function runConstraintChecks(logger?: (msg: string) => void): Promi
   const log = (msg: string) => { console.log(msg); logger?.(msg); };
 
   log("━━━ CONSTRAINT CHECK STARTED ━━━");
+
+  log("Check 0/5 — removing duplicate invoice-slot rows from re-uploads…");
+  await deduplicateSameDaySlots(log);
 
   log("Check 1/5 — enforcing same invoice = same van…");
   await enforceInvoiceVanConsistency(log);
@@ -536,6 +543,44 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
 }
 
 /**
+ * Remove duplicate booking rows that share the same (invoiceNo, vehicleIndex, travelDate).
+ *
+ * Duplicates arise when the same PDF is uploaded more than once, or when a
+ * price-revised PDF is re-uploaded.  Only one booking per slot makes sense —
+ * keep the row with the lowest id (first inserted) and delete the rest.
+ *
+ * Only non-manual bookings (manualChange = 0) are candidates for deletion so
+ * that user-locked entries are never touched.
+ */
+async function deduplicateSameDaySlots(log: (msg: string) => void): Promise<void> {
+  // Use a window function to rank rows within each (invoiceNo, vehicleIndex, travelDate)
+  // group by id ASC — keep rank=1, delete rank>1.
+  const result = await db.execute(sql`
+    DELETE FROM bookings
+    WHERE id IN (
+      SELECT id FROM (
+        SELECT id,
+          ROW_NUMBER() OVER (
+            PARTITION BY invoice_no, vehicle_index, travel_date
+            ORDER BY id ASC
+          ) AS rn
+        FROM bookings
+        WHERE invoice_no IS NOT NULL
+          AND manual_change = 0
+      ) ranked
+      WHERE rn > 1
+    )
+  `);
+
+  const deleted = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+  if (deleted > 0) {
+    log(`[dedup] removed ${deleted} duplicate booking row(s) (same invoiceNo + vehicleIndex + travelDate)`);
+  } else {
+    log("  no duplicate invoice-slot rows found ✓");
+  }
+}
+
+/**
  * Sweep all auto-managed bookings and ensure that every (invoiceNo, vehicleIndex)
  * group uses the SAME van across all its travel dates.
  *
@@ -610,13 +655,17 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       `[enforceInvoice] ${slotKey}: ${rows.length} bookings split across vans [${[...vanSet].join(",")}] on dates [${dates.join(",")}]`
     );
 
-    // Determine capability requirements from this group's bookings
-    const anyRow = rows[0];
-    const { needsSingapore, needsThailand } = detectTripRequirements(
-      anyRow.fromLocation ?? "",
-      anyRow.toLocation ?? "",
-    );
-    const isAlphardBooking = (anyRow.isAlphardTrip ?? 0) === 1;
+    // Determine capability requirements across ALL legs of the group.
+    // A multi-day tour where the last leg goes to Singapore still requires
+    // a Singapore-capable van for the entire invoice — not just the first leg.
+    let needsSingapore = false;
+    let needsThailand = false;
+    for (const r of rows) {
+      const reqs = detectTripRequirements(r.fromLocation ?? "", r.toLocation ?? "");
+      if (reqs.needsSingapore) needsSingapore = true;
+      if (reqs.needsThailand) needsThailand = true;
+    }
+    const isAlphardBooking = rows.some((r) => (r.isAlphardTrip ?? 0) === 1);
     const capableVans = allVans.filter((v) => {
       if (needsSingapore && v.singaporeEnabled !== 1) return false;
       if (needsThailand && v.thailandEnabled !== 1) return false;
