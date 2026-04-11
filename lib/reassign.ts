@@ -132,6 +132,8 @@ export async function runReassign(
           vehiclePlate: van?.vanNumber ?? "",
           driverName: van?.driverName ?? "",
           driverContact: van?.driverContact ?? "",
+          inHouseOrOutsourced: "I",
+          outsourcedCompany: "",
         })
         .where(eq(bookings.id, b.id));
 
@@ -176,7 +178,7 @@ export async function runReassign(
           const van = vanMap.get(bumpedVanId);
 
           await db.update(bookings)
-            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
+            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "I", outsourcedCompany: "" })
             .where(eq(bookings.id, victim.id));
 
           await db.update(bookings)
@@ -185,6 +187,8 @@ export async function runReassign(
               vehiclePlate: van?.vanNumber ?? "",
               driverName: van?.driverName ?? "",
               driverContact: van?.driverContact ?? "",
+              inHouseOrOutsourced: "I",
+              outsourcedCompany: "",
             })
             .where(eq(bookings.id, b.id));
 
@@ -249,7 +253,7 @@ export async function runReassign(
 
           await db
             .update(bookings)
-            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
+            .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "I", outsourcedCompany: "" })
             .where(eq(bookings.id, victim.id));
 
           await db
@@ -259,6 +263,8 @@ export async function runReassign(
               vehiclePlate: van?.vanNumber ?? "",
               driverName: van?.driverName ?? "",
               driverContact: van?.driverContact ?? "",
+              inHouseOrOutsourced: "I",
+              outsourcedCompany: "",
             })
             .where(eq(bookings.id, b.id));
 
@@ -335,6 +341,8 @@ export async function runReassign(
             vehiclePlate: van?.vanNumber ?? "",
             driverName: van?.driverName ?? "",
             driverContact: van?.driverContact ?? "",
+            inHouseOrOutsourced: "I",
+            outsourcedCompany: "",
           })
           .where(eq(bookings.id, b.id));
 

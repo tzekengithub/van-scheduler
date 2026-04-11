@@ -322,6 +322,8 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
           vehiclePlate: freeVan.vanNumber ?? "",
           driverName: freeVan.driverName ?? "",
           driverContact: freeVan.driverContact ?? "",
+          inHouseOrOutsourced: "I",
+          outsourcedCompany: "",
         })
         .where(eq(bookings.id, b.id));
       occupiedSlots.add(`${freeVan.id}::${b.travelDate}`);
@@ -748,6 +750,8 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
           vehiclePlate: targetVan.vanNumber ?? "",
           driverName: targetVan.driverName ?? "",
           driverContact: targetVan.driverContact ?? "",
+          inHouseOrOutsourced: "I",
+          outsourcedCompany: "",
         })
         .where(inArray(bookings.id, toMove.map((b) => b.id)));
 
@@ -861,6 +865,8 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
             vehiclePlate: freeVan.vanNumber ?? "",
             driverName: freeVan.driverName ?? "",
             driverContact: freeVan.driverContact ?? "",
+            inHouseOrOutsourced: "I",
+            outsourcedCompany: "",
           })
           .where(eq(bookings.id, victim.id));
         // sorted[0] still holds victim.vanId::date — only add freeVan's new slot
