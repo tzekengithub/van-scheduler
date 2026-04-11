@@ -549,14 +549,37 @@ export async function aiRecheckAllVans(
           throw new Error("AI returned incomplete structure");
         }
 
-        // Validate every chunk bookingId is accounted for
+        // Validate every chunk bookingId is accounted for.
+        // If the AI omits some bookings, handle only those with the rules engine
+        // and continue processing the AI's valid assignments for the rest —
+        // don't throw and discard the whole batch.
         const chunkIds = new Set(chunk.map((b) => b.id));
         const respondedIds = new Set([
           ...parsed.assignments.map((a) => a.bookingId),
           ...parsed.outsourced.map((o) => o.bookingId),
         ]);
-        for (const id of chunkIds) {
-          if (!respondedIds.has(id)) throw new Error(`AI omitted bookingId ${id}`);
+        const omittedIds = [...chunkIds].filter((id) => !respondedIds.has(id));
+        if (omittedIds.length > 0) {
+          emit(
+            `⚠ AI omitted ${omittedIds.length} booking(s) [${omittedIds.join(", ")}] — rules engine handling only those`,
+          );
+          try {
+            await runReassign(omittedIds, (msg) => { log.push(msg); logger?.(msg); });
+          } catch (reassignErr: any) {
+            emit(`⚠ Rules-engine fallback for omitted bookings also failed (${reassignErr.message})`);
+          }
+          // Refresh committed context so the AI's valid assignments don't
+          // double-book a slot the rules engine just claimed.
+          const omitNowAssigned = await db
+            .select({ id: bookings.id, vanId: bookings.vanId, travelDate: bookings.travelDate, tripType: bookings.tripType })
+            .from(bookings)
+            .where(isNotNull(bookings.vanId));
+          for (const b of omitNowAssigned) {
+            const key = `${b.vanId}::${b.travelDate}`;
+            if (!committedSlots.has(key)) {
+              committedSlots.set(key, { bookingId: b.id, tripType: b.tripType ?? "trip", locked: false });
+            }
+          }
         }
 
         // ── Process cross-batch bumps requested by the AI ───────────────────────
