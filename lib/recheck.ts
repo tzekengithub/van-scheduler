@@ -135,6 +135,41 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
 }
 
 /**
+ * Mid-layer rescan — runs after each AI scheduling layer commits its results,
+ * BEFORE the next layer starts.
+ *
+ * Corrects any mistakes the AI made within the just-completed layer WITHOUT
+ * touching bookings that haven't been scheduled yet (i.e. layers still to run).
+ * Specifically it does NOT mark unassigned bookings as outsourced — those are
+ * still waiting for a later layer to claim them.
+ *
+ * Three guarantees per layer:
+ *  1. Invoice continuity  — all legs of the same (invoiceNo, vehicleIndex) use the same van
+ *  2. Van-type match      — Alphard bookings → Alphard vans; SG/TH trips → capable vans
+ *  3. No phantom outsources — if a booking was outsourced but a free capable van exists, rescue it
+ */
+export async function runMidLayerChecks(layerLabel: string, logger?: (msg: string) => void): Promise<void> {
+  const log = (msg: string) => { console.log(msg); logger?.(msg); };
+
+  log(`━━━ MID-LAYER RESCAN (${layerLabel}) ━━━`);
+
+  log("  [1/4] Invoice continuity — same (invoiceNo, vehicleIndex) → same van…");
+  await enforceInvoiceVanConsistency(log);
+
+  log("  [2/4] Double-booking elimination…");
+  await eliminateDoubleBookings(log);
+
+  log("  [3/4] Van-type match — Alphard exclusivity + SG/TH capability…");
+  await fixAlphardViolations(log);
+  await fixCapabilityViolations(log);
+
+  log("  [4/4] Rescue incorrectly outsourced bookings (free capable van exists)…");
+  await rescueIncorrectOutsources(log);
+
+  log(`━━━ MID-LAYER RESCAN COMPLETE ━━━`);
+}
+
+/**
  * Run only the constraint-enforcement steps (4–7) without resetting assignments.
  *
  * Called after the AI scheduler writes its results to guarantee hard rules are met:

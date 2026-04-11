@@ -18,7 +18,7 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, isNotNull } from "drizzle-orm";
-import { recheckAllVans, runConstraintChecks } from "@/lib/recheck";
+import { recheckAllVans, runConstraintChecks, runMidLayerChecks } from "@/lib/recheck";
 import { runReassign } from "@/lib/reassign";
 import { getActiveRules } from "@/lib/scheduling-rules";
 
@@ -696,6 +696,40 @@ export async function aiRecheckAllVans(
 
       if (chunkResult.summary) summaries.push(chunkResult.summary);
       } // end batch loop (ci)
+
+      // ── Mid-layer rescan: fix mistakes before next layer inherits committed slots ──
+      emit(`\n🔍 Post-layer rescan for ${layer.label}…`);
+      await runMidLayerChecks(layer.label, (msg) => emit(msg));
+
+      // Refresh committedVanDates + committedInvoiceVans from DB so the next layer
+      // sees the corrected (post-rescan) state as its locked context.
+      const nowAssigned = await db
+        .select({
+          vanId: bookings.vanId,
+          travelDate: bookings.travelDate,
+          invoiceNo: bookings.invoiceNo,
+          vehicleIndex: bookings.vehicleIndex,
+        })
+        .from(bookings)
+        .where(isNotNull(bookings.vanId));
+
+      committedVanDates.clear();
+      committedInvoiceVans.clear();
+      for (const b of nowAssigned) {
+        committedVanDates.add(`${b.vanId}::${b.travelDate}`);
+        if (b.invoiceNo)
+          committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId!);
+      }
+      // Re-seed protected bookings (manualChange=1 / confirmed outsource) which
+      // have no vanId but must still block their slots
+      for (const b of allBookings) {
+        if (isProtected(b) && b.vanId) {
+          committedVanDates.add(`${b.vanId}::${b.travelDate}`);
+          if (b.invoiceNo)
+            committedInvoiceVans.set(`${b.invoiceNo}::${b.vehicleIndex ?? 1}`, b.vanId);
+        }
+      }
+      emit(`✅ ${layer.label} complete — committed slots refreshed from DB`);
     } // end layer loop (li)
 
     // ── Step 8: Constraint checks — fix any mistakes the AI made ─────────────
