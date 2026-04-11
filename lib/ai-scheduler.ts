@@ -258,44 +258,94 @@ export async function aiRecheckAllVans(
       return { summary: "No bookings to assign.", log, reasoning: [] };
     }
 
-    // ── Step 5: Sort bookings — priority tier first, then date + invoice ───────
-    // Tier 1 (multi-day / day_trip) → Tier 2 (trip/round_trip/tpri) → Tier 3 (one_way_ride)
-    // Within the same tier sort by date then invoice so higher-priority trips
-    // claim vans before lower-priority ones in each batch.
-    const tripTier = (b: (typeof unprotected)[0]): number => {
-      const t = (b.tripType ?? "trip").toLowerCase();
-      if (t === "day_trip") return 0;
-      if (t === "one_way_ride") return 2;
-      return 1; // trip, round_trip, tpri, etc.
-    };
+    // ── Step 5: Split into 3 priority layers ──────────────────────────────────
+    // Layer 1 (highest): day_trips + invoices spanning 2+ distinct dates (multi-day tours)
+    // Layer 2 (standard): trip, round_trip, tpri
+    // Layer 3 (lowest):  one_way_ride
+    //
+    // Each layer is processed as a separate set of AI batches. Committed slots from
+    // Layer N are automatically available as locked context for Layer N+1, so
+    // higher-priority bookings always claim vans before lower-priority ones even run.
 
-    const sorted = [...workingSet].sort(
-      (a, b) =>
-        tripTier(a) - tripTier(b) ||
-        a.travelDate.localeCompare(b.travelDate) ||
-        (a.invoiceNo ?? "").localeCompare(b.invoiceNo ?? "") ||
-        (a.vehicleIndex ?? 1) - (b.vehicleIndex ?? 1),
+    // Detect multi-day invoices (same invoiceNo on 2+ distinct travel dates)
+    const invoiceDateCount = new Map<string, Set<string>>();
+    for (const b of workingSet) {
+      if (!b.invoiceNo) continue;
+      if (!invoiceDateCount.has(b.invoiceNo)) invoiceDateCount.set(b.invoiceNo, new Set());
+      invoiceDateCount.get(b.invoiceNo)!.add(b.travelDate);
+    }
+    const multiDayInvoices = new Set(
+      [...invoiceDateCount.entries()]
+        .filter(([, s]) => s.size > 1)
+        .map(([inv]) => inv),
     );
 
-    // ── Step 6: Chunk into batches ─────────────────────────────────────────────
-    const chunks: (typeof sorted)[] = [];
-    for (let i = 0; i < sorted.length; i += CHUNK_SIZE) {
-      chunks.push(sorted.slice(i, i + CHUNK_SIZE));
-    }
+    const byDate = (a: (typeof workingSet)[0], b: (typeof workingSet)[0]) =>
+      a.travelDate.localeCompare(b.travelDate) ||
+      (a.invoiceNo ?? "").localeCompare(b.invoiceNo ?? "") ||
+      (a.vehicleIndex ?? 1) - (b.vehicleIndex ?? 1);
+
+    const isL1 = (b: (typeof workingSet)[0]) =>
+      (b.tripType ?? "").toLowerCase() === "day_trip" ||
+      multiDayInvoices.has(b.invoiceNo ?? "");
+    const isL3 = (b: (typeof workingSet)[0]) =>
+      (b.tripType ?? "").toLowerCase() === "one_way_ride";
+
+    const layers = [
+      {
+        label: "Layer 1/3 — Day Trips + Multi-day Tours (highest priority)",
+        bookings: [...workingSet].filter(isL1).sort(byDate),
+      },
+      {
+        label: "Layer 2/3 — Standard Trips",
+        bookings: [...workingSet].filter((b) => !isL1(b) && !isL3(b)).sort(byDate),
+      },
+      {
+        label: "Layer 3/3 — One-Way Rides (lowest priority)",
+        bookings: [...workingSet].filter(isL3).sort(byDate),
+      },
+    ];
 
     emit(
-      `📦 ${workingSet.length} booking(s) to process → ${chunks.length} batch(es) of up to ${CHUNK_SIZE}`,
+      `📦 ${workingSet.length} booking(s) split into 3 layers: ` +
+      `${layers[0].bookings.length} day-trip/multi-day | ` +
+      `${layers[1].bookings.length} standard | ` +
+      `${layers[2].bookings.length} one-way`,
     );
 
     const allReasoning: AiReasoningEntry[] = [];
     const summaries: string[] = [];
 
-    // ── Step 7: Process each batch ─────────────────────────────────────────────
-    for (let ci = 0; ci < chunks.length; ci++) {
-      const chunk = chunks[ci];
-      emit(
-        `🤖 Batch ${ci + 1}/${chunks.length} — sending ${chunk.length} booking(s) to Gemini 2.5 Pro…`,
-      );
+    // ── Step 6–7: Process each layer, then each batch within the layer ─────────
+    for (let li = 0; li < layers.length; li++) {
+      const layer = layers[li];
+
+      if (layer.bookings.length === 0) {
+        emit(`⏭ ${layer.label} — no bookings, skipping`);
+        continue;
+      }
+
+      // Chunk this layer
+      const chunks: (typeof layer.bookings)[] = [];
+      for (let i = 0; i < layer.bookings.length; i += CHUNK_SIZE) {
+        chunks.push(layer.bookings.slice(i, i + CHUNK_SIZE));
+      }
+
+      emit(`\n🗂 ${layer.label} — ${layer.bookings.length} booking(s) → ${chunks.length} batch(es)`);
+
+      // Layer hint injected into every userMessage for this layer
+      const layerHint =
+        `\n\nCURRENT LAYER: ${li + 1} of 3 — ${layer.label}.\n` +
+        (li === 0
+          ? "Committed slots above are from protected/manual bookings only. All other vans are fully available."
+          : `Committed slots above include protected bookings AND all assignments already made in earlier layers. ` +
+            `Only vans NOT in the committed list are available for this layer.`);
+
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
+        emit(
+          `🤖 ${layer.label}, Batch ${ci + 1}/${chunks.length} — sending ${chunk.length} booking(s) to Gemini…`,
+        );
 
       const chunkPayload = chunk.map((b) => ({
         bookingId: b.id,
@@ -339,7 +389,8 @@ export async function aiRecheckAllVans(
       const userMessage =
         `CURRENT FLEET:\n${JSON.stringify(vansPayload, null, 2)}` +
         committedSection +
-        `\n\nBOOKINGS TO ASSIGN (batch ${ci + 1}/${chunks.length}):\n${JSON.stringify(chunkPayload, null, 2)}` +
+        layerHint +
+        `\n\nBOOKINGS TO ASSIGN (${layer.label}, batch ${ci + 1}/${chunks.length}):\n${JSON.stringify(chunkPayload, null, 2)}` +
         customRulesSection;
 
       // ── Call OpenRouter for this chunk ───────────────────────────────────────
@@ -644,7 +695,8 @@ export async function aiRecheckAllVans(
       );
 
       if (chunkResult.summary) summaries.push(chunkResult.summary);
-    }
+      } // end batch loop (ci)
+    } // end layer loop (li)
 
     // ── Step 8: Constraint checks — fix any mistakes the AI made ─────────────
     // Runs enforce-invoice-consistency, eliminate-double-bookings, and marks
@@ -659,7 +711,7 @@ export async function aiRecheckAllVans(
         ? "All bookings processed."
         : summaries.length === 1
           ? summaries[0]
-          : summaries.map((s, i) => `Batch ${i + 1}: ${s}`).join(" ");
+          : summaries.map((s, i) => `Layer ${i + 1}: ${s}`).join(" ");
 
     return { summary, log, reasoning: allReasoning };
   } catch (err) {
