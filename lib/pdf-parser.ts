@@ -202,6 +202,7 @@ export function parseRawText(text: string): ParsedBooking[] {
         if (/COMPANY POLICY|No Booking Details|Booking Details/i.test(line)) break;
         if (line === COMPANY_PHONE) continue;
         if (line === "No") continue;
+        if (/^client'?s?\s*details?$/i.test(line)) continue;
         if (/^\+6[05\d][\d\s-]{6,}/.test(line)) {
           clientPhone = line;
           break;
@@ -225,6 +226,7 @@ export function parseRawText(text: string): ParsedBooking[] {
         ) break;
         if (l === COMPANY_PHONE) continue;
         if (l === "No") continue;
+        if (/^client'?s?\s*details?$/i.test(l)) continue;
         clientDetailLines.push(l);
       }
       clientDetails = clientDetailLines.join("\n").trim();

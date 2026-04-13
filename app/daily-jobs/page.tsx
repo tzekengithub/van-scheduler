@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useUploadContext } from "@/app/upload-context";
@@ -127,7 +127,10 @@ export default function DailyJobsPage() {
   const [patchError, setPatchError] = useState<string | null>(null);
   const [deleteInvoiceInput, setDeleteInvoiceInput] = useState("");
   const [deleteInvoiceState, setDeleteInvoiceState] = useState<"idle" | "confirm" | "deleting">("idle");
-  const [allInvoiceNos, setAllInvoiceNos] = useState<string[]>([]);
+  const allInvoiceNos = useMemo(
+    () => [...new Set(rows.map((r) => r.invoiceNo).filter(Boolean))] as string[],
+    [rows],
+  );
 
   const router = useRouter();
   const { uploadOpen, setUploadOpen, serviceStatus } = useUploadContext();
@@ -159,15 +162,6 @@ export default function DailyJobsPage() {
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
-  useEffect(() => {
-    fetch("/api/bookings")
-      .then((r) => r.json())
-      .then((data: BookingRow[]) => {
-        const nos = [...new Set(data.map((r) => r.invoiceNo).filter(Boolean))] as string[];
-        setAllInvoiceNos(nos);
-      })
-      .catch(() => {});
-  }, []);
 
   // Refresh data and navigate to first inserted date after PDF upload
   useEffect(() => {
