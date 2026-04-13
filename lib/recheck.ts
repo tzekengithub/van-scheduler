@@ -108,6 +108,13 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   log("Step 6/7 — scanning for double-bookings (same van, same date)…");
   await eliminateDoubleBookings(log);
 
+  // ── Step 6b: Rescue bookings incorrectly left unassigned ─────────────────────
+  // Handles cases where enforceInvoiceVanConsistency couldn't consolidate a
+  // SG/TH trip because a non-SG/TH booking occupied the only capable van.
+  // The rescue pass has SG/TH override bump logic to displace lower-priority occupants.
+  log("Step 6b/7 — rescuing any unassigned bookings that have a free or bumpable van…");
+  await rescueIncorrectOutsources(log);
+
   // ── Step 7: Any still-unassigned → mark as outsourced ───────────────────────
   log("Step 7/7 — marking any still-unassigned bookings as outsourced…");
   const stillUnassigned = await db
