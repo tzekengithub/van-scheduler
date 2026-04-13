@@ -924,9 +924,8 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
     inconsistent++;
 
     const dates = rows.map((r) => r.travelDate);
-    const bookingIds = rows.map((r) => r.id);
 
-    // Detect same-day duplicates within this group: two bookings on the same date
+// Detect same-day duplicates within this group: two bookings on the same date
     // means the invoice genuinely needs 2 vans that day (multi-vehicle same-day).
     // We cannot put them on the same van, so skip consolidation for this group.
     const dateSet = new Set(dates);
@@ -938,94 +937,113 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
     }
 
     // Detect mixed Alphard/non-Alphard legs within the same invoice slot.
-    // A single van cannot serve both: Alphard legs require a Toyota Alphard
-    // van, regular legs require a non-Alphard van. Consolidating would force
-    // one side into a violation and trigger an infinite ping-pong with
-    // fixAlphardViolations. Leave the group split.
+    // A single van cannot serve both types. Instead of skipping the whole group,
+    // split into two sub-groups (Alphard legs / regular legs) and consolidate each
+    // independently. This preserves invoice continuity within each vehicle type.
     const alphardCount = rows.filter((r) => (r.isAlphardTrip ?? 0) === 1).length;
-    if (alphardCount > 0 && alphardCount < rows.length) {
+    const isMixedAlphard = alphardCount > 0 && alphardCount < rows.length;
+
+    const subGroups: Array<{ label: string; subRows: typeof rows }> = isMixedAlphard
+      ? [
+          { label: `${slotKey}[regular]`, subRows: rows.filter((r) => (r.isAlphardTrip ?? 0) === 0) },
+          { label: `${slotKey}[alphard]`, subRows: rows.filter((r) => (r.isAlphardTrip ?? 0) === 1) },
+        ]
+      : [{ label: slotKey, subRows: rows }];
+
+    if (isMixedAlphard) {
       log(
-        `[enforceInvoice] ${slotKey}: SKIP — group has ${alphardCount} Alphard leg(s) and ${rows.length - alphardCount} regular leg(s) (mixed type, cannot consolidate onto one van)`
+        `[enforceInvoice] ${slotKey}: mixed Alphard group — splitting into ${rows.length - alphardCount} regular + ${alphardCount} Alphard sub-group(s) for separate consolidation`
       );
-      continue;
+    } else {
+      log(
+        `[enforceInvoice] ${slotKey}: ${rows.length} bookings split across vans [${[...vanSet].join(",")}] on dates [${dates.join(",")}]`
+      );
     }
 
-    log(
-      `[enforceInvoice] ${slotKey}: ${rows.length} bookings split across vans [${[...vanSet].join(",")}] on dates [${dates.join(",")}]`
-    );
+    for (const { label, subRows } of subGroups) {
+      if (subRows.length <= 1) continue;
+      const subVanSet = new Set(subRows.map((r) => r.vanId!));
+      if (subVanSet.size <= 1) continue; // already consistent ✓
 
-    // Determine capability requirements across ALL legs of the group.
-    // A multi-day tour where the last leg goes to Singapore still requires
-    // a Singapore-capable van for the entire invoice — not just the first leg.
-    let needsSingapore = false;
-    let needsThailand = false;
-    for (const r of rows) {
-      const reqs = detectTripRequirements(r.fromLocation ?? "", r.toLocation ?? "");
-      if (reqs.needsSingapore) needsSingapore = true;
-      if (reqs.needsThailand) needsThailand = true;
-    }
-    const isAlphardBooking = rows.some((r) => (r.isAlphardTrip ?? 0) === 1);
-    const capableVans = allVans.filter((v) => {
-      if (needsSingapore && v.singaporeEnabled !== 1) return false;
-      if (needsThailand && v.thailandEnabled !== 1) return false;
-      const isVanAlphard = (v.vehicleType ?? "").toLowerCase() === "toyota alphard";
-      if (isAlphardBooking && !isVanAlphard) return false;
-      if (!isAlphardBooking && isVanAlphard) return false;
-      return true;
-    });
+      const subDates = subRows.map((r) => r.travelDate);
+      const subBookingIds = subRows.map((r) => r.id);
 
-    // Prefer vans already used by this group (fewer moves), then try all others
-    const vanPriority = [
-      ...capableVans.filter((v) => vanSet.has(v.id)),
-      ...capableVans.filter((v) => !vanSet.has(v.id)),
-    ];
+      // Check for same-day duplicates within this sub-group
+      const subDateSet = new Set(subDates);
+      if (subDateSet.size < subDates.length) {
+        log(`[enforceInvoice] ${label}: SKIP — same-day duplicates within sub-group`);
+        continue;
+      }
 
-    const bookingIdSet = new Set(bookingIds);
-
-    let targetVan: typeof allVans[number] | null = null;
-    for (const van of vanPriority) {
-      // Check in-memory: does this van have any other booking on any of the group's dates?
-      const blocked = dates.some((date) => {
-        const slotBookingId = occupiedSlots.get(`${van.id}::${date}`);
-        return slotBookingId !== undefined && !bookingIdSet.has(slotBookingId);
+      // Determine capability requirements across sub-group legs only
+      let needsSingapore = false;
+      let needsThailand = false;
+      for (const r of subRows) {
+        const reqs = detectTripRequirements(r.fromLocation ?? "", r.toLocation ?? "");
+        if (reqs.needsSingapore) needsSingapore = true;
+        if (reqs.needsThailand) needsThailand = true;
+      }
+      const isAlphardBooking = subRows.some((r) => (r.isAlphardTrip ?? 0) === 1);
+      const capableVans = allVans.filter((v) => {
+        if (needsSingapore && v.singaporeEnabled !== 1) return false;
+        if (needsThailand && v.thailandEnabled !== 1) return false;
+        const isVanAlphard = (v.vehicleType ?? "").toLowerCase() === "toyota alphard";
+        if (isAlphardBooking && !isVanAlphard) return false;
+        if (!isAlphardBooking && isVanAlphard) return false;
+        return true;
       });
 
-      if (!blocked) {
-        targetVan = van;
-        break;
+      // Prefer vans already used by this sub-group (fewer moves), then all others
+      const vanPriority = [
+        ...capableVans.filter((v) => subVanSet.has(v.id)),
+        ...capableVans.filter((v) => !subVanSet.has(v.id)),
+      ];
+
+      const subBookingIdSet = new Set(subBookingIds);
+
+      let targetVan: typeof allVans[number] | null = null;
+      for (const van of vanPriority) {
+        const blocked = subDates.some((date) => {
+          const slotBookingId = occupiedSlots.get(`${van.id}::${date}`);
+          return slotBookingId !== undefined && !subBookingIdSet.has(slotBookingId);
+        });
+        if (!blocked) {
+          targetVan = van;
+          break;
+        }
+        log(`  van ${van.id} (${van.vanNumber}) blocked on ≥1 date — trying next`);
       }
-      log(`  van ${van.id} (${van.vanNumber}) blocked on ≥1 date — trying next`);
-    }
 
-    if (!targetVan) {
-      log(`[enforceInvoice] ${slotKey}: no single van free on all dates — leaving split`);
-      continue;
-    }
-
-    // Move all rows not already on targetVan — single batch UPDATE
-    const toMove = rows.filter((b) => b.vanId !== targetVan!.id);
-    if (toMove.length > 0) {
-      await db
-        .update(bookings)
-        .set({
-          vanId: targetVan.id,
-          vehiclePlate: targetVan.vanNumber ?? "",
-          driverName: targetVan.driverName ?? "",
-          driverContact: targetVan.driverContact ?? "",
-          inHouseOrOutsourced: "I",
-          outsourcedCompany: "",
-        })
-        .where(inArray(bookings.id, toMove.map((b) => b.id)));
-
-      for (const b of toMove) {
-        occupiedSlots.delete(`${b.vanId}::${b.travelDate}`);
-        occupiedSlots.set(`${targetVan.id}::${b.travelDate}`, b.id);
-        log(`[enforceInvoice] ${slotKey} id=${b.id} date=${b.travelDate} → van ${targetVan.id} (${targetVan.vanNumber})`);
+      if (!targetVan) {
+        log(`[enforceInvoice] ${label}: no single van free on all dates — leaving split`);
+        continue;
       }
+
+      // Move all sub-group rows not already on targetVan
+      const toMove = subRows.filter((b) => b.vanId !== targetVan!.id);
+      if (toMove.length > 0) {
+        await db
+          .update(bookings)
+          .set({
+            vanId: targetVan.id,
+            vehiclePlate: targetVan.vanNumber ?? "",
+            driverName: targetVan.driverName ?? "",
+            driverContact: targetVan.driverContact ?? "",
+            inHouseOrOutsourced: "I",
+            outsourcedCompany: "",
+          })
+          .where(inArray(bookings.id, toMove.map((b) => b.id)));
+
+        for (const b of toMove) {
+          occupiedSlots.delete(`${b.vanId}::${b.travelDate}`);
+          occupiedSlots.set(`${targetVan.id}::${b.travelDate}`, b.id);
+          log(`[enforceInvoice] ${label} id=${b.id} date=${b.travelDate} → van ${targetVan.id} (${targetVan.vanNumber})`);
+        }
+      }
+      const moved = toMove.length;
+      log(`[enforceInvoice] ${label}: consolidated to van ${targetVan.id} (${targetVan.vanNumber ?? "?"}), moved ${moved} booking(s)`);
+      fixed += moved;
     }
-    const moved = toMove.length;
-    log(`[enforceInvoice] ${slotKey}: consolidated to van ${targetVan.id} (${targetVan.vanNumber ?? "?"}), moved ${moved} booking(s)`);
-    fixed += moved;
   }
 
   if (inconsistent === 0) {
