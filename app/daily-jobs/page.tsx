@@ -217,13 +217,15 @@ function generateWhatsAppText(
           const from = leg.fromLocation?.trim() || "?";
           const to = leg.toLocation?.trim() || "?";
           const dateStr = formatLegDate(leg.travelDate);
-          lines.push(`  📍 Leg ${i + 1} · ${dateStr}:  ${from} → ${to}`);
+          const route = leg.tripType === "day_trip" ? from : `${from} → ${to}`;
+          lines.push(`  📍 Leg ${i + 1} · ${dateStr}:  ${route}`);
         });
       } else {
         const from = repRow.fromLocation?.trim() || "?";
         const to = repRow.toLocation?.trim() || "?";
         const dateStr = formatLegDate(repRow.travelDate);
-        lines.push(`  📍 ${dateStr}:  ${from} → ${to}`);
+        const route = repRow.tripType === "day_trip" ? from : `${from} → ${to}`;
+        lines.push(`  📍 ${dateStr}:  ${route}`);
       }
 
       // Use rep row for metadata (pax, client, guide, remarks)
