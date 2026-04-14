@@ -113,22 +113,37 @@ function formatShortDate(day: string, month: string, year: string): string {
 
 // ── WhatsApp export ───────────────────────────────────────────────────────────
 
-function generateWhatsAppText(rows: BookingRow[], fullDateLabel: string): string {
+function formatLegDate(travelDate: string): string {
+  // travelDate is "YYYY-MM-DD"; format as "DD/MM (Weekday)"
+  if (!travelDate) return "";
+  const d = new Date(travelDate + "T00:00:00");
+  if (isNaN(d.getTime())) return travelDate;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const wd = d.toLocaleDateString("en-GB", { weekday: "short" });
+  return `${dd}/${mm} (${wd})`;
+}
+
+function generateWhatsAppText(
+  allLegs: BookingRow[],   // all legs for invoices active today (may span multiple dates)
+  dayRows: BookingRow[],   // today's rows only (driver grouping source)
+  fullDateLabel: string
+): string {
   const lines: string[] = [];
 
   lines.push(`📅 *DRIVER SCHEDULE*`);
   lines.push(`${fullDateLabel}`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
 
-  // Separate in-house vs outsourced
-  const inHouse = rows.filter(
+  // Split today's rows
+  const inHouse = dayRows.filter(
     (r) => r.inHouseOrOutsourced !== "O" && r.inHouseOrOutsourced !== "outsourced"
   );
-  const outsourced = rows.filter(
+  const outsourced = dayRows.filter(
     (r) => r.inHouseOrOutsourced === "O" || r.inHouseOrOutsourced === "outsourced"
   );
 
-  // Group in-house by driver name (fall back to plate, then "Unassigned")
+  // Group in-house by driver key
   const driverGroups = new Map<string, BookingRow[]>();
   for (const r of inHouse) {
     const key = r.driverName?.trim() || r.vehiclePlate?.trim() || r.vanNumber?.trim() || "⚠️ No Driver Assigned";
@@ -136,7 +151,7 @@ function generateWhatsAppText(rows: BookingRow[], fullDateLabel: string): string
     driverGroups.get(key)!.push(r);
   }
 
-  // Sort drivers alphabetically; "⚠️ No Driver Assigned" last
+  // Sort drivers alpha; unassigned last
   const sortedDrivers = [...driverGroups.keys()].sort((a, b) => {
     if (a.startsWith("⚠️")) return 1;
     if (b.startsWith("⚠️")) return -1;
@@ -151,30 +166,77 @@ function generateWhatsAppText(rows: BookingRow[], fullDateLabel: string): string
     const plate = firstRow.vehiclePlate?.trim() || firstRow.vanNumber?.trim() || "";
     const contact = firstRow.driverContact?.trim() || "";
 
+    // Convoy tag: if any of today's rows for this driver has numberOfVehicles > 1
+    const convoyRow = driverRows.find(r => (r.numberOfVehicles ?? 1) > 1);
+    const convoyTag = convoyRow
+      ? `  [Van ${convoyRow.vehicleIndex ?? 1} of ${convoyRow.numberOfVehicles}]`
+      : "";
+
     lines.push(``);
-    lines.push(`🚐 *${driverIdx}. ${driver}*`);
+    lines.push(`🚐 *${driverIdx}. ${driver}*${convoyTag}`);
     if (plate) lines.push(`    Plate: ${plate}`);
     if (contact) lines.push(`    📞 ${contact}`);
 
+    // Group this driver's today-rows by invoice (null/empty = solo trip keyed by id)
+    const invoiceOrder: string[] = [];
+    const invoiceMap = new Map<string, BookingRow[]>();
     for (const r of driverRows) {
-      const from = r.fromLocation?.trim() || "?";
-      const to = r.toLocation?.trim() || "?";
-      const pax = r.passengerCount ? `${r.passengerCount} pax` : "";
-      const client = clientName(r) || "";
-      const clientTel = clientPhone(r) || "";
-      const tripLabel = tripTypeLabel(r.tripType);
-      const invoice = r.invoiceNo?.trim() ? `[${r.invoiceNo.trim()}]` : "";
+      const key = r.invoiceNo?.trim() || `__solo_${r.id}`;
+      if (!invoiceMap.has(key)) { invoiceMap.set(key, []); invoiceOrder.push(key); }
+      invoiceMap.get(key)!.push(r);
+    }
 
-      const routeLine = `    • ${from} → ${to}`;
-      const detailParts = [tripLabel, pax].filter(Boolean);
-      const detailLine = detailParts.length ? `      ${detailParts.join(" · ")}` : "";
-      const clientLine = client ? `      Client: ${client}${clientTel ? ` (${clientTel})` : ""}` : "";
-      const invoiceLine = invoice ? `      Invoice: ${invoice}` : "";
+    for (const invKey of invoiceOrder) {
+      const todayLegsForInv = invoiceMap.get(invKey)!;
+      const repRow = todayLegsForInv[0];
+      const tripLabel = tripTypeLabel(repRow.tripType);
 
-      lines.push(routeLine);
-      if (detailLine) lines.push(detailLine);
-      if (clientLine) lines.push(clientLine);
-      if (invoiceLine) lines.push(invoiceLine);
+      // Find ALL legs (across dates) for this invoice in allLegs, same driver
+      let allInvLegs: BookingRow[];
+      if (invKey.startsWith("__solo_")) {
+        allInvLegs = todayLegsForInv;
+      } else {
+        allInvLegs = allLegs
+          .filter(r =>
+            r.invoiceNo?.trim() === invKey &&
+            (r.driverName?.trim() || r.vehiclePlate?.trim() || r.vanNumber?.trim() || "⚠️ No Driver Assigned") === driver
+          )
+          .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""));
+        // Fallback: use today's legs if cross-date fetch returned nothing
+        if (allInvLegs.length === 0) allInvLegs = todayLegsForInv;
+      }
+
+      const multiLeg = allInvLegs.length > 1;
+      const legSuffix = multiLeg ? ` · ${allInvLegs.length} legs` : "";
+
+      lines.push(``);
+      lines.push(`  — ${tripLabel}${legSuffix}`);
+
+      if (multiLeg) {
+        allInvLegs.forEach((leg, i) => {
+          const from = leg.fromLocation?.trim() || "?";
+          const to = leg.toLocation?.trim() || "?";
+          const dateStr = formatLegDate(leg.travelDate);
+          lines.push(`  📍 Leg ${i + 1} · ${dateStr}:  ${from} → ${to}`);
+        });
+      } else {
+        const from = repRow.fromLocation?.trim() || "?";
+        const to = repRow.toLocation?.trim() || "?";
+        const dateStr = formatLegDate(repRow.travelDate);
+        lines.push(`  📍 ${dateStr}:  ${from} → ${to}`);
+      }
+
+      // Use rep row for metadata (pax, client, guide, remarks)
+      const pax = repRow.passengerCount ? `${repRow.passengerCount} pax` : "";
+      const cName = clientName(repRow);
+      const cPhone = clientPhone(repRow);
+      const guide = repRow.tourGuide?.trim() || "";
+      const remarks = repRow.details?.trim() || "";
+
+      if (pax) lines.push(`  👥 ${pax}`);
+      if (cName) lines.push(`  👤 ${cName}${cPhone ? `  |  📞 ${cPhone}` : ""}`);
+      if (guide) lines.push(`  🧑‍✈️ Guide: ${guide}`);
+      if (remarks) lines.push(`  📝 ${remarks}`);
     }
   }
 
@@ -186,20 +248,24 @@ function generateWhatsAppText(rows: BookingRow[], fullDateLabel: string): string
     for (const r of outsourced) {
       const from = r.fromLocation?.trim() || "?";
       const to = r.toLocation?.trim() || "?";
-      const company = r.outsourcedCompany?.trim() || "⚠️ No company";
+      const company = r.outsourcedCompany?.trim() || "⚠️ No company assigned";
       const pax = r.passengerCount ? ` · ${r.passengerCount} pax` : "";
-      const client = clientName(r) || "";
-      lines.push(`    • ${from} → ${to}  (${company}${pax})`);
-      if (client) lines.push(`      Client: ${client}`);
+      const cName = clientName(r);
+      const cPhone = clientPhone(r);
+      lines.push(``);
+      lines.push(`  • ${from} → ${to}  ·  ${company}${pax}`);
+      if (cName) lines.push(`    Client: ${cName}${cPhone ? `  |  📞 ${cPhone}` : ""}`);
+      const remarks = r.details?.trim() || "";
+      if (remarks) lines.push(`    📝 ${remarks}`);
     }
   }
 
   lines.push(``);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
-  const totalTrips = rows.length;
+  const totalTrips = dayRows.length;
   const inHouseCount = inHouse.length;
   const outCount = outsourced.length;
-  lines.push(`Total: ${totalTrips} trip${totalTrips !== 1 ? "s" : ""} · ${inHouseCount} in-house · ${outCount} outsourced`);
+  lines.push(`Total: ${totalTrips} booking${totalTrips !== 1 ? "s" : ""} · ${inHouseCount} in-house · ${outCount} outsourced`);
 
   return lines.join("\n");
 }
@@ -222,6 +288,7 @@ export default function DailyJobsPage() {
   const [deleteInvoiceState, setDeleteInvoiceState] = useState<"idle" | "confirm" | "deleting">("idle");
   const [whatsappOpen, setWhatsappOpen] = useState(false);
   const [whatsappCopied, setWhatsappCopied] = useState(false);
+  const [whatsappLegs, setWhatsappLegs] = useState<BookingRow[]>([]);
   const allInvoiceNos = useMemo(
     () => [...new Set(rows.map((r) => r.invoiceNo).filter(Boolean))] as string[],
     [rows],
@@ -482,7 +549,7 @@ export default function DailyJobsPage() {
   const COL_HEADERS = [
     "Invoice #", "Client Name", "Client Phone", "Location",
     "Type", "Description", "Van Plate", "Driver Name", "Driver Contact",
-    "Tour Guide", "Pax", "Overtime", "I/O", "Outsourced Co.", "Amount (MYR)", "P/U", "",
+    "Tour Guide", "Remarks", "Pax", "Overtime", "I/O", "Outsourced Co.", "Amount (MYR)", "P/U", "",
   ];
 
   function TripTable({ groupRows }: { groupRows: BookingRow[] }) {
@@ -549,6 +616,10 @@ export default function DailyJobsPage() {
                 {/* Tour Guide */}
                 <td className="px-3 py-2 min-w-[120px]">
                   <EditableText id={row.id} field="tourGuide" value={row.tourGuide} placeholder="—" />
+                </td>
+                {/* Remarks */}
+                <td className="px-3 py-2 min-w-[160px]">
+                  <EditableText id={row.id} field="details" value={row.details} placeholder="Add remarks…" />
                 </td>
                 {/* Pax */}
                 <td className="px-3 py-2 min-w-[72px]">
@@ -754,7 +825,23 @@ export default function DailyJobsPage() {
               + Add Row
             </button>
             <button
-              onClick={() => { setWhatsappCopied(false); setWhatsappOpen(true); }}
+              onClick={async () => {
+                setWhatsappCopied(false);
+                const invoiceSet = new Set(rows.map(r => r.invoiceNo).filter(Boolean));
+                try {
+                  const res = await fetch("/api/bookings");
+                  if (res.ok) {
+                    const all: BookingRow[] = await res.json();
+                    const legs = all.filter(r => r.invoiceNo && invoiceSet.has(r.invoiceNo));
+                    setWhatsappLegs(legs.length ? legs : rows);
+                  } else {
+                    setWhatsappLegs(rows);
+                  }
+                } catch {
+                  setWhatsappLegs(rows);
+                }
+                setWhatsappOpen(true);
+              }}
               className="h-9 px-4 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors"
             >
               📱 WhatsApp
@@ -898,14 +985,14 @@ export default function DailyJobsPage() {
                 <textarea
                   readOnly
                   className="w-full h-80 text-sm font-mono text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-xl p-3 resize-none focus:outline-none"
-                  value={generateWhatsAppText(rows, fullDateLabel)}
+                  value={generateWhatsAppText(whatsappLegs.length ? whatsappLegs : rows, rows, fullDateLabel)}
                 />
               </div>
               {/* Footer */}
               <div className="px-5 pb-5 flex gap-3">
                 <button
                   onClick={async () => {
-                    await navigator.clipboard.writeText(generateWhatsAppText(rows, fullDateLabel));
+                    await navigator.clipboard.writeText(generateWhatsAppText(whatsappLegs.length ? whatsappLegs : rows, rows, fullDateLabel));
                     setWhatsappCopied(true);
                     setTimeout(() => setWhatsappCopied(false), 2500);
                   }}
