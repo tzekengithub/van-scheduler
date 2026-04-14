@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-
-const LOCATIONS = ["KL", "Singapore", "Penang", "Johor Bahru", "Ipoh", "Melaka", "Kuantan", "Kota Kinabalu", "Kuching", "Other"];
+import { locationConfig } from "@/lib/config";
 
 interface Van {
   id: number;
@@ -239,7 +238,7 @@ export default function DashboardPage() {
               type="text"
               value={newPlate}
               onChange={(e) => setNewPlate(e.target.value)}
-              placeholder="e.g. VKB 8468"
+              placeholder="e.g. VAN-001"
               required
               className="h-9 w-36 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400 uppercase"
             />
@@ -247,7 +246,7 @@ export default function DashboardPage() {
               type="text"
               value={newDriverName}
               onChange={(e) => setNewDriverName(e.target.value)}
-              placeholder="e.g. Lee Yoke Khuan"
+              placeholder="e.g. Driver Name"
               required
               className="h-9 flex-1 min-w-[160px] px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
@@ -272,7 +271,7 @@ export default function DashboardPage() {
               className="h-9 px-2 rounded-lg border border-zinc-300 text-sm text-zinc-900 bg-white focus:outline-none focus:ring-2 focus:ring-zinc-400"
             >
               <option value="">📍 Base</option>
-              {LOCATIONS.map((l) => <option key={l} value={l}>{l}</option>)}
+              {locationConfig.map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
             <div className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700">
               <span className="text-zinc-500">👥</span>

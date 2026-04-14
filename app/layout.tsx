@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { UploadProvider } from "./upload-context";
 import ChatPanel from "@/components/ChatPanel";
+import { config } from "@/lib/config";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Van Scheduler",
-  description: "Smart van booking management dashboard",
+  title: config.company.name + " — Van Scheduler",
+  description: "Van scheduling and booking management for " + config.company.name,
 };
 
 export default function RootLayout({

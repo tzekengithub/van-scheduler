@@ -4,12 +4,9 @@ import { vans } from "@/drizzle/schema";
 import { eq } from "drizzle-orm";
 
 const DEFAULT_VANS = [
-  { vanNumber: "VKE 8518", driverName: "Chang Zi-Kang (Jordan)", driverContact: "", singaporeEnabled: 1, thailandEnabled: 0 },
-  { vanNumber: "VKB 8468", driverName: "Lee Yoke Khuan (Tiger)",  driverContact: "", singaporeEnabled: 0, thailandEnabled: 1 },
-  { vanNumber: "VKB 8158", driverName: "Wong Chee Khen (Kenji)",  driverContact: "", singaporeEnabled: 0, thailandEnabled: 1 },
-  { vanNumber: "VKB 8518", driverName: "Wong Kim Long (Mark)",    driverContact: "", singaporeEnabled: 0, thailandEnabled: 0 },
-  { vanNumber: "VPK 8138", driverName: "Wong Pak Woon (Ivan)",    driverContact: "", singaporeEnabled: 0, thailandEnabled: 0 },
-  { vanNumber: "VNK 8348", driverName: "Look Swee Yit (Luke)",    driverContact: "", singaporeEnabled: 0, thailandEnabled: 1 },
+  { vanNumber: "VAN-001", driverName: "Driver 1", driverContact: "", singaporeEnabled: 0, thailandEnabled: 0 },
+  { vanNumber: "VAN-002", driverName: "Driver 2", driverContact: "", singaporeEnabled: 0, thailandEnabled: 0 },
+  { vanNumber: "VAN-003", driverName: "Driver 3", driverContact: "", singaporeEnabled: 0, thailandEnabled: 0 },
 ];
 
 export async function POST() {

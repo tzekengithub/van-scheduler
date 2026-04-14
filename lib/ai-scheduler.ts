@@ -21,6 +21,7 @@ import { eq, isNotNull, inArray } from "drizzle-orm";
 import { recheckAllVans, runConstraintChecks, runMidLayerChecks } from "@/lib/recheck";
 import { runReassign } from "@/lib/reassign";
 import { getActiveRules } from "@/lib/scheduling-rules";
+import { config } from "@/lib/config";
 
 export interface AiReasoningEntry {
   bookingId: number;
@@ -39,7 +40,7 @@ export interface AiRecheckResult {
 const CHUNK_SIZE = 50;
 
 const SYSTEM_PROMPT = `You are a van scheduling optimizer for a Malaysian transport company
-called Excellent Travel. You assign vans to trip bookings.
+called ${config.company.name}. You assign vans to trip bookings.
 
 THE FLEET:
 You will receive the current van list in each request.

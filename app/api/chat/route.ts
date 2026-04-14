@@ -5,6 +5,7 @@ import { bookings, vans } from "@/drizzle/schema";
 import { eq } from "drizzle-orm";
 import { saveRule, getActiveRules } from "@/lib/scheduling-rules";
 import { aiRecheckAllVans } from "@/lib/ai-scheduler";
+import { config } from "@/lib/config";
 
 export const runtime = "nodejs";
 
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
           ? `\nCURRENT SCHEDULE DATA:\n${scheduleContext}\n`
           : "";
 
-        const systemContent = `You are the scheduling assistant for Excellent Travel, a Malaysian van transport company.
+        const systemContent = `You are the scheduling assistant for ${config.company.name}, a Malaysian van transport company.
 
 YOUR CAPABILITIES:
 - Answer questions about bookings, vans, drivers, and conflicts

@@ -1,3 +1,5 @@
+import { pdfConfig } from "@/lib/config";
+
 export type TripType = "one_way_ride" | "round_trip" | "day_trip" | "trip";
 
 export interface ParsedBooking {
@@ -179,7 +181,8 @@ export function parseRawText(text: string): ParsedBooking[] {
   }
 
   // ── Client Details ──────────────────────────────────────────────────────────
-  const COMPANY_PHONE = "+60 12-606 1728";
+  const shouldSkipLine = (line: string) =>
+    pdfConfig.skipLineContaining.some((skip) => line.includes(skip));
   let bookIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     if (/^BOOK\d+/.test(lines[i])) { bookIdx = i; break; }
@@ -200,7 +203,7 @@ export function parseRawText(text: string): ParsedBooking[] {
         const line = lines[i];
         if (/^\d+\./.test(line)) break;
         if (/COMPANY POLICY|No Booking Details|Booking Details/i.test(line)) break;
-        if (line === COMPANY_PHONE) continue;
+        if (shouldSkipLine(line)) continue;
         if (line === "No") continue;
         if (/^client'?s?\s*details?$/i.test(line)) continue;
         if (/^\+6[05\d][\d\s-]{6,}/.test(line)) {
@@ -224,7 +227,7 @@ export function parseRawText(text: string): ParsedBooking[] {
           l.includes("No Booking Details") ||
           l.includes("Booking Details")
         ) break;
-        if (l === COMPANY_PHONE) continue;
+        if (shouldSkipLine(l)) continue;
         if (l === "No") continue;
         if (/^client'?s?\s*details?$/i.test(l)) continue;
         clientDetailLines.push(l);
