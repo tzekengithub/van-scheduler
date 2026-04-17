@@ -59,6 +59,13 @@ export type NewVan = typeof vans.$inferInsert;
 export type Booking = typeof bookings.$inferSelect;
 export type NewBooking = typeof bookings.$inferInsert;
 
+export const invoiceCounters = pgTable("invoice_counters", {
+  id: serial("id").primaryKey(),
+  yearMonth: text("year_month").notNull().unique(), // "202604"
+  seq: integer("seq").notNull().default(0),
+});
+export type InvoiceCounter = typeof invoiceCounters.$inferSelect;
+
 export const schedulingRules = pgTable("scheduling_rules", {
   id: serial("id").primaryKey(),
   ruleText: text("rule_text").notNull(),

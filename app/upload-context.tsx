@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
-interface PreviewBooking {
+export interface PreviewBooking {
   travelDate: string;
   day: string;
   month: string;
@@ -31,6 +31,7 @@ interface UploadContextValue {
   serviceStatus: "unknown" | "cold" | "starting" | "ready" | "error";
   parsing: boolean;
   previewRows: PreviewBooking[] | null;
+  setPreviewRows: (rows: PreviewBooking[] | null) => void;
 }
 
 const UploadContext = createContext<UploadContextValue | null>(null);
@@ -369,7 +370,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const showPanel = uploadOpen || parsing || previewRows !== null || confirming || uploadResults !== null;
 
   return (
-    <UploadContext.Provider value={{ uploadOpen, setUploadOpen, serviceStatus, parsing, previewRows }}>
+    <UploadContext.Provider value={{ uploadOpen, setUploadOpen, serviceStatus, parsing, previewRows, setPreviewRows }}>
       {children}
 
       {/* ── Floating upload panel (persists across page navigation) ── */}

@@ -139,8 +139,8 @@ function detect15PaxTrip(bookingDetails: string, annotationLine: string): 0 | 1 
 
 /**
  * Determine tripType from booking details and annotation.
- * "one_way" if details/annotation contain "one-way" or "one way" (case-insensitive).
- * Everything else → "trip".
+ * Only two types: one_way_ride or trip.
+ * Day trips are always "trip" — one-way annotation on a day trip is ignored.
  */
 function detectTripType(
   bookingDetails: string,
@@ -149,6 +149,10 @@ function detectTripType(
 ): TripType {
   const lower = bookingDetails.toLowerCase();
   const annotLower = annotationLine.toLowerCase();
+  // Day trip route — always "trip" regardless of annotations
+  if (lower.includes("day trip") || lower.includes("day-trip")) {
+    return "trip";
+  }
   if (
     lower.includes("one-way") || lower.includes("one way") ||
     annotLower.includes("one-way") || annotLower.includes("one way")
