@@ -61,12 +61,11 @@ export async function POST(request: NextRequest) {
 
   const html = buildInvoiceHtml(invoice);
 
-  const pdfResp = await fetch("https://api.html2pdf.app/v1/generate", {
+  const pdfResp = await fetch(`https://api.html2pdf.app/v1/generate?apikey=${HTML2PDF_API_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       html,
-      apiKey: HTML2PDF_API_KEY,
       format: "A4",
       landscape: false,
       margin_top: "0",
