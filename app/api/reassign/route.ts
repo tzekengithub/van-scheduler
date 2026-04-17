@@ -1,19 +1,7 @@
-import { aiRecheckAllVans } from "@/lib/ai-scheduler";
+import { recheckAllVans } from "@/lib/recheck";
 
 export const runtime = "nodejs";
 
-/**
- * POST /api/reassign
- *
- * Streams real-time log lines as Server-Sent Events while running the full
- * AI-powered recheck from scratch. Falls back to the rules engine if AI fails.
- *
- * SSE event format:
- *   data: <log line>\n\n               — a log message (JSON-encoded string)
- *   data: "[AI_SUMMARY]{...}"\n\n      — JSON payload with summary + reasoning
- *   data: "[DONE]"\n\n                 — recheck finished successfully
- *   data: "[ERROR] <message>"\n\n      — recheck failed
- */
 export async function POST() {
   const encoder = new TextEncoder();
 
@@ -24,8 +12,7 @@ export async function POST() {
       };
 
       try {
-        const result = await aiRecheckAllVans(send);
-        send(`[AI_SUMMARY]${JSON.stringify({ summary: result.summary, reasoning: result.reasoning })}`);
+        await recheckAllVans(send);
         send("[DONE]");
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);

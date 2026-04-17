@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { bookings } from "@/drizzle/schema";
-import { aiRecheckAllVans } from "@/lib/ai-scheduler";
+import { recheckAllVans } from "@/lib/recheck";
 import type { ParsedBooking } from "@/lib/pdf-parser";
 
 export const runtime = "nodejs";
@@ -65,15 +65,10 @@ export async function POST(request: NextRequest) {
 
         send({ type: "recheck" });
 
-        // Pass the newly inserted IDs so the AI knows which bookings are new.
-        // Existing assigned bookings are still visible to the AI (for bumping)
-        // but flagged as isNew=false — it won't touch them unless a new
-        // higher-priority trip needs their exact van+date slot.
-        const { summary, reasoning } = await aiRecheckAllVans((msg) => {
+        await recheckAllVans((msg) => {
           send({ type: "recheck_log", message: msg });
-        }, insertedIds);
+        });
 
-        send({ type: "ai_summary", summary, reasoning });
         send({ type: "done", inserted: rows.length });
         controller.close();
       } catch (error: any) {
