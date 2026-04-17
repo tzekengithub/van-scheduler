@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, isNull, isNotNull, inArray, asc, ne, or } from "drizzle-orm";
-import { smartAssignVan, AssignResult, detectTripRequirements } from "@/lib/van-assignment";
+import { detectTripRequirements } from "@/lib/van-assignment";
 
 /**
  * Two priority tiers — the only trip types the system uses:
@@ -26,6 +26,9 @@ function bumpableTypes(tripType: string | null | undefined): readonly string[] {
 /**
  * Reassign vans to unassigned bookings.
  *
+ * Pure in-memory scheduling — no per-booking DB queries, no AI calls.
+ * Loads all vans + assigned bookings once upfront, then runs entirely in memory.
+ *
  * @param bookingIds - If provided, only process these specific booking IDs.
  *                     If omitted, process ALL bookings where vanId IS NULL
  *                     and manualChange = 0.
@@ -44,7 +47,7 @@ export async function runReassign(
   logger?: (msg: string) => void,
 ): Promise<{ assigned: number; conflicts: number }> {
   const log = (msg: string) => { console.log(msg); logger?.(msg); };
-  const allVans = await db.select().from(vans);
+  const allVans = await db.select().from(vans).orderBy(vans.id);
   const vanMap = new Map(allVans.map((v) => [v.id, v]));
 
   // ── Fetch target bookings (Car trips are always outsourced — skip them) ──────
@@ -60,7 +63,7 @@ export async function runReassign(
           .from(bookings)
           .where(and(isNull(bookings.vanId), eq(bookings.manualChange, 0), notCarTrip));
 
-  // Sort: date ASC, then priority (day_trip first within each date), then invoice/vehicleIndex
+  // Sort: date ASC, then priority (trip first within each date), then invoice/vehicleIndex
   const targetBookings = [...raw].sort((a, b) => {
     if (a.travelDate !== b.travelDate)
       return a.travelDate.localeCompare(b.travelDate);
@@ -72,10 +75,8 @@ export async function runReassign(
     return (a.vehicleIndex ?? 1) - (b.vehicleIndex ?? 1);
   });
 
-  // Pre-load all currently assigned bookings for bump candidate lookup.
-  // Keyed by "travelDate::tripType" → [{id, vanId, from, to}]. Updated as the loop runs.
-  // fromLocation/toLocation are needed so the SG/TH override bump can skip victims
-  // that themselves need the same specialty (no zero-sum swaps).
+  // Pre-load all currently assigned bookings — used for both bump candidates and
+  // in-memory scheduling. Fetched once; never re-queried per booking.
   const existingAssigned = await db
     .select({
       id: bookings.id,
@@ -85,6 +86,9 @@ export async function runReassign(
       fromLocation: bookings.fromLocation,
       toLocation: bookings.toLocation,
       is15PaxTrip: bookings.is15PaxTrip,
+      invoiceNo: bookings.invoiceNo,
+      vehicleIndex: bookings.vehicleIndex,
+      isAlphardTrip: bookings.isAlphardTrip,
     })
     .from(bookings)
     .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
@@ -103,27 +107,105 @@ export async function runReassign(
     });
   }
 
+  // ── In-memory scheduling structures ──────────────────────────────────────────
+  // Replaces 3 DB queries + 1 AI call that smartAssignVan made per booking.
+
+  // "vanId::travelDate" → occupied; updated as we assign
+  const occupiedSlots = new Set<string>(
+    existingAssigned.map((b) => `${b.vanId}::${b.travelDate}`)
+  );
+
+  // "invoiceNo::vehicleIndex" → preferred vanId (for multi-day continuity)
+  const invoiceVanPreference = new Map<string, number>();
+  for (const b of existingAssigned) {
+    if (b.invoiceNo) {
+      const key = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
+      if (!invoiceVanPreference.has(key)) invoiceVanPreference.set(key, b.vanId!);
+    }
+  }
+
+  // vanId → last toLocation (routing continuity hint); most-recent-date wins
+  const vanLastDropOff = new Map<number, string | null>();
+  const sortedByDateDesc = [...existingAssigned].sort((a, b) =>
+    b.travelDate.localeCompare(a.travelDate)
+  );
+  for (const b of sortedByDateDesc) {
+    if (b.vanId != null && !vanLastDropOff.has(b.vanId))
+      vanLastDropOff.set(b.vanId, b.toLocation ?? null);
+  }
+  for (const van of allVans) {
+    if (!vanLastDropOff.has(van.id)) vanLastDropOff.set(van.id, null);
+  }
+
+  // Lookup map for bumped victim data (avoids per-ID DB query in second pass)
+  const existingById = new Map(existingAssigned.map((b) => [b.id, b]));
+
+  // Track which bumped victims are still unassigned (vanId cleared in DB)
+  const bumpedAndUnassigned = new Set<number>();
+
+  // ── Pure in-memory van selection ───────────────────────────────────────────
+  // Mirrors smartAssignVan's decision logic without any DB/AI calls.
+  function findBestVan(
+    travelDate: string,
+    fromLocation: string | null,
+    toLocation: string | null,
+    invoiceNo: string,
+    vehicleIndex: number,
+    isAlphardTrip: boolean,
+    is15PaxTrip: boolean,
+  ): number | null {
+    const { needsSingapore, needsThailand } = detectTripRequirements(
+      fromLocation ?? "", toLocation ?? ""
+    );
+
+    // allVans already sorted by id — lowest id wins ties
+    const eligible = allVans.filter((van) => {
+      if (needsSingapore && van.singaporeEnabled !== 1) return false;
+      if (needsThailand && van.thailandEnabled !== 1) return false;
+      const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+      if (isAlphardTrip && !isVanAlphard) return false;
+      if (!isAlphardTrip && isVanAlphard) return false;
+      if (is15PaxTrip && (van.maxPaxCapacity ?? 0) < 15) return false;
+      return true;
+    });
+
+    const free = eligible.filter((v) => !occupiedSlots.has(`${v.id}::${travelDate}`));
+    if (free.length === 0) return null;
+
+    // 1. Prefer van already used by this invoice+vehicleIndex (multi-day continuity)
+    const preferredVanId = invoiceVanPreference.get(`${invoiceNo}::${vehicleIndex}`);
+    if (preferredVanId) {
+      const pref = free.find((v) => v.id === preferredVanId);
+      if (pref) return pref.id;
+    }
+
+    // 2. Prefer van whose last drop-off matches fromLocation (routing continuity)
+    if (fromLocation) {
+      const locationMatch = free.find((v) => vanLastDropOff.get(v.id) === fromLocation);
+      if (locationMatch) return locationMatch.id;
+    }
+
+    // 3. Lowest id
+    return free[0].id;
+  }
+
   let assigned = 0;
   let conflicts = 0;
-  const bumpedIds: number[] = []; // bookings displaced by a day_trip — need a retry
+  const bumpedIds: number[] = [];
 
   // ── Main pass ────────────────────────────────────────────────────────────────
   for (const b of targetBookings) {
     if (b.manualChange === 1) continue;
 
-    const assignResult: AssignResult = await smartAssignVan(
+    const vanId = findBestVan(
       b.travelDate,
       b.fromLocation,
       b.toLocation,
       b.invoiceNo ?? "",
       b.vehicleIndex ?? 1,
-      b.numberOfVehicles ?? 1,
-      b.tripType,
       b.isAlphardTrip === 1,
-      b.vehicleCategory,
       (b.is15PaxTrip ?? 0) === 1,
     );
-    const vanId = typeof assignResult === "number" ? assignResult : null;
 
     if (vanId != null) {
       // ── Normal assignment ──────────────────────────────────────────────────
@@ -140,6 +222,14 @@ export async function runReassign(
         })
         .where(eq(bookings.id, b.id));
 
+      // Update in-memory state
+      occupiedSlots.add(`${vanId}::${b.travelDate}`);
+      if (b.invoiceNo) {
+        const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
+        if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, vanId);
+      }
+      vanLastDropOff.set(vanId, b.toLocation ?? null);
+
       const assignKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
       if (!bumpIndex.has(assignKey)) bumpIndex.set(assignKey, []);
       bumpIndex.get(assignKey)!.push({
@@ -154,8 +244,6 @@ export async function runReassign(
       assigned++;
     } else {
       // ── No free van: attempt to bump a lower-priority booking ─────────────
-      // Rule: higher priority MUST get a van. Search bumpableTypes() in order
-      // (lowest priority first) for a same-date booking to displace.
       const { needsSingapore, needsThailand } = detectTripRequirements(b.fromLocation, b.toLocation);
       const isAlphard = b.isAlphardTrip === 1;
       const needs15Pax = (b.is15PaxTrip ?? 0) === 1;
@@ -198,6 +286,12 @@ export async function runReassign(
             })
             .where(eq(bookings.id, b.id));
 
+          // Slot stays occupied (now by b). Update invoice preference for b.
+          if (b.invoiceNo) {
+            const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
+            if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, bumpedVanId);
+          }
+
           const victimKey = `${b.travelDate}::${bumpType}`;
           bumpIndex.set(victimKey, (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id));
           const winnerKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
@@ -213,6 +307,7 @@ export async function runReassign(
           log(`[runReassign] BUMP    ${b.tripType} id=${b.id} date=${b.travelDate} displaced ${bumpType} id=${victim.id} → van ${bumpedVanId} (${van?.vanNumber ?? "?"})`);
 
           bumpedIds.push(victim.id);
+          bumpedAndUnassigned.add(victim.id);
           assigned++;
           bumped = true;
           break;
@@ -220,13 +315,7 @@ export async function runReassign(
       }
 
       // ── SG/TH override bump ─────────────────────────────────────────────
-      // If no same-priority victim was found and this booking needs Singapore
-      // or Thailand capability, the LOCATION-BASED OVERRIDE rule allows it to
-      // displace ANY non-SG/TH booking on a capable van, regardless of the
-      // victim's priority tier. This ensures SG/TH trips are outsourced ONLY
-      // when every capable van is already holding another SG/TH trip.
       if (!bumped && (needsSingapore || needsThailand)) {
-        // Collect all same-date candidates across both tripType buckets.
         const allSameDate: Array<BumpEntry & { tripType: string }> = [];
         for (const [key, entries] of bumpIndex.entries()) {
           const [date, tripType] = key.split("::");
@@ -240,14 +329,11 @@ export async function runReassign(
         const victim = allSameDate.find((c) => {
           const van = vanMap.get(c.vanId);
           if (!van) return false;
-          // Van must have the needed capability and correct vehicle type.
           if (needsSingapore && van.singaporeEnabled !== 1) return false;
           if (needsThailand && van.thailandEnabled !== 1) return false;
           const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
           if (isAlphard && !isVanAlphard) return false;
           if (!isAlphard && isVanAlphard) return false;
-          // Victim must NOT itself need the same specialty — otherwise the
-          // displaced booking would immediately need the same kind of van.
           const victimReq = detectTripRequirements(c.fromLocation, c.toLocation);
           if (needsSingapore && victimReq.needsSingapore) return false;
           if (needsThailand && victimReq.needsThailand) return false;
@@ -275,6 +361,11 @@ export async function runReassign(
             })
             .where(eq(bookings.id, b.id));
 
+          if (b.invoiceNo) {
+            const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
+            if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, bumpedVanId);
+          }
+
           const victimKey = `${b.travelDate}::${victim.tripType}`;
           bumpIndex.set(
             victimKey,
@@ -295,17 +386,13 @@ export async function runReassign(
           );
 
           bumpedIds.push(victim.id);
+          bumpedAndUnassigned.add(victim.id);
           assigned++;
           bumped = true;
         }
       }
 
       // ── 15-pax override bump ─────────────────────────────────────────────
-      // A 15-pax booking that cannot find a free 15-seater may displace ANY
-      // non-15-pax booking currently occupying a 15-seater van on the same date,
-      // regardless of that booking's priority tier.  This mirrors the SG/TH rule:
-      // the 15-seater should only outsource when every 15-seater is already held
-      // by another 15-pax trip.
       if (!bumped && needs15Pax) {
         const allSameDate: Array<BumpEntry & { tripType: string }> = [];
         for (const [key, entries] of bumpIndex.entries()) {
@@ -324,7 +411,6 @@ export async function runReassign(
           const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
           if (isAlphard && !isVanAlphard) return false;
           if (!isAlphard && isVanAlphard) return false;
-          // Only displace non-15-pax occupants — never bump another 15-pax trip
           if ((c.is15PaxTrip ?? 0) === 1) return false;
           return true;
         });
@@ -350,6 +436,11 @@ export async function runReassign(
             })
             .where(eq(bookings.id, b.id));
 
+          if (b.invoiceNo) {
+            const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
+            if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, bumpedVanId);
+          }
+
           const victimKey = `${b.travelDate}::${victim.tripType}`;
           bumpIndex.set(victimKey, (bumpIndex.get(victimKey) ?? []).filter((c) => c.id !== victim.id));
           const winnerKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
@@ -367,6 +458,7 @@ export async function runReassign(
           );
 
           bumpedIds.push(victim.id);
+          bumpedAndUnassigned.add(victim.id);
           assigned++;
           bumped = true;
         }
@@ -383,35 +475,27 @@ export async function runReassign(
     }
   }
 
-  // ── Second pass: retry bumped bookings (no bumping rights) ──────────────────
+  // ── Second pass: retry bumped bookings (no bumping rights, no DB queries) ────
   if (bumpedIds.length > 0) {
     log(
       `[runReassign] second pass: retrying ${bumpedIds.length} bumped booking(s)`
     );
 
     for (const bumpedId of bumpedIds) {
-      const [b] = await db
-        .select()
-        .from(bookings)
-        .where(eq(bookings.id, bumpedId))
-        .limit(1);
+      if (!bumpedAndUnassigned.has(bumpedId)) continue; // already re-assigned
 
-      // Skip if already reassigned, manual, or missing
-      if (!b || b.manualChange === 1 || b.vanId != null) continue;
+      const b = existingById.get(bumpedId);
+      if (!b) continue;
 
-      const retryResult: AssignResult = await smartAssignVan(
+      const vanId = findBestVan(
         b.travelDate,
-        b.fromLocation,
-        b.toLocation,
+        b.fromLocation ?? null,
+        b.toLocation ?? null,
         b.invoiceNo ?? "",
         b.vehicleIndex ?? 1,
-        b.numberOfVehicles ?? 1,
-        b.tripType,
-        b.isAlphardTrip === 1,
-        b.vehicleCategory,
+        (b.isAlphardTrip ?? 0) === 1,
         (b.is15PaxTrip ?? 0) === 1,
       );
-      const vanId = typeof retryResult === "number" ? retryResult : null;
 
       if (vanId != null) {
         const van = vanMap.get(vanId);
@@ -426,6 +510,13 @@ export async function runReassign(
             outsourcedCompany: "",
           })
           .where(eq(bookings.id, b.id));
+
+        occupiedSlots.add(`${vanId}::${b.travelDate}`);
+        if (b.invoiceNo) {
+          const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
+          if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, vanId);
+        }
+        bumpedAndUnassigned.delete(bumpedId);
 
         log(
           `[runReassign] RETRY-OK id=${b.id} ${b.invoiceNo ?? "no-inv"} date=${b.travelDate} → van ${vanId} (${van?.vanNumber ?? "?"})`
