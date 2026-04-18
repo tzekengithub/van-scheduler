@@ -120,15 +120,121 @@ function formatBriefDate(travelDate: string): string {
   return `${d.getDate()}/${d.getMonth() + 1}`;
 }
 
-function generateWhatsAppText(
-  allLegs: BookingRow[],   // all legs for invoices active today (may span multiple dates)
-  dayRows: BookingRow[],   // today's rows only
-  fullDateLabel: string
-): string {
+function buildInvBlock(invKey: string, allInvLegs: BookingRow[], repRow: BookingRow): string {
   const lines: string[] = [];
 
-  lines.push(`📅 *${fullDateLabel}*`);
+  // Deduplicate legs by date+route (multi-van rows share same date/route)
+  const seenLegKeys = new Set<string>();
+  const uniqueLegs: BookingRow[] = [];
+  for (const leg of allInvLegs) {
+    const k = `${leg.travelDate}|${leg.fromLocation}|${leg.toLocation}`;
+    if (!seenLegKeys.has(k)) { seenLegKeys.add(k); uniqueLegs.push(leg); }
+  }
+
+  const isMultiDay = uniqueLegs.length > 1;
+  const isMultiVan = (repRow.numberOfVehicles ?? 1) > 1 ||
+    new Set(allInvLegs.map(r => r.vehicleIndex ?? 1)).size > 1;
+
+  // Collect one driver row per vehicleIndex
+  const driverByVehicle = new Map<number, BookingRow>();
+  for (const leg of allInvLegs) {
+    const vi = leg.vehicleIndex ?? 1;
+    if (!driverByVehicle.has(vi) && (leg.driverName || leg.vehiclePlate || leg.vanNumber)) {
+      driverByVehicle.set(vi, leg);
+    }
+  }
+
+  // ── Itinerary ──
+  if (isMultiDay) {
+    for (const leg of uniqueLegs) {
+      const d = formatBriefDate(leg.travelDate);
+      const from = leg.fromLocation?.trim() || "?";
+      const to = leg.toLocation?.trim() || "?";
+      if (leg.tripType === "day_trip") {
+        lines.push(`${d} - ${from} Day Trip`);
+      } else {
+        lines.push(`${d} - ${from} → ${to}`);
+      }
+    }
+  } else {
+    lines.push(formatBriefDate(repRow.travelDate));
+    lines.push(``);
+    lines.push(`_______`);
+    lines.push(``);
+    const from = repRow.fromLocation?.trim() || "";
+    const to = repRow.toLocation?.trim() || "";
+    if (repRow.tripType === "day_trip") {
+      lines.push(`Day Trip: ${from}`);
+    } else {
+      if (from) { lines.push(`From:`); lines.push(from); }
+      lines.push(``);
+      if (to) { lines.push(`To:`); lines.push(to); }
+    }
+  }
+
   lines.push(``);
+
+  // ── Pax ──
+  if (repRow.passengerCount) lines.push(`${repRow.passengerCount} pax with luggage`);
+
+  // ── Remarks ──
+  const remarks = repRow.details?.trim() || "";
+  if (remarks) { lines.push(``); lines.push(remarks); }
+
+  // ── Client contact ──
+  const cName = clientName(repRow);
+  const cPhone = clientPhone(repRow);
+  if (cName || cPhone) {
+    lines.push(``);
+    lines.push(`Guest contact:`);
+    if (cName && cPhone) lines.push(`${cName} - ${cPhone}`);
+    else lines.push(cName || cPhone);
+  }
+
+  // ── Tour guide ──
+  const guide = repRow.tourGuide?.trim() || "";
+  if (guide) { lines.push(``); lines.push(`Tour Guide: ${guide}`); }
+
+  lines.push(``);
+
+  // ── Driver info ──
+  if (isMultiVan) {
+    const numVans = repRow.numberOfVehicles ?? driverByVehicle.size;
+    const viList = [...new Set([...Array.from(driverByVehicle.keys()), ...Array.from({length: numVans}, (_, i) => i + 1)])].sort((a, b) => a - b);
+    for (const vi of viList) {
+      const dr = driverByVehicle.get(vi);
+      const name = dr?.driverName?.trim() || "";
+      const contact = dr?.driverContact?.trim() || "";
+      const plate = dr?.vehiclePlate?.trim() || dr?.vanNumber?.trim() || "";
+      lines.push(`Van ${vi} Driver Information:`);
+      if (name) lines.push(name);
+      if (contact) lines.push(contact);
+      if (plate) lines.push(plate);
+      lines.push(``);
+    }
+  } else {
+    const dr = driverByVehicle.get(1) || repRow;
+    const name = dr.driverName?.trim() || "";
+    const contact = dr.driverContact?.trim() || "";
+    const plate = dr.vehiclePlate?.trim() || dr.vanNumber?.trim() || "";
+    if (name || contact || plate) {
+      lines.push(`Driver Information:`);
+      if (name) lines.push(name);
+      if (contact) lines.push(contact);
+      if (plate) lines.push(plate);
+    } else {
+      lines.push(`⚠️ No driver assigned`);
+    }
+  }
+
+  return lines.join("\n").trimEnd();
+}
+
+function generateWhatsAppBlocks(
+  allLegs: BookingRow[],
+  dayRows: BookingRow[]
+): { key: string; label: string; text: string }[] {
+  const blocks: { key: string; label: string; text: string }[] = [];
 
   const inHouse = dayRows.filter(
     (r) => r.inHouseOrOutsourced !== "O" && r.inHouseOrOutsourced !== "outsourced"
@@ -146,15 +252,12 @@ function generateWhatsAppText(
     invoiceMap.get(key)!.push(r);
   }
 
-  let first = true;
+  let jobIdx = 0;
   for (const invKey of invoiceOrder) {
-    if (!first) { lines.push(`─────────────────────`); lines.push(``); }
-    first = false;
-
+    jobIdx++;
     const todayLegs = invoiceMap.get(invKey)!;
     const repRow = todayLegs[0];
 
-    // Get all legs across dates for this invoice
     let allInvLegs: BookingRow[];
     if (invKey.startsWith("__solo_")) {
       allInvLegs = todayLegs;
@@ -165,115 +268,14 @@ function generateWhatsAppText(
       if (allInvLegs.length === 0) allInvLegs = todayLegs;
     }
 
-    // Deduplicate legs by date+route (multi-van rows share same date/route)
-    const seenLegKeys = new Set<string>();
-    const uniqueLegs: BookingRow[] = [];
-    for (const leg of allInvLegs) {
-      const key = `${leg.travelDate}|${leg.fromLocation}|${leg.toLocation}`;
-      if (!seenLegKeys.has(key)) { seenLegKeys.add(key); uniqueLegs.push(leg); }
-    }
-
-    const isMultiDay = uniqueLegs.length > 1;
-    const isMultiVan = (repRow.numberOfVehicles ?? 1) > 1 ||
-      new Set(allInvLegs.map(r => r.vehicleIndex ?? 1)).size > 1;
-
-    // Collect one driver row per vehicleIndex
-    const driverByVehicle = new Map<number, BookingRow>();
-    for (const leg of allInvLegs) {
-      const vi = leg.vehicleIndex ?? 1;
-      if (!driverByVehicle.has(vi) && (leg.driverName || leg.vehiclePlate || leg.vanNumber)) {
-        driverByVehicle.set(vi, leg);
-      }
-    }
-
-    // ── Itinerary ──
-    if (isMultiDay) {
-      for (const leg of uniqueLegs) {
-        const d = formatBriefDate(leg.travelDate);
-        const from = leg.fromLocation?.trim() || "?";
-        const to = leg.toLocation?.trim() || "?";
-        if (leg.tripType === "day_trip") {
-          lines.push(`${d} - ${from} Day Trip`);
-        } else {
-          lines.push(`${d} - ${from} → ${to}`);
-        }
-      }
-    } else {
-      lines.push(formatBriefDate(repRow.travelDate));
-      lines.push(``);
-      const from = repRow.fromLocation?.trim() || "";
-      const to = repRow.toLocation?.trim() || "";
-      if (repRow.tripType === "day_trip") {
-        lines.push(`Day Trip: ${from}`);
-      } else {
-        if (from) { lines.push(`From:`); lines.push(from); }
-        lines.push(``);
-        if (to) { lines.push(`To:`); lines.push(to); }
-      }
-    }
-
-    lines.push(``);
-
-    // ── Pax ──
-    if (repRow.passengerCount) lines.push(`${repRow.passengerCount} pax with luggage`);
-
-    // ── Remarks ──
-    const remarks = repRow.details?.trim() || "";
-    if (remarks) { lines.push(``); lines.push(remarks); }
-
-    // ── Client contact ──
-    const cName = clientName(repRow);
-    const cPhone = clientPhone(repRow);
-    if (cName || cPhone) {
-      lines.push(``);
-      lines.push(`Guest contact:`);
-      if (cName && cPhone) lines.push(`${cName} - ${cPhone}`);
-      else lines.push(cName || cPhone);
-    }
-
-    // ── Tour guide ──
-    const guide = repRow.tourGuide?.trim() || "";
-    if (guide) { lines.push(``); lines.push(`Tour Guide: ${guide}`); }
-
-    lines.push(``);
-
-    // ── Driver info ──
-    if (isMultiVan) {
-      const numVans = repRow.numberOfVehicles ?? driverByVehicle.size;
-      const viList = [...new Set([...Array.from(driverByVehicle.keys()), ...Array.from({length: numVans}, (_, i) => i + 1)])].sort((a, b) => a - b);
-      for (const vi of viList) {
-        const dr = driverByVehicle.get(vi);
-        const name = dr?.driverName?.trim() || "";
-        const contact = dr?.driverContact?.trim() || "";
-        const plate = dr?.vehiclePlate?.trim() || dr?.vanNumber?.trim() || "";
-        lines.push(`Van ${vi} Driver Information:`);
-        if (name) lines.push(name);
-        if (contact) lines.push(contact);
-        if (plate) lines.push(plate);
-        lines.push(``);
-      }
-    } else {
-      const dr = driverByVehicle.get(1) || repRow;
-      const name = dr.driverName?.trim() || "";
-      const contact = dr.driverContact?.trim() || "";
-      const plate = dr.vehiclePlate?.trim() || dr.vanNumber?.trim() || "";
-      if (name || contact || plate) {
-        lines.push(`Driver Information:`);
-        if (name) lines.push(name);
-        if (contact) lines.push(contact);
-        if (plate) lines.push(plate);
-      } else {
-        lines.push(`⚠️ No driver assigned`);
-      }
-      lines.push(``);
-    }
+    const label = invKey.startsWith("__solo_") ? `Job ${jobIdx}` : invKey;
+    blocks.push({ key: invKey, label, text: buildInvBlock(invKey, allInvLegs, repRow) });
   }
 
-  // ── Outsourced ──
+  // Outsourced block
   if (outsourced.length > 0) {
-    if (!first) { lines.push(`─────────────────────`); lines.push(``); }
-    first = false;
-    lines.push(`*OUTSOURCED (${outsourced.length})*`);
+    const lines: string[] = [];
+    lines.push(`OUTSOURCED (${outsourced.length})`);
     lines.push(``);
     for (const r of outsourced) {
       const from = r.fromLocation?.trim() || "?";
@@ -283,20 +285,33 @@ function generateWhatsAppText(
       const cName = clientName(r);
       const cPhone = clientPhone(r);
       lines.push(`• ${from} → ${to}  [${company}${pax}]`);
-      if (cName || cPhone) {
-        lines.push(`  Guest: ${cName}${cPhone ? ` - ${cPhone}` : ""}`);
-      }
+      if (cName || cPhone) lines.push(`  Guest: ${cName}${cPhone ? ` - ${cPhone}` : ""}`);
       const remarks = r.details?.trim() || "";
       if (remarks) lines.push(`  ${remarks}`);
       lines.push(``);
     }
+    blocks.push({ key: "__outsourced", label: `Outsourced (${outsourced.length})`, text: lines.join("\n").trimEnd() });
   }
 
-  // ── Footer ──
-  lines.push(`─────────────────────`);
-  lines.push(`Total: ${dayRows.length} booking${dayRows.length !== 1 ? "s" : ""} · ${inHouse.length} in-house · ${outsourced.length} outsourced`);
+  return blocks;
+}
 
-  return lines.join("\n");
+function generateWhatsAppText(
+  allLegs: BookingRow[],
+  dayRows: BookingRow[],
+  fullDateLabel: string
+): string {
+  const blocks = generateWhatsAppBlocks(allLegs, dayRows);
+  const inHouseCount = dayRows.filter(r => r.inHouseOrOutsourced !== "O" && r.inHouseOrOutsourced !== "outsourced").length;
+  const outCount = dayRows.length - inHouseCount;
+  const parts = [
+    `📅 *${fullDateLabel}*`,
+    ``,
+    ...blocks.flatMap((b, i) => i > 0 ? [`─────────────────────`, ``, b.text, ``] : [b.text, ``]),
+    `─────────────────────`,
+    `Total: ${dayRows.length} booking${dayRows.length !== 1 ? "s" : ""} · ${inHouseCount} in-house · ${outCount} outsourced`,
+  ];
+  return parts.join("\n");
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -316,8 +331,23 @@ export default function DailyJobsPage() {
   const [deleteInvoiceInput, setDeleteInvoiceInput] = useState("");
   const [deleteInvoiceState, setDeleteInvoiceState] = useState<"idle" | "confirm" | "deleting">("idle");
   const [whatsappOpen, setWhatsappOpen] = useState(false);
-  const [whatsappCopied, setWhatsappCopied] = useState(false);
+  const [whatsappCopied, setWhatsappCopied] = useState<Record<string, boolean>>({});
+  const [whatsappTexts, setWhatsappTexts] = useState<Record<string, string>>({});
   const [whatsappLegs, setWhatsappLegs] = useState<BookingRow[]>([]);
+
+  const whatsappBlocks = useMemo(
+    () => generateWhatsAppBlocks(whatsappLegs.length ? whatsappLegs : rows, rows),
+    [whatsappLegs, rows]
+  );
+
+  useEffect(() => {
+    if (whatsappOpen) {
+      const init: Record<string, string> = {};
+      for (const b of whatsappBlocks) init[b.key] = b.text;
+      setWhatsappTexts(init);
+      setWhatsappCopied({});
+    }
+  }, [whatsappOpen, whatsappBlocks]);
   const allInvoiceNos = useMemo(
     () => [...new Set(rows.map((r) => r.invoiceNo).filter(Boolean))] as string[],
     [rows],
@@ -855,7 +885,6 @@ export default function DailyJobsPage() {
             </button>
             <button
               onClick={async () => {
-                setWhatsappCopied(false);
                 const invoiceSet = new Set(rows.map(r => r.invoiceNo).filter(Boolean));
                 try {
                   const res = await fetch("/api/bookings");
@@ -1000,42 +1029,53 @@ export default function DailyJobsPage() {
         {/* WhatsApp export modal */}
         {whatsappOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 no-print" onClick={() => setWhatsappOpen(false)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
-              {/* Modal header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 bg-green-50">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 bg-green-50 shrink-0">
                 <div>
                   <div className="font-bold text-zinc-900 text-base">📱 WhatsApp Schedule</div>
                   <div className="text-xs text-zinc-500 mt-0.5">{fullDateLabel}</div>
                 </div>
                 <button onClick={() => setWhatsappOpen(false)} className="text-zinc-400 hover:text-zinc-700 text-xl font-bold leading-none px-1">×</button>
               </div>
-              {/* Text area */}
-              <div className="px-5 py-4">
-                <textarea
-                  readOnly
-                  className="w-full h-80 text-sm font-mono text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-xl p-3 resize-none focus:outline-none"
-                  value={generateWhatsAppText(whatsappLegs.length ? whatsappLegs : rows, rows, fullDateLabel)}
-                />
+              {/* Scrollable job blocks */}
+              <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+                {whatsappBlocks.length === 0 && (
+                  <div className="text-center py-8 text-zinc-400 text-sm">No bookings</div>
+                )}
+                {whatsappBlocks.map((block) => (
+                  <div key={block.key} className="border border-zinc-200 rounded-xl overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-zinc-50 border-b border-zinc-200">
+                      <span className="text-xs font-semibold text-zinc-600">{block.label}</span>
+                      <button
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(whatsappTexts[block.key] ?? block.text);
+                          setWhatsappCopied(prev => ({ ...prev, [block.key]: true }));
+                          setTimeout(() => setWhatsappCopied(prev => ({ ...prev, [block.key]: false })), 2500);
+                        }}
+                        className={`text-xs font-semibold px-3 py-1 rounded-lg transition-colors ${
+                          whatsappCopied[block.key]
+                            ? "bg-green-500 text-white"
+                            : "bg-green-600 text-white hover:bg-green-700"
+                        }`}
+                      >
+                        {whatsappCopied[block.key] ? "✓ Copied!" : "Copy"}
+                      </button>
+                    </div>
+                    <textarea
+                      className="w-full text-sm font-mono text-zinc-800 bg-white p-3 resize-none focus:outline-none focus:ring-1 focus:ring-green-400"
+                      rows={10}
+                      value={whatsappTexts[block.key] ?? block.text}
+                      onChange={(e) => setWhatsappTexts(prev => ({ ...prev, [block.key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
               </div>
               {/* Footer */}
-              <div className="px-5 pb-5 flex gap-3">
-                <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(generateWhatsAppText(whatsappLegs.length ? whatsappLegs : rows, rows, fullDateLabel));
-                    setWhatsappCopied(true);
-                    setTimeout(() => setWhatsappCopied(false), 2500);
-                  }}
-                  className={`flex-1 h-10 rounded-xl text-sm font-semibold transition-colors ${
-                    whatsappCopied
-                      ? "bg-green-500 text-white"
-                      : "bg-green-600 text-white hover:bg-green-700"
-                  }`}
-                >
-                  {whatsappCopied ? "✓ Copied!" : "Copy to Clipboard"}
-                </button>
+              <div className="px-5 py-3 border-t border-zinc-200 shrink-0">
                 <button
                   onClick={() => setWhatsappOpen(false)}
-                  className="h-10 px-5 rounded-xl text-sm font-medium border border-zinc-300 text-zinc-700 hover:bg-zinc-50 transition-colors"
+                  className="w-full h-10 rounded-xl text-sm font-medium border border-zinc-300 text-zinc-700 hover:bg-zinc-50 transition-colors"
                 >
                   Close
                 </button>
