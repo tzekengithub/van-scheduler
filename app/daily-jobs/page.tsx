@@ -113,29 +113,23 @@ function formatShortDate(day: string, month: string, year: string): string {
 
 // ── WhatsApp export ───────────────────────────────────────────────────────────
 
-function formatLegDate(travelDate: string): string {
-  // travelDate is "YYYY-MM-DD"; format as "DD/MM (Weekday)"
+function formatBriefDate(travelDate: string): string {
   if (!travelDate) return "";
   const d = new Date(travelDate + "T00:00:00");
   if (isNaN(d.getTime())) return travelDate;
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const wd = d.toLocaleDateString("en-GB", { weekday: "short" });
-  return `${dd}/${mm} (${wd})`;
+  return `${d.getDate()}/${d.getMonth() + 1}`;
 }
 
 function generateWhatsAppText(
   allLegs: BookingRow[],   // all legs for invoices active today (may span multiple dates)
-  dayRows: BookingRow[],   // today's rows only (driver grouping source)
+  dayRows: BookingRow[],   // today's rows only
   fullDateLabel: string
 ): string {
   const lines: string[] = [];
 
-  lines.push(`📅 *DRIVER SCHEDULE*`);
-  lines.push(`${fullDateLabel}`);
-  lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(`📅 *${fullDateLabel}*`);
+  lines.push(``);
 
-  // Split today's rows
   const inHouse = dayRows.filter(
     (r) => r.inHouseOrOutsourced !== "O" && r.inHouseOrOutsourced !== "outsourced"
   );
@@ -143,110 +137,144 @@ function generateWhatsAppText(
     (r) => r.inHouseOrOutsourced === "O" || r.inHouseOrOutsourced === "outsourced"
   );
 
-  // Group in-house by driver key
-  const driverGroups = new Map<string, BookingRow[]>();
+  // Group in-house by invoice
+  const invoiceOrder: string[] = [];
+  const invoiceMap = new Map<string, BookingRow[]>();
   for (const r of inHouse) {
-    const key = r.driverName?.trim() || r.vehiclePlate?.trim() || r.vanNumber?.trim() || "⚠️ No Driver Assigned";
-    if (!driverGroups.has(key)) driverGroups.set(key, []);
-    driverGroups.get(key)!.push(r);
+    const key = r.invoiceNo?.trim() || `__solo_${r.id}`;
+    if (!invoiceMap.has(key)) { invoiceMap.set(key, []); invoiceOrder.push(key); }
+    invoiceMap.get(key)!.push(r);
   }
 
-  // Sort drivers alpha; unassigned last
-  const sortedDrivers = [...driverGroups.keys()].sort((a, b) => {
-    if (a.startsWith("⚠️")) return 1;
-    if (b.startsWith("⚠️")) return -1;
-    return a.localeCompare(b);
-  });
+  let first = true;
+  for (const invKey of invoiceOrder) {
+    if (!first) { lines.push(`─────────────────────`); lines.push(``); }
+    first = false;
 
-  let driverIdx = 0;
-  for (const driver of sortedDrivers) {
-    driverIdx++;
-    const driverRows = driverGroups.get(driver)!;
-    const firstRow = driverRows[0];
-    const plate = firstRow.vehiclePlate?.trim() || firstRow.vanNumber?.trim() || "";
-    const contact = firstRow.driverContact?.trim() || "";
+    const todayLegs = invoiceMap.get(invKey)!;
+    const repRow = todayLegs[0];
 
-    // Convoy tag: if any of today's rows for this driver has numberOfVehicles > 1
-    const convoyRow = driverRows.find(r => (r.numberOfVehicles ?? 1) > 1);
-    const convoyTag = convoyRow
-      ? `  [Van ${convoyRow.vehicleIndex ?? 1} of ${convoyRow.numberOfVehicles}]`
-      : "";
-
-    lines.push(``);
-    lines.push(`🚐 *${driverIdx}. ${driver}*${convoyTag}`);
-    if (plate) lines.push(`    Plate: ${plate}`);
-    if (contact) lines.push(`    📞 ${contact}`);
-
-    // Group this driver's today-rows by invoice (null/empty = solo trip keyed by id)
-    const invoiceOrder: string[] = [];
-    const invoiceMap = new Map<string, BookingRow[]>();
-    for (const r of driverRows) {
-      const key = r.invoiceNo?.trim() || `__solo_${r.id}`;
-      if (!invoiceMap.has(key)) { invoiceMap.set(key, []); invoiceOrder.push(key); }
-      invoiceMap.get(key)!.push(r);
+    // Get all legs across dates for this invoice
+    let allInvLegs: BookingRow[];
+    if (invKey.startsWith("__solo_")) {
+      allInvLegs = todayLegs;
+    } else {
+      allInvLegs = allLegs
+        .filter(r => r.invoiceNo?.trim() === invKey)
+        .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""));
+      if (allInvLegs.length === 0) allInvLegs = todayLegs;
     }
 
-    for (const invKey of invoiceOrder) {
-      const todayLegsForInv = invoiceMap.get(invKey)!;
-      const repRow = todayLegsForInv[0];
-      const tripLabel = tripTypeLabel(repRow.tripType);
+    // Deduplicate legs by date+route (multi-van rows share same date/route)
+    const seenLegKeys = new Set<string>();
+    const uniqueLegs: BookingRow[] = [];
+    for (const leg of allInvLegs) {
+      const key = `${leg.travelDate}|${leg.fromLocation}|${leg.toLocation}`;
+      if (!seenLegKeys.has(key)) { seenLegKeys.add(key); uniqueLegs.push(leg); }
+    }
 
-      // Find ALL legs (across dates) for this invoice in allLegs, same driver
-      let allInvLegs: BookingRow[];
-      if (invKey.startsWith("__solo_")) {
-        allInvLegs = todayLegsForInv;
-      } else {
-        allInvLegs = allLegs
-          .filter(r =>
-            r.invoiceNo?.trim() === invKey &&
-            (r.driverName?.trim() || r.vehiclePlate?.trim() || r.vanNumber?.trim() || "⚠️ No Driver Assigned") === driver
-          )
-          .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? ""));
-        // Fallback: use today's legs if cross-date fetch returned nothing
-        if (allInvLegs.length === 0) allInvLegs = todayLegsForInv;
+    const isMultiDay = uniqueLegs.length > 1;
+    const isMultiVan = (repRow.numberOfVehicles ?? 1) > 1 ||
+      new Set(allInvLegs.map(r => r.vehicleIndex ?? 1)).size > 1;
+
+    // Collect one driver row per vehicleIndex
+    const driverByVehicle = new Map<number, BookingRow>();
+    for (const leg of allInvLegs) {
+      const vi = leg.vehicleIndex ?? 1;
+      if (!driverByVehicle.has(vi) && (leg.driverName || leg.vehiclePlate || leg.vanNumber)) {
+        driverByVehicle.set(vi, leg);
       }
+    }
 
-      const multiLeg = allInvLegs.length > 1;
-      const legSuffix = multiLeg ? ` · ${allInvLegs.length} legs` : "";
-
+    // ── Itinerary ──
+    if (isMultiDay) {
+      for (const leg of uniqueLegs) {
+        const d = formatBriefDate(leg.travelDate);
+        const from = leg.fromLocation?.trim() || "?";
+        const to = leg.toLocation?.trim() || "?";
+        if (leg.tripType === "day_trip") {
+          lines.push(`${d} - ${from} Day Trip`);
+        } else {
+          lines.push(`${d} - ${from} → ${to}`);
+        }
+      }
+    } else {
+      lines.push(formatBriefDate(repRow.travelDate));
       lines.push(``);
-      lines.push(`  — ${tripLabel}${legSuffix}`);
-
-      if (multiLeg) {
-        allInvLegs.forEach((leg, i) => {
-          const from = leg.fromLocation?.trim() || "?";
-          const to = leg.toLocation?.trim() || "?";
-          const dateStr = formatLegDate(leg.travelDate);
-          const route = leg.tripType === "day_trip" ? from : `${from} → ${to}`;
-          lines.push(`  📍 Leg ${i + 1} · ${dateStr}:  ${route}`);
-        });
+      const from = repRow.fromLocation?.trim() || "";
+      const to = repRow.toLocation?.trim() || "";
+      if (repRow.tripType === "day_trip") {
+        lines.push(`Day Trip: ${from}`);
       } else {
-        const from = repRow.fromLocation?.trim() || "?";
-        const to = repRow.toLocation?.trim() || "?";
-        const dateStr = formatLegDate(repRow.travelDate);
-        const route = repRow.tripType === "day_trip" ? from : `${from} → ${to}`;
-        lines.push(`  📍 ${dateStr}:  ${route}`);
+        if (from) { lines.push(`From:`); lines.push(from); }
+        lines.push(``);
+        if (to) { lines.push(`To:`); lines.push(to); }
       }
+    }
 
-      // Use rep row for metadata (pax, client, guide, remarks)
-      const pax = repRow.passengerCount ? `${repRow.passengerCount} pax` : "";
-      const cName = clientName(repRow);
-      const cPhone = clientPhone(repRow);
-      const guide = repRow.tourGuide?.trim() || "";
-      const remarks = repRow.details?.trim() || "";
+    lines.push(``);
 
-      if (pax) lines.push(`  👥 ${pax}`);
-      if (cName) lines.push(`  👤 ${cName}${cPhone ? `  |  📞 ${cPhone}` : ""}`);
-      if (guide) lines.push(`  🧑‍✈️ Guide: ${guide}`);
-      if (remarks) lines.push(`  📝 ${remarks}`);
+    // ── Pax ──
+    if (repRow.passengerCount) lines.push(`${repRow.passengerCount} pax with luggage`);
+
+    // ── Remarks ──
+    const remarks = repRow.details?.trim() || "";
+    if (remarks) { lines.push(``); lines.push(remarks); }
+
+    // ── Client contact ──
+    const cName = clientName(repRow);
+    const cPhone = clientPhone(repRow);
+    if (cName || cPhone) {
+      lines.push(``);
+      lines.push(`Guest contact:`);
+      if (cName && cPhone) lines.push(`${cName} - ${cPhone}`);
+      else lines.push(cName || cPhone);
+    }
+
+    // ── Tour guide ──
+    const guide = repRow.tourGuide?.trim() || "";
+    if (guide) { lines.push(``); lines.push(`Tour Guide: ${guide}`); }
+
+    lines.push(``);
+
+    // ── Driver info ──
+    if (isMultiVan) {
+      const numVans = repRow.numberOfVehicles ?? driverByVehicle.size;
+      const viList = [...new Set([...Array.from(driverByVehicle.keys()), ...Array.from({length: numVans}, (_, i) => i + 1)])].sort((a, b) => a - b);
+      for (const vi of viList) {
+        const dr = driverByVehicle.get(vi);
+        const name = dr?.driverName?.trim() || "";
+        const contact = dr?.driverContact?.trim() || "";
+        const plate = dr?.vehiclePlate?.trim() || dr?.vanNumber?.trim() || "";
+        lines.push(`Van ${vi} Driver Information:`);
+        if (name) lines.push(name);
+        if (contact) lines.push(contact);
+        if (plate) lines.push(plate);
+        lines.push(``);
+      }
+    } else {
+      const dr = driverByVehicle.get(1) || repRow;
+      const name = dr.driverName?.trim() || "";
+      const contact = dr.driverContact?.trim() || "";
+      const plate = dr.vehiclePlate?.trim() || dr.vanNumber?.trim() || "";
+      if (name || contact || plate) {
+        lines.push(`Driver Information:`);
+        if (name) lines.push(name);
+        if (contact) lines.push(contact);
+        if (plate) lines.push(plate);
+      } else {
+        lines.push(`⚠️ No driver assigned`);
+      }
+      lines.push(``);
     }
   }
 
-  // Outsourced section
+  // ── Outsourced ──
   if (outsourced.length > 0) {
+    if (!first) { lines.push(`─────────────────────`); lines.push(``); }
+    first = false;
+    lines.push(`*OUTSOURCED (${outsourced.length})*`);
     lines.push(``);
-    lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`🔄 *OUTSOURCED (${outsourced.length})*`);
     for (const r of outsourced) {
       const from = r.fromLocation?.trim() || "?";
       const to = r.toLocation?.trim() || "?";
@@ -254,20 +282,19 @@ function generateWhatsAppText(
       const pax = r.passengerCount ? ` · ${r.passengerCount} pax` : "";
       const cName = clientName(r);
       const cPhone = clientPhone(r);
-      lines.push(``);
-      lines.push(`  • ${from} → ${to}  ·  ${company}${pax}`);
-      if (cName) lines.push(`    Client: ${cName}${cPhone ? `  |  📞 ${cPhone}` : ""}`);
+      lines.push(`• ${from} → ${to}  [${company}${pax}]`);
+      if (cName || cPhone) {
+        lines.push(`  Guest: ${cName}${cPhone ? ` - ${cPhone}` : ""}`);
+      }
       const remarks = r.details?.trim() || "";
-      if (remarks) lines.push(`    📝 ${remarks}`);
+      if (remarks) lines.push(`  ${remarks}`);
+      lines.push(``);
     }
   }
 
-  lines.push(``);
-  lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
-  const totalTrips = dayRows.length;
-  const inHouseCount = inHouse.length;
-  const outCount = outsourced.length;
-  lines.push(`Total: ${totalTrips} booking${totalTrips !== 1 ? "s" : ""} · ${inHouseCount} in-house · ${outCount} outsourced`);
+  // ── Footer ──
+  lines.push(`─────────────────────`);
+  lines.push(`Total: ${dayRows.length} booking${dayRows.length !== 1 ? "s" : ""} · ${inHouse.length} in-house · ${outsourced.length} outsourced`);
 
   return lines.join("\n");
 }
