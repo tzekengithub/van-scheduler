@@ -113,6 +113,8 @@ export default function AllJobsPage() {
   const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [cellStates, setCellStates] = useState<Record<string, "saving" | "saved" | "error">>({});
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckMsg, setRecheckMsg] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>("travelDate");
@@ -143,6 +145,38 @@ export default function AllJobsPage() {
     window.addEventListener("bookings-uploaded", handler);
     return () => window.removeEventListener("bookings-uploaded", handler);
   }, [fetchRows]);
+
+  // ── Rules engine recheck ──────────────────────────────────────────────────
+  const handleRecheck = async () => {
+    setRechecking(true);
+    setRecheckMsg(null);
+    try {
+      const res = await fetch("/api/reassign", { method: "POST" });
+      if (!res.ok || !res.body) { setRecheckMsg("❌ Recheck failed"); return; }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+          let payload: string;
+          try { payload = JSON.parse(line.slice(6)); } catch { continue; }
+          if (payload === "[DONE]") setRecheckMsg("✅ Recheck complete");
+          else if (payload.startsWith("[ERROR]")) setRecheckMsg(`❌ ${payload.slice(8)}`);
+        }
+      }
+    } catch { setRecheckMsg("❌ Network error"); }
+    finally {
+      setRechecking(false);
+      await fetchRows();
+    }
+  };
 
   // All unique invoice numbers (for dropdown datalists)
   const allInvoiceNos = useMemo(
@@ -643,7 +677,7 @@ export default function AllJobsPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400 w-80"
           />
-          <div className="flex gap-2 ml-2">
+          <div className="flex gap-2 ml-2 items-center">
             <button
               onClick={() => setUploadOpen(true)}
               className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
@@ -656,6 +690,29 @@ export default function AllJobsPage() {
             >
               + Add Row
             </button>
+            <button
+              onClick={handleRecheck}
+              disabled={rechecking}
+              className="h-9 px-4 rounded-lg border border-blue-300 bg-blue-50 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+              title="Re-run rules engine: enforce same invoice = same van, fix double-bookings, outsource unassigned"
+            >
+              {rechecking ? (
+                <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              )}
+              {rechecking ? "Rechecking…" : "Recheck (Rules)"}
+            </button>
+            {recheckMsg && (
+              <span className={`text-xs font-medium ${recheckMsg.startsWith("✅") ? "text-green-600" : "text-red-600"}`}>
+                {recheckMsg}
+              </span>
+            )}
             <button
               onClick={() => window.print()}
               className="h-9 px-4 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 transition-colors"
