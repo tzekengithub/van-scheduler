@@ -270,6 +270,7 @@ export async function aiRecheckAllVans(
             driverContact: null,
             inHouseOrOutsourced: "I",
             outsourcedCompany: null,
+            outsourceReason: "",
           })
           .where(inArray(bookings.id, toResetIds));
         // Mirror in-memory so isNew detection sees vanId = null for all of them
@@ -931,6 +932,7 @@ export async function aiRecheckAllVans(
               driverContact: van.driverContact ?? "",
               inHouseOrOutsourced: "I",
               outsourcedCompany: "",
+              outsourceReason: "",
             })
             .where(eq(bookings.id, assignment.bookingId));
 
@@ -966,6 +968,7 @@ export async function aiRecheckAllVans(
               driverContact: "",
               inHouseOrOutsourced: "O",
               outsourcedCompany: "",
+              outsourceReason: outsourced.reasoning,
             })
             .where(eq(bookings.id, outsourced.bookingId));
 
@@ -1071,6 +1074,7 @@ export async function aiRecheckAllVans(
               driverContact: freeVan.driverContact ?? "",
               inHouseOrOutsourced: "I",
               outsourcedCompany: "",
+              outsourceReason: "",
             })
             .where(eq(bookings.id, bid));
           committedSlots.set(`${freeVan.id}::${b.travelDate}`, {
@@ -1131,7 +1135,7 @@ export async function aiRecheckAllVans(
             const bumpVanId = Number(bumpKey.split("::")[0]);
             const bumpVan = vanMap.get(bumpVanId)!;
             await db.update(bookings)
-              .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "O", outsourcedCompany: "" })
+              .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "O", outsourcedCompany: "", outsourceReason: "Bumped by higher-priority trip" })
               .where(eq(bookings.id, bumpInfo.bookingId));
             committedSlots.delete(bumpKey);
             await db.update(bookings)
@@ -1145,7 +1149,7 @@ export async function aiRecheckAllVans(
           } else {
             await db
               .update(bookings)
-              .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "O", outsourcedCompany: "" })
+              .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "O", outsourcedCompany: "", outsourceReason: "No free van after reassignment" })
               .where(eq(bookings.id, bid));
             emit(`⚠ Requeued #${bid} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) — no free van, outsourced`);
           }

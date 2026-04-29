@@ -40,6 +40,7 @@ export const bookings = pgTable("bookings", {
   introducer: text("introducer").default(""),
   inHouseOrOutsourced: text("in_house_or_outsourced").default("I"),
   outsourcedCompany: text("outsourced_company").default(""),
+  outsourceReason: text("outsource_reason").default(""),
   // New fields — Section 1
   tripType: text("trip_type").default("trip"),
   tourGuide: text("tour_guide"),

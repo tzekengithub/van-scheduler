@@ -131,7 +131,7 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   if (stillUnassigned.length > 0) {
     await db
       .update(bookings)
-      .set({ inHouseOrOutsourced: "O" })
+      .set({ inHouseOrOutsourced: "O", outsourceReason: "No van available after schedule check" })
       .where(inArray(bookings.id, stillUnassigned.map((b) => b.id)));
     log(`  marked ${stillUnassigned.length} booking(s) as outsourced (no van available)`);
   } else {
@@ -227,7 +227,7 @@ export async function runConstraintChecks(logger?: (msg: string) => void): Promi
   if (stillUnassigned.length > 0) {
     await db
       .update(bookings)
-      .set({ inHouseOrOutsourced: "O" })
+      .set({ inHouseOrOutsourced: "O", outsourceReason: "No van available after schedule check" })
       .where(inArray(bookings.id, stillUnassigned.map((b) => b.id)));
     log(`  marked ${stillUnassigned.length} booking(s) as outsourced`);
   } else {
@@ -1167,6 +1167,7 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
             driverName: null,
             driverContact: null,
             inHouseOrOutsourced: "O",
+            outsourceReason: "Double-booking conflict — no free van",
           })
           .where(eq(bookings.id, victim.id));
         log(

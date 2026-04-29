@@ -40,6 +40,7 @@ interface BookingRow {
   introducer: string | null;
   inHouseOrOutsourced: string | null;
   outsourcedCompany: string | null;
+  outsourceReason: string | null;
   day: string | null;
   month: string | null;
   year: string | null;
@@ -743,19 +744,24 @@ export default function DailyJobsPage() {
                     );
                   })()}
                 </td>
-                {/* Outsourced Company */}
+                {/* Outsourced Company + Reason */}
                 <td className="px-3 py-2 min-w-[150px]">
                   {(row.inHouseOrOutsourced === "O" || row.inHouseOrOutsourced === "outsourced") ? (
-                    <input
-                      className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
-                        cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
-                        cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" : "border-zinc-300"
-                      }`}
-                      defaultValue={row.outsourcedCompany ?? ""}
-                      placeholder={row.vehicleCategory === "Alphard" ? "Alphard company" : row.vehicleCategory === "Car" ? "Car company" : "Company name"}
-                      key={`oc-${row.id}`}
-                      onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
-                    />
+                    <div className="flex flex-col gap-1">
+                      <input
+                        className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
+                          cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
+                          cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" : "border-zinc-300"
+                        }`}
+                        defaultValue={row.outsourcedCompany ?? ""}
+                        placeholder={row.vehicleCategory === "Alphard" ? "Alphard company" : row.vehicleCategory === "Car" ? "Car company" : "Company name"}
+                        key={`oc-${row.id}`}
+                        onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
+                      />
+                      {row.outsourceReason && (
+                        <span className="text-[10px] text-orange-500 leading-tight">{row.outsourceReason}</span>
+                      )}
+                    </div>
                   ) : (
                     <span className="text-xs text-zinc-300 px-1">—</span>
                   )}

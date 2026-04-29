@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
         introducer: bookings.introducer,
         inHouseOrOutsourced: bookings.inHouseOrOutsourced,
         outsourcedCompany: bookings.outsourcedCompany,
+        outsourceReason: bookings.outsourceReason,
         day: bookings.day,
         month: bookings.month,
         year: bookings.year,

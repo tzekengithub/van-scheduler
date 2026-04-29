@@ -43,6 +43,7 @@ interface BookingRow {
   manualChange: number | null;
   inHouseOrOutsourced: string | null;
   outsourcedCompany: string | null;
+  outsourceReason: string | null;
   overtime: string | null;
   introducer: string | null;
   tourGuide: string | null;
@@ -68,6 +69,7 @@ interface EditForm {
   manualChange: boolean;
   inHouseOrOutsourced: string;
   outsourcedCompany: string;
+  outsourceReason: string;
   overtime: string;
   introducer: string;
   tourGuide: string;
@@ -198,6 +200,7 @@ export default function VanSchedulePage() {
       manualChange: (booking.manualChange ?? 0) === 1,
       inHouseOrOutsourced: booking.inHouseOrOutsourced ?? "I",
       outsourcedCompany: booking.outsourcedCompany ?? "",
+      outsourceReason: booking.outsourceReason ?? "",
       overtime: booking.overtime ?? "",
       introducer: booking.introducer ?? "",
       tourGuide: booking.tourGuide ?? "",
@@ -230,6 +233,7 @@ export default function VanSchedulePage() {
           manualChange: editForm.manualChange ? 1 : 0,
           inHouseOrOutsourced: editForm.inHouseOrOutsourced,
           outsourcedCompany: editForm.outsourcedCompany,
+          outsourceReason: editForm.outsourceReason,
           overtime: editForm.overtime,
           introducer: editForm.introducer,
           tourGuide: editForm.tourGuide,
@@ -767,6 +771,18 @@ export default function VanSchedulePage() {
                   onChange={(e) => setEditForm((f) => f && { ...f, outsourcedCompany: e.target.value })}
                 />
               </div>
+
+              {editForm.inHouseOrOutsourced === "O" && (
+                <div className="space-y-1">
+                  <label className="block text-zinc-500 font-medium">Outsource Reason</label>
+                  <input
+                    className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 text-xs"
+                    placeholder="e.g. No van available, Bumped by priority trip…"
+                    value={editForm.outsourceReason}
+                    onChange={(e) => setEditForm((f) => f && { ...f, outsourceReason: e.target.value })}
+                  />
+                </div>
+              )}
 
               <div className="space-y-1">
                 <label className="block text-zinc-500 font-medium">Overtime</label>

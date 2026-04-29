@@ -19,7 +19,7 @@ export async function PATCH(
 
     const allowed = [
       "day", "vehiclePlate", "driverName", "driverContact", "paidStatus",
-      "inHouseOrOutsourced", "outsourcedCompany", "overtime", "introducer",
+      "inHouseOrOutsourced", "outsourcedCompany", "outsourceReason", "overtime", "introducer",
       "amount", "clientDetails", "invoiceNo", "details", "passengerCount",
       "myrPerVehicle", "vanId", "manualChange",
       "tripType", "tourGuide", "vehicleIndex", "numberOfVehicles",
