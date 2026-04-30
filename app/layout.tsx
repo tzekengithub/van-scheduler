@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { UploadProvider } from "./upload-context";
 import ChatPanel from "@/components/ChatPanel";
+import AppNav from "@/components/AppNav";
 import { config } from "@/lib/config";
 
 const geistSans = Geist({
@@ -31,7 +32,12 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <UploadProvider>
-          {children}
+          <div className="min-h-screen flex flex-col" style={{ background: "var(--bg-base)" }}>
+            <AppNav />
+            <main className="flex-1">
+              {children}
+            </main>
+          </div>
         </UploadProvider>
         <ChatPanel />
       </body>

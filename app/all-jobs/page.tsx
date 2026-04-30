@@ -431,8 +431,8 @@ export default function AllJobsPage() {
   function TripTable({ groupRows }: { groupRows: BookingRow[] }) {
     if (groupRows.length === 0) return null;
     return (
-      <div className="bg-white rounded-xl border border-zinc-200 overflow-auto shadow-sm">
-        <table className="w-full text-xs border-collapse">
+      <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "auto" }}>
+        <table className="data-table">
           <thead>
             <tr className="bg-zinc-50 border-b border-zinc-200">
               <th className={thSort} onClick={() => toggleSort("travelDate")}>
@@ -643,7 +643,7 @@ export default function AllJobsPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans">
+    <div style={{ minHeight: "100vh", background: "var(--bg-base)" }}>
       <style>{`
         @media print {
           .no-print { display: none !important; }
@@ -652,19 +652,6 @@ export default function AllJobsPage() {
           table { font-size: 10px; }
         }
       `}</style>
-
-      {/* Header */}
-      <header className="bg-white border-b border-zinc-200 px-6 py-4 no-print">
-        <div className="max-w-full mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-zinc-900">All Jobs</h1>
-          <nav className="flex gap-4 text-sm font-medium">
-            <Link href="/" className="text-zinc-500 hover:text-zinc-900 transition-colors">Dashboard</Link>
-            <Link href="/daily-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">Daily Jobs</Link>
-            <Link href="/van-schedule" className="text-zinc-500 hover:text-zinc-900 transition-colors">Van Schedule</Link>
-            <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">All Jobs</span>
-          </nav>
-        </div>
-      </header>
 
       <main className="px-4 py-6 space-y-4">
 
@@ -675,47 +662,38 @@ export default function AllJobsPage() {
             placeholder="Search by client, invoice, route, plate, driver…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400 w-80"
+            className="input-base"
+            style={{ height: 34, padding: "0 12px", width: 320, fontSize: 13 }}
           />
-          <div className="flex gap-2 ml-2 items-center">
-            <button
-              onClick={() => setUploadOpen(true)}
-              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
-            >
-              Upload Invoice PDF
-            </button>
-            <button
-              onClick={handleAddRow}
-              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
-            >
-              + Add Row
-            </button>
+          <div className="flex gap-2 ml-2 items-center flex-wrap">
+            <button onClick={() => setUploadOpen(true)} className="btn btn-secondary">↑ Upload PDF</button>
+            <button onClick={handleAddRow} className="btn btn-secondary">+ Add Row</button>
             <button
               onClick={handleRecheck}
               disabled={rechecking}
-              className="h-9 px-4 rounded-lg border border-blue-300 bg-blue-50 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-              title="Re-run rules engine: enforce same invoice = same van, fix double-bookings, outsource unassigned"
+              className="btn"
+              style={{ background: "rgba(88,166,255,0.1)", border: "1px solid rgba(88,166,255,0.3)", color: "var(--blue)" }}
             >
               {rechecking ? (
-                <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                <svg className="spin" style={{ width: 13, height: 13 }} viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity="0.25"/>
+                  <path fill="currentColor" opacity="0.75" d="M4 12a8 8 0 018-8v8z"/>
                 </svg>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg style={{ width: 13, height: 13 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               )}
-              {rechecking ? "Rechecking…" : "Recheck (Rules)"}
+              {rechecking ? "Rechecking…" : "Recheck"}
             </button>
             {recheckMsg && (
-              <span className={`text-xs font-medium ${recheckMsg.startsWith("✅") ? "text-green-600" : "text-red-600"}`}>
+              <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: recheckMsg.startsWith("✅") ? "var(--green)" : "var(--red)" }}>
                 {recheckMsg}
               </span>
             )}
             <button
               onClick={() => window.print()}
-              className="h-9 px-4 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 transition-colors"
+              className="btn btn-secondary"
             >
               Print as PDF
             </button>

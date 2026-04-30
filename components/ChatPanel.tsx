@@ -16,7 +16,13 @@ const QUICK_PROMPTS = [
 
 function ActionNeededLine({ text }: { text: string }) {
   return (
-    <span className="inline-block my-0.5 px-2 py-1 rounded bg-amber-100 border border-amber-300 text-amber-900 font-semibold text-xs">
+    <span style={{
+      display: "inline-block", margin: "2px 0",
+      padding: "3px 8px", borderRadius: 4,
+      background: "var(--amber-glow)", border: "1px solid var(--amber-border)",
+      color: "var(--amber)", fontWeight: 700, fontSize: 11,
+      fontFamily: "var(--font-mono)",
+    }}>
       {text}
     </span>
   );
@@ -30,9 +36,7 @@ function MessageContent({ content }: { content: string }) {
         part.startsWith("ACTION NEEDED:") ? (
           <ActionNeededLine key={i} text={part} />
         ) : (
-          <span key={i} className="whitespace-pre-wrap">
-            {part}
-          </span>
+          <span key={i} style={{ whiteSpace: "pre-wrap" }}>{part}</span>
         ),
       )}
     </>
@@ -53,55 +57,36 @@ export default function ChatPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
   const sendMessage = useCallback(
     async (userContent: string, isGreeting = false) => {
       if (streaming) return;
-
       const userMessage: Message = { role: "user", content: userContent };
       const nextMessages = isGreeting ? [] : [...messages, userMessage];
-      if (!isGreeting) {
-        setMessages((prev) => [...prev, userMessage]);
-      }
-
+      if (!isGreeting) setMessages(prev => [...prev, userMessage]);
       setStreaming(true);
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
+      setMessages(prev => [...prev, { role: "assistant", content: "" }]);
       abortRef.current = new AbortController();
-
       try {
         const payload = isGreeting
           ? [{ role: "user", content: "Greet the user briefly and give them a one-line summary of today's schedule status." }]
-          : nextMessages.map((m) => ({ role: m.role, content: m.content }));
-
+          : nextMessages.map(m => ({ role: m.role, content: m.content }));
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ messages: payload }),
           signal: abortRef.current.signal,
         });
-
         if (!res.ok || !res.body) {
-          let errMsg = "Sorry, I couldn't reach the AI service. Please try again.";
-          try {
-            const errData = await res.json();
-            if (errData?.error) errMsg = `AI error: ${errData.error}`;
-          } catch {}
-          setMessages((prev) => [
-            ...prev.slice(0, -1),
-            { role: "assistant", content: errMsg },
-          ]);
+          let errMsg = "Sorry, couldn't reach the AI service.";
+          try { const d = await res.json(); if (d?.error) errMsg = `AI error: ${d.error}`; } catch {}
+          setMessages(prev => [...prev.slice(0, -1), { role: "assistant", content: errMsg }]);
           return;
         }
-
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let buf = "";
-        let assistantContent = "";
-
+        let buf = "", assistantContent = "";
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -117,20 +102,14 @@ export default function ChatPanel() {
               const delta = chunk.choices?.[0]?.delta?.content ?? "";
               if (delta) {
                 assistantContent += delta;
-                setMessages((prev) => [
-                  ...prev.slice(0, -1),
-                  { role: "assistant", content: assistantContent },
-                ]);
+                setMessages(prev => [...prev.slice(0, -1), { role: "assistant", content: assistantContent }]);
               }
             } catch {}
           }
         }
       } catch (err: any) {
         if (err?.name !== "AbortError") {
-          setMessages((prev) => [
-            ...prev.slice(0, -1),
-            { role: "assistant", content: "Connection interrupted. Please try again." },
-          ]);
+          setMessages(prev => [...prev.slice(0, -1), { role: "assistant", content: "Connection interrupted." }]);
         }
       } finally {
         setStreaming(false);
@@ -140,12 +119,8 @@ export default function ChatPanel() {
     [messages, streaming],
   );
 
-  // Auto-greet on first open
   useEffect(() => {
-    if (open && !greeted && !streaming) {
-      setGreeted(true);
-      sendMessage("", true);
-    }
+    if (open && !greeted && !streaming) { setGreeted(true); sendMessage("", true); }
   }, [open, greeted, streaming, sendMessage]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -157,77 +132,114 @@ export default function ChatPanel() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e as any);
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e as any); }
   };
 
   const showQuickPrompts = messages.length === 0 || (messages.length === 1 && messages[0].role === "assistant");
 
   return (
     <>
-      {/* Collapsed button */}
+      {/* Trigger button */}
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-4 left-4 z-40 flex items-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-full shadow-lg hover:bg-zinc-700 transition-colors text-sm font-medium"
-          aria-label="Open schedule assistant"
+          style={{
+            position: "fixed", bottom: 20, left: 20, zIndex: 40,
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "9px 16px",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            color: "var(--text-primary)",
+            fontSize: 13, fontWeight: 500,
+            cursor: "pointer",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.borderColor = "var(--amber-border)";
+            (e.currentTarget as HTMLElement).style.boxShadow = "0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px var(--amber-border)";
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+            (e.currentTarget as HTMLElement).style.boxShadow = "0 8px 32px rgba(0,0,0,0.4)";
+          }}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-          </svg>
-          Schedule AI
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--amber)", boxShadow: "0 0 6px var(--amber)", flexShrink: 0 }} className="pulse-dot" />
+          <span>Schedule AI</span>
         </button>
       )}
 
-      {/* Expanded panel */}
+      {/* Panel */}
       {open && (
-        <div className="fixed bottom-4 left-4 z-40 flex flex-col bg-white rounded-xl shadow-2xl border border-zinc-200 w-[380px] max-w-[calc(100vw-2rem)] h-[520px] max-h-[calc(100vh-2rem)]">
+        <div
+          className="fade-up"
+          style={{
+            position: "fixed", bottom: 20, left: 20, zIndex: 40,
+            display: "flex", flexDirection: "column",
+            width: 360, maxWidth: "calc(100vw - 32px)",
+            height: 500, maxHeight: "calc(100vh - 40px)",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 14,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04)",
+            overflow: "hidden",
+          }}
+        >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-zinc-50 border-b border-zinc-200 rounded-t-xl shrink-0">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-500" />
-              <span className="text-sm font-semibold text-zinc-900">Schedule Assistant</span>
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 uppercase tracking-wide">AI</span>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "12px 16px",
+            background: "var(--bg-elevated)",
+            borderBottom: "1px solid var(--border)",
+            flexShrink: 0,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 6px var(--green)", display: "inline-block" }} className="pulse-dot" />
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Schedule Assistant</span>
+              <span style={{
+                fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3,
+                background: "var(--amber-glow)", border: "1px solid var(--amber-border)",
+                color: "var(--amber)", fontFamily: "var(--font-mono)", letterSpacing: "0.08em",
+              }}>AI</span>
             </div>
             <button
-              onClick={() => {
-                abortRef.current?.abort();
-                setOpen(false);
+              onClick={() => { abortRef.current?.abort(); setOpen(false); }}
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                color: "var(--text-muted)", fontSize: 18, lineHeight: 1,
+                padding: "2px 6px", borderRadius: 4,
               }}
-              className="text-zinc-400 hover:text-zinc-700 text-xl font-bold leading-none px-1.5 py-0.5 rounded hover:bg-zinc-200 transition-colors"
-              aria-label="Close"
-            >
-              ×
-            </button>
+              onMouseEnter={e => (e.currentTarget.style.color = "var(--text-primary)")}
+              onMouseLeave={e => (e.currentTarget.style.color = "var(--text-muted)")}
+            >×</button>
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 6px", display: "flex", flexDirection: "column", gap: 10 }}>
             {messages.length === 0 && !streaming && (
-              <p className="text-xs text-zinc-400 text-center py-4">
+              <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "20px 0", fontFamily: "var(--font-mono)" }}>
                 Ask anything about the schedule…
               </p>
             )}
-
             {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
-                    msg.role === "user"
-                      ? "bg-zinc-900 text-white"
-                      : "bg-zinc-100 text-zinc-900"
-                  }`}
-                >
+              <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                <div style={{
+                  maxWidth: "88%", borderRadius: 10, padding: "8px 12px",
+                  fontSize: 13, lineHeight: 1.55,
+                  background: msg.role === "user" ? "var(--amber)" : "var(--bg-elevated)",
+                  color: msg.role === "user" ? "var(--text-inverse)" : "var(--text-primary)",
+                  border: msg.role === "user" ? "none" : "1px solid var(--border)",
+                }}>
                   {msg.role === "assistant" && msg.content === "" && streaming ? (
-                    <span className="flex gap-1 items-center py-0.5">
-                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                    <span style={{ display: "flex", gap: 4, alignItems: "center", padding: "2px 0" }}>
+                      {[0, 150, 300].map(d => (
+                        <span key={d} style={{
+                          width: 5, height: 5, borderRadius: "50%", background: "var(--text-muted)",
+                          display: "inline-block",
+                          animation: `pulse-dot 1s ease-in-out ${d}ms infinite`,
+                        }} />
+                      ))}
                     </span>
                   ) : (
                     <MessageContent content={msg.content} />
@@ -235,52 +247,72 @@ export default function ChatPanel() {
                 </div>
               </div>
             ))}
-
-            {/* Quick prompts — shown when chat is empty or only has the greeting */}
             {showQuickPrompts && !streaming && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {QUICK_PROMPTS.map((prompt) => (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 4 }}>
+                {QUICK_PROMPTS.map(prompt => (
                   <button
                     key={prompt}
                     onClick={() => sendMessage(prompt)}
-                    className="text-xs px-2.5 py-1.5 rounded-full border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 hover:border-zinc-400 transition-colors"
+                    style={{
+                      fontSize: 11, padding: "5px 10px", borderRadius: 6,
+                      background: "var(--bg-muted)", border: "1px solid var(--border)",
+                      color: "var(--text-secondary)", cursor: "pointer",
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={e => {
+                      (e.currentTarget as HTMLElement).style.borderColor = "var(--amber-border)";
+                      (e.currentTarget as HTMLElement).style.color = "var(--text-primary)";
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+                      (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)";
+                    }}
                   >
                     {prompt}
                   </button>
                 ))}
               </div>
             )}
-
             <div ref={messagesEndRef} />
           </div>
 
           {/* Input */}
-          <div className="shrink-0 p-3 border-t border-zinc-200">
-            <form onSubmit={handleSubmit} className="flex gap-2 items-end">
+          <div style={{ flexShrink: 0, padding: 12, borderTop: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
+            <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
               <textarea
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Ask about the schedule…"
                 rows={1}
                 disabled={streaming}
-                className="flex-1 resize-none rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 disabled:opacity-50 max-h-24 overflow-y-auto"
-                style={{ lineHeight: "1.4" }}
+                className="input-base"
+                style={{
+                  flex: 1, resize: "none", padding: "8px 10px",
+                  fontSize: 13, lineHeight: 1.4, maxHeight: 80, overflowY: "auto",
+                  opacity: streaming ? 0.5 : 1,
+                }}
               />
               <button
                 type="submit"
                 disabled={!input.trim() || streaming}
-                className="h-9 w-9 rounded-lg bg-zinc-900 text-white flex items-center justify-center hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
-                aria-label="Send"
+                style={{
+                  width: 34, height: 34, borderRadius: 8, flexShrink: 0,
+                  background: input.trim() && !streaming ? "var(--amber)" : "var(--bg-muted)",
+                  border: "none", cursor: input.trim() && !streaming ? "pointer" : "not-allowed",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: input.trim() && !streaming ? "var(--text-inverse)" : "var(--text-muted)",
+                  transition: "all 0.15s",
+                }}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <svg style={{ width: 14, height: 14 }} viewBox="0 0 20 20" fill="currentColor">
                   <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
                 </svg>
               </button>
             </form>
-            <p className="text-[10px] text-zinc-400 mt-1 text-center">
-              Read-only — cannot modify bookings directly
+            <p style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "center", marginTop: 6, fontFamily: "var(--font-mono)" }}>
+              read-only · cannot modify bookings
             </p>
           </div>
         </div>

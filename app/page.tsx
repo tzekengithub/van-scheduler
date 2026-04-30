@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import Link from "next/link";
 import { locationConfig } from "@/lib/config";
 
 interface Van {
@@ -16,16 +15,63 @@ interface Van {
   vehicleType: string | null;
 }
 
-const BADGE_COLORS = [
-  "bg-blue-100 text-blue-800 border-blue-200",
-  "bg-emerald-100 text-emerald-800 border-emerald-200",
-  "bg-amber-100 text-amber-800 border-amber-200",
-  "bg-rose-100 text-rose-800 border-rose-200",
-  "bg-violet-100 text-violet-800 border-violet-200",
-  "bg-cyan-100 text-cyan-800 border-cyan-200",
-  "bg-orange-100 text-orange-800 border-orange-200",
-  "bg-pink-100 text-pink-800 border-pink-200",
+const VAN_COLORS = [
+  { bg: "rgba(88,166,255,0.08)",  border: "rgba(88,166,255,0.25)",  text: "#58a6ff" },
+  { bg: "rgba(63,185,80,0.08)",   border: "rgba(63,185,80,0.25)",   text: "#3fb950" },
+  { bg: "rgba(245,158,11,0.08)",  border: "rgba(245,158,11,0.25)",  text: "#f59e0b" },
+  { bg: "rgba(248,81,73,0.08)",   border: "rgba(248,81,73,0.25)",   text: "#f85149" },
+  { bg: "rgba(167,139,250,0.08)", border: "rgba(167,139,250,0.25)", text: "#a78bfa" },
+  { bg: "rgba(34,211,238,0.08)",  border: "rgba(34,211,238,0.25)",  text: "#22d3ee" },
+  { bg: "rgba(251,146,60,0.08)",  border: "rgba(251,146,60,0.25)",  text: "#fb923c" },
+  { bg: "rgba(244,114,182,0.08)", border: "rgba(244,114,182,0.25)", text: "#f472b6" },
 ];
+
+function Modal({
+  title, body, confirm, confirmLabel, onClose, danger
+}: {
+  title: string; body: string; confirm: () => void; confirmLabel: string; onClose: () => void; danger?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 50,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          padding: 24,
+          maxWidth: 420,
+          width: "calc(100% - 32px)",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+        }}
+        onClick={e => e.stopPropagation()}
+        className="fade-up"
+      >
+        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>
+          {title}
+        </h2>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>{body}</p>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className={`btn ${danger ? "btn-danger" : "btn-primary"}`}
+            onClick={confirm}
+            style={danger ? { background: "var(--red)", color: "#fff", borderColor: "var(--red)" } : {}}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [vans, setVans] = useState<Van[]>([]);
@@ -42,7 +88,7 @@ export default function DashboardPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState(false);
   const [showClearDuplicatesModal, setShowClearDuplicatesModal] = useState(false);
-  const [actionMessage, setActionMessage] = useState('');
+  const [actionMessage, setActionMessage] = useState("");
   const [rechecking, setRechecking] = useState(false);
   const [recheckLogs, setRecheckLogs] = useState<string[]>([]);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
@@ -50,9 +96,7 @@ export default function DashboardPage() {
   const [showReasoning, setShowReasoning] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [recheckLogs]);
+  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [recheckLogs]);
 
   const fetchVans = useCallback(async () => {
     try {
@@ -87,20 +131,12 @@ export default function DashboardPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to add van");
       setSuccess(`Van ${data.vanNumber} added`);
-      setNewPlate("");
-      setNewDriverName("");
-      setNewDriverContact("");
-      setNewSingapore(false);
-      setNewThailand(false);
-      setNewMaxPax(4);
-      setNewLocation("");
-      setNewVehicleType("van");
+      setNewPlate(""); setNewDriverName(""); setNewDriverContact("");
+      setNewSingapore(false); setNewThailand(false);
+      setNewMaxPax(4); setNewLocation(""); setNewVehicleType("van");
       await fetchVans();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setVanLoading(false);
-    }
+    } catch (e) { setError(String(e)); }
+    finally { setVanLoading(false); }
   }
 
   async function handleToggleCapability(id: number, field: "singaporeEnabled" | "thailandEnabled", current: number) {
@@ -114,13 +150,11 @@ export default function DashboardPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to update van");
       await fetchVans();
-    } catch (e) {
-      setError(String(e));
-    }
+    } catch (e) { setError(String(e)); }
   }
 
   async function handleDeleteVan(id: number, plate: string) {
-    if (!confirm(`Remove van ${plate}? It will be unassigned from any bookings.`)) return;
+    if (!confirm(`Remove van ${plate}?`)) return;
     setError(null);
     try {
       const res = await fetch("/api/vans", {
@@ -132,66 +166,53 @@ export default function DashboardPage() {
       if (!res.ok) throw new Error(data.error ?? "Failed to delete van");
       setSuccess(`Van ${plate} removed`);
       await fetchVans();
-    } catch (e) {
-      setError(String(e));
-    }
+    } catch (e) { setError(String(e)); }
   }
 
   const handleClearAll = async () => {
     setShowClearAllModal(false);
-    const res = await fetch('/api/clear', { method: 'POST' });
-    if (res.ok) {
-      setActionMessage('All bookings deleted successfully');
-    } else {
-      setActionMessage('Failed to delete bookings');
-    }
+    const res = await fetch("/api/clear", { method: "POST" });
+    setActionMessage(res.ok ? "All bookings deleted" : "Failed to delete bookings");
   };
 
   const handleClearDuplicates = async () => {
     setShowClearDuplicatesModal(false);
-    const res = await fetch('/api/bookings/duplicates', { method: 'DELETE' });
-    if (res.ok) {
-      setActionMessage('Duplicate bookings removed successfully');
-    } else {
-      setActionMessage('Failed to remove duplicates');
-    }
+    const res = await fetch("/api/bookings/duplicates", { method: "DELETE" });
+    setActionMessage(res.ok ? "Duplicate bookings removed" : "Failed to remove duplicates");
   };
 
   const handleRecheck = async () => {
     setRechecking(true);
-    setActionMessage('');
+    setActionMessage("");
     setRecheckLogs([]);
     setAiSummary(null);
     setAiReasoning([]);
     setShowReasoning(false);
     try {
-      const res = await fetch('/api/reassign', { method: 'POST' });
-      if (!res.ok || !res.body) {
-        setActionMessage('❌ Recheck failed: network error');
-        return;
-      }
+      const res = await fetch("/api/reassign", { method: "POST" });
+      if (!res.ok || !res.body) { setActionMessage("error:Recheck failed: network error"); return; }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = '';
+      let buffer = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() ?? '';
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
         for (const part of parts) {
           const line = part.trim();
-          if (!line.startsWith('data: ')) continue;
+          if (!line.startsWith("data: ")) continue;
           let payload: string;
           try { payload = JSON.parse(line.slice(6)); } catch { continue; }
-          if (payload === '[DONE]') {
-            setActionMessage('✅ Van assignments rechecked — same invoice = same van enforced, no double-bookings.');
-          } else if (payload.startsWith('[ERROR]')) {
-            setActionMessage(`❌ Recheck failed: ${payload.slice(7).trim()}`);
-          } else if (payload.startsWith('[AI_SUMMARY]')) {
+          if (payload === "[DONE]") {
+            setActionMessage("done:Van assignments rechecked — same invoice = same van enforced, no double-bookings.");
+          } else if (payload.startsWith("[ERROR]")) {
+            setActionMessage(`error:${payload.slice(7).trim()}`);
+          } else if (payload.startsWith("[AI_SUMMARY]")) {
             try {
-              const aiData = JSON.parse(payload.slice('[AI_SUMMARY]'.length));
-              setAiSummary(aiData.summary ?? '');
+              const aiData = JSON.parse(payload.slice("[AI_SUMMARY]".length));
+              setAiSummary(aiData.summary ?? "");
               setAiReasoning(aiData.reasoning ?? []);
             } catch {}
           } else {
@@ -199,378 +220,393 @@ export default function DashboardPage() {
           }
         }
       }
-    } catch {
-      setActionMessage('❌ Recheck failed: network error');
-    } finally {
-      setRechecking(false);
-    }
+    } catch { setActionMessage("error:Recheck failed: network error"); }
+    finally { setRechecking(false); }
+  };
+
+  const S: Record<string, React.CSSProperties> = {
+    page: { maxWidth: 960, margin: "0 auto", padding: "32px 24px", display: "flex", flexDirection: "column", gap: 20 },
+    sectionHeader: {
+      fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600,
+      letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)",
+      marginBottom: 14,
+    },
+    card: {
+      background: "var(--bg-surface)", border: "1px solid var(--border)",
+      borderRadius: 12, padding: 20,
+    },
+    label: { fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginBottom: 4, display: "block", letterSpacing: "0.04em" },
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans">
-      <header className="bg-white border-b border-zinc-200 px-6 py-4">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
+    <div style={S.page} className="fade-up">
+
+      {/* Alerts */}
+      {error   && <div className="alert alert-error fade-up">{error}</div>}
+      {success && <div className="alert alert-success fade-up">{success}</div>}
+
+      {/* ── Fleet Management ─────────────────────────────────── */}
+      <section style={S.card}>
+        <p style={S.sectionHeader}>Fleet Management</p>
+
+        <form onSubmit={handleAddVan} style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20, alignItems: "flex-end" }}>
+          {/* Plate */}
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900">Van Scheduler</h1>
-            <p className="text-sm text-zinc-500 mt-0.5">Manage vans and drivers</p>
-          </div>
-          <nav className="flex gap-4 text-sm font-medium">
-            <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">Dashboard</span>
-            <Link href="/daily-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">Daily Jobs</Link>
-            <Link href="/all-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">All Jobs</Link>
-            <Link href="/van-schedule" className="text-zinc-500 hover:text-zinc-900 transition-colors">Van Schedule</Link>
-          </nav>
-        </div>
-      </header>
-
-      <main className="max-w-3xl mx-auto px-6 py-8 space-y-4">
-        {error && (
-          <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">{error}</div>
-        )}
-        {success && (
-          <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">{success}</div>
-        )}
-
-        <div className="bg-white rounded-xl border border-zinc-200 shadow-sm p-5">
-          <h2 className="text-sm font-semibold text-zinc-700 mb-4">Van / Plate Management</h2>
-          <form onSubmit={handleAddVan} className="flex flex-wrap gap-2 mb-4 items-end">
+            <label style={S.label}>Plate</label>
             <input
-              type="text"
+              className="input-base"
+              style={{ height: 34, width: 120, padding: "0 10px", textTransform: "uppercase", fontFamily: "var(--font-mono)", letterSpacing: "0.05em" }}
+              placeholder="VAN-001"
               value={newPlate}
-              onChange={(e) => setNewPlate(e.target.value)}
-              placeholder="e.g. VAN-001"
+              onChange={e => setNewPlate(e.target.value)}
               required
-              className="h-9 w-36 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400 uppercase"
             />
+          </div>
+          {/* Driver */}
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <label style={S.label}>Driver</label>
             <input
-              type="text"
+              className="input-base"
+              style={{ height: 34, width: "100%", padding: "0 10px" }}
+              placeholder="Driver name"
               value={newDriverName}
-              onChange={(e) => setNewDriverName(e.target.value)}
-              placeholder="e.g. Driver Name"
+              onChange={e => setNewDriverName(e.target.value)}
               required
-              className="h-9 flex-1 min-w-[160px] px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
+          </div>
+          {/* Contact */}
+          <div>
+            <label style={S.label}>Contact</label>
             <input
-              type="text"
+              className="input-base"
+              style={{ height: 34, width: 148, padding: "0 10px" }}
+              placeholder="+60 12-xxx xxxx"
               value={newDriverContact}
-              onChange={(e) => setNewDriverContact(e.target.value)}
-              placeholder="e.g. +60 12-xxx xxxx"
-              className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              onChange={e => setNewDriverContact(e.target.value)}
             />
+          </div>
+          {/* Vehicle type */}
+          <div>
+            <label style={S.label}>Type</label>
             <input
-              type="text"
+              className="input-base"
+              style={{ height: 34, width: 140, padding: "0 10px" }}
+              placeholder="van / Alphard"
               value={newVehicleType}
-              onChange={(e) => setNewVehicleType(e.target.value)}
-              placeholder="e.g. van, Toyota Alphard"
-              className="h-9 w-40 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-              title="Vehicle type"
+              onChange={e => setNewVehicleType(e.target.value)}
             />
+          </div>
+          {/* Base */}
+          <div>
+            <label style={S.label}>Base</label>
             <select
+              className="input-base"
+              style={{ height: 34, padding: "0 10px" }}
               value={newLocation}
-              onChange={(e) => setNewLocation(e.target.value)}
-              className="h-9 px-2 rounded-lg border border-zinc-300 text-sm text-zinc-900 bg-white focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              onChange={e => setNewLocation(e.target.value)}
             >
-              <option value="">📍 Base</option>
-              {locationConfig.map((l) => <option key={l} value={l}>{l}</option>)}
+              <option value="">Any</option>
+              {locationConfig.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
-            <div className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700">
-              <span className="text-zinc-500">👥</span>
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={newMaxPax}
-                onChange={(e) => setNewMaxPax(Number(e.target.value))}
-                className="w-10 text-center focus:outline-none text-zinc-900"
-                title="Max passenger capacity"
-              />
-              <span className="text-zinc-400 text-xs">total seats</span>
+          </div>
+          {/* Pax */}
+          <div>
+            <label style={S.label}>Seats</label>
+            <input
+              className="input-base"
+              type="number" min={1} max={50}
+              style={{ height: 34, width: 64, padding: "0 10px", textAlign: "center" }}
+              value={newMaxPax}
+              onChange={e => setNewMaxPax(Number(e.target.value))}
+            />
+          </div>
+          {/* SG / TH toggles */}
+          <div>
+            <label style={S.label}>Routes</label>
+            <div style={{ display: "flex", gap: 6, height: 34, alignItems: "center" }}>
+              <label style={{
+                display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
+                padding: "0 10px", height: 34, borderRadius: 6,
+                background: newSingapore ? "rgba(248,81,73,0.12)" : "var(--bg-muted)",
+                border: `1px solid ${newSingapore ? "rgba(248,81,73,0.4)" : "var(--border)"}`,
+                fontSize: 12, color: newSingapore ? "var(--red)" : "var(--text-muted)",
+                transition: "all 0.15s",
+              }}>
+                <input type="checkbox" checked={newSingapore} onChange={e => setNewSingapore(e.target.checked)} style={{ display: "none" }} />
+                🇸🇬 SG
+              </label>
+              <label style={{
+                display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
+                padding: "0 10px", height: 34, borderRadius: 6,
+                background: newThailand ? "rgba(88,166,255,0.12)" : "var(--bg-muted)",
+                border: `1px solid ${newThailand ? "rgba(88,166,255,0.4)" : "var(--border)"}`,
+                fontSize: 12, color: newThailand ? "var(--blue)" : "var(--text-muted)",
+                transition: "all 0.15s",
+              }}>
+                <input type="checkbox" checked={newThailand} onChange={e => setNewThailand(e.target.checked)} style={{ display: "none" }} />
+                🇹🇭 TH
+              </label>
             </div>
-            <label className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700 cursor-pointer select-none hover:bg-zinc-50">
-              <input
-                type="checkbox"
-                checked={newSingapore}
-                onChange={(e) => setNewSingapore(e.target.checked)}
-                className="accent-red-500"
-              />
-              🇸🇬 SG
-            </label>
-            <label className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-zinc-300 bg-white text-sm text-zinc-700 cursor-pointer select-none hover:bg-zinc-50">
-              <input
-                type="checkbox"
-                checked={newThailand}
-                onChange={(e) => setNewThailand(e.target.checked)}
-                className="accent-blue-500"
-              />
-              🇹🇭 TH
-            </label>
-            <button
-              type="submit"
-              disabled={vanLoading || !newPlate.trim() || !newDriverName.trim()}
-              className="h-9 px-4 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-            >
-              {vanLoading ? "Adding…" : "Add Van"}
-            </button>
-          </form>
+          </div>
+          <button
+            type="submit"
+            disabled={vanLoading || !newPlate.trim() || !newDriverName.trim()}
+            className="btn btn-primary"
+            style={{ alignSelf: "flex-end", fontWeight: 600 }}
+          >
+            {vanLoading ? "Adding…" : "+ Add Van"}
+          </button>
+        </form>
 
-          {vans.length === 0 ? (
-            <p className="text-xs text-zinc-400">No vans added yet.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {vans.map((van, i) => (
+        {/* Fleet list */}
+        {vans.length === 0 ? (
+          <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>No vans. Add one above.</p>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            {vans.map((van, i) => {
+              const c = VAN_COLORS[i % VAN_COLORS.length];
+              return (
                 <div
                   key={van.id}
-                  className={`flex items-start gap-2 px-3 py-2 rounded-xl border text-xs font-semibold ${BADGE_COLORS[i % BADGE_COLORS.length]}`}
+                  style={{
+                    background: c.bg, border: `1px solid ${c.border}`,
+                    borderRadius: 10, padding: "10px 12px",
+                    minWidth: 148, position: "relative",
+                  }}
                 >
-                  <div className="flex flex-col gap-0.5 min-w-0">
-                    <span>{van.vanNumber}</span>
-                    {van.vehicleType && (
-                      <span className="font-normal opacity-75 text-[11px]">🚐 {van.vehicleType}</span>
-                    )}
-                    {van.driverName && (
-                      <span className="font-normal opacity-70">Driver: {van.driverName}</span>
-                    )}
-                    {van.driverContact && (
-                      <span className="font-normal opacity-60">{van.driverContact}</span>
-                    )}
-                    {van.maxPaxCapacity != null && (
-                      <span className="font-normal opacity-60 text-[11px]">👥 {(van.maxPaxCapacity ?? 1) - 1}+1 seats</span>
-                    )}
-                    <div className="flex gap-1 mt-1">
-                      <button
-                        onClick={() => handleToggleCapability(van.id, "singaporeEnabled", van.singaporeEnabled)}
-                        title={van.singaporeEnabled ? "Singapore enabled — click to disable" : "Singapore disabled — click to enable"}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
-                          van.singaporeEnabled
-                            ? "bg-red-100 text-red-700 border border-red-300 hover:bg-red-200"
-                            : "bg-zinc-100 text-zinc-400 border border-zinc-200 hover:bg-zinc-200 line-through"
-                        }`}
-                      >
-                        🇸🇬 SG
-                      </button>
-                      <button
-                        onClick={() => handleToggleCapability(van.id, "thailandEnabled", van.thailandEnabled)}
-                        title={van.thailandEnabled ? "Thailand enabled — click to disable" : "Thailand disabled — click to enable"}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
-                          van.thailandEnabled
-                            ? "bg-blue-100 text-blue-700 border border-blue-300 hover:bg-blue-200"
-                            : "bg-zinc-100 text-zinc-400 border border-zinc-200 hover:bg-zinc-200 line-through"
-                        }`}
-                      >
-                        🇹🇭 TH
-                      </button>
-                    </div>
-                  </div>
+                  {/* Delete */}
                   <button
                     onClick={() => handleDeleteVan(van.id, van.vanNumber)}
-                    className="opacity-50 hover:opacity-100 transition-opacity font-bold leading-none mt-0.5"
+                    style={{
+                      position: "absolute", top: 6, right: 8,
+                      background: "none", border: "none", cursor: "pointer",
+                      color: "var(--text-muted)", fontSize: 14, lineHeight: 1,
+                      padding: 2, borderRadius: 4,
+                    }}
                     title="Remove van"
+                    onMouseEnter={e => (e.currentTarget.style.color = "var(--red)")}
+                    onMouseLeave={e => (e.currentTarget.style.color = "var(--text-muted)")}
                   >
                     ×
                   </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Van Assignment Recheck */}
-        <div className="bg-white rounded-xl border border-blue-200 shadow-sm p-5">
-          <h2 className="text-sm font-semibold text-blue-700 mb-1">Van Assignment Recheck</h2>
-          <p className="text-xs text-zinc-500 mb-4">
-            Re-runs the full van scheduler from scratch: enforces <strong>same invoice = same van</strong>,
-            eliminates all double-bookings, and outsources any trips that cannot fit.
-          </p>
-          {actionMessage && (
-            <div className={`rounded-lg px-4 py-3 text-sm mb-4 border ${actionMessage.startsWith('✅') ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
-              {actionMessage}
-            </div>
-          )}
-          <button
-            onClick={handleRecheck}
-            disabled={rechecking}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-          >
-            {rechecking ? (
-              <>
-                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-                Rechecking…
-              </>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Recheck Van Assignments
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-300 text-amber-900 uppercase tracking-wide">AI</span>
-              </>
-            )}
-          </button>
-
-          {/* AI summary box */}
-          {aiSummary && !rechecking && (
-            <div className="mt-4 border-l-4 border-amber-400 bg-amber-50 rounded-r-lg px-4 py-3">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 uppercase tracking-wide">AI Scheduler</span>
-              </div>
-              <p className="text-sm text-amber-900">{aiSummary}</p>
-              {aiReasoning.length > 0 && (
-                <div className="mt-2">
-                  <button
-                    onClick={() => setShowReasoning((v) => !v)}
-                    className="text-xs text-amber-700 hover:text-amber-900 underline underline-offset-2 transition-colors"
-                  >
-                    {showReasoning ? "Hide" : "View"} assignment reasoning ({aiReasoning.length})
-                  </button>
-                  {showReasoning && (
-                    <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
-                      {aiReasoning.map((r, i) => (
-                        <div key={i} className="flex items-start gap-2 text-xs">
-                          <span className={`shrink-0 font-bold ${r.action === 'outsourced' ? 'text-orange-600' : 'text-green-700'}`}>
-                            {r.action === 'outsourced' ? '⚠' : '✓'}
-                          </span>
-                          <span className="text-amber-900">
-                            <span className="font-medium">#{r.bookingId}</span>
-                            {r.van && <span className="text-amber-700"> → {r.van}</span>}
-                            {': '}{r.reasoning}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                  {/* Plate */}
+                  <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 13, color: c.text, marginBottom: 4, paddingRight: 16 }}>
+                    {van.vanNumber}
+                  </div>
+                  {van.vehicleType && (
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>🚐 {van.vehicleType}</div>
                   )}
+                  {van.driverName && (
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 1 }}>{van.driverName}</div>
+                  )}
+                  {van.driverContact && (
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{van.driverContact}</div>
+                  )}
+                  {van.maxPaxCapacity != null && (
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3 }}>👥 {van.maxPaxCapacity - 1}+1 pax</div>
+                  )}
+                  {van.location && (
+                    <div style={{ fontSize: 10, color: "var(--text-muted)" }}>📍 {van.location}</div>
+                  )}
+                  {/* Route toggles */}
+                  <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
+                    <button
+                      onClick={() => handleToggleCapability(van.id, "singaporeEnabled", van.singaporeEnabled)}
+                      style={{
+                        padding: "2px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600,
+                        fontFamily: "var(--font-mono)", cursor: "pointer", border: "1px solid",
+                        background: van.singaporeEnabled ? "rgba(248,81,73,0.15)" : "transparent",
+                        color: van.singaporeEnabled ? "var(--red)" : "var(--text-muted)",
+                        borderColor: van.singaporeEnabled ? "rgba(248,81,73,0.4)" : "var(--border-muted)",
+                        textDecoration: van.singaporeEnabled ? "none" : "line-through",
+                        transition: "all 0.15s",
+                      }}
+                    >SG</button>
+                    <button
+                      onClick={() => handleToggleCapability(van.id, "thailandEnabled", van.thailandEnabled)}
+                      style={{
+                        padding: "2px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600,
+                        fontFamily: "var(--font-mono)", cursor: "pointer", border: "1px solid",
+                        background: van.thailandEnabled ? "rgba(88,166,255,0.15)" : "transparent",
+                        color: van.thailandEnabled ? "var(--blue)" : "var(--text-muted)",
+                        borderColor: van.thailandEnabled ? "rgba(88,166,255,0.4)" : "var(--border-muted)",
+                        textDecoration: van.thailandEnabled ? "none" : "line-through",
+                        transition: "all 0.15s",
+                      }}
+                    >TH</button>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+              );
+            })}
+          </div>
+        )}
+      </section>
 
-          {/* Terminal log panel */}
-          {recheckLogs.length > 0 && (
-            <div className="mt-4">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-mono text-zinc-500">recheck log</span>
+      {/* ── Scheduler Recheck ─────────────────────────────────── */}
+      <section style={{ ...S.card, borderColor: "var(--amber-border)", boxShadow: "0 0 0 1px var(--amber-border), 0 4px 24px var(--amber-glow)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 16 }}>
+          <div>
+            <p style={S.sectionHeader}>Van Assignment Recheck</p>
+            <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, maxWidth: 480 }}>
+              Re-runs the full scheduler: enforces same-invoice van consistency, eliminates double-bookings, outsources trips that cannot fit.
+            </p>
+          </div>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px",
+            borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: "0.06em",
+            fontFamily: "var(--font-mono)", textTransform: "uppercase",
+            background: "rgba(245,158,11,0.2)", border: "1px solid rgba(245,158,11,0.4)", color: "var(--amber)",
+          }}>
+            ✦ AI
+          </span>
+        </div>
+
+        {actionMessage && (
+          <div className={`alert fade-up ${actionMessage.startsWith("done") ? "alert-success" : "alert-error"}`} style={{ marginBottom: 14 }}>
+            {actionMessage.startsWith("done:") ? actionMessage.slice(5) : actionMessage.startsWith("error:") ? actionMessage.slice(6) : actionMessage}
+          </div>
+        )}
+
+        <button
+          onClick={handleRecheck}
+          disabled={rechecking}
+          className="btn btn-primary"
+          style={{ fontWeight: 600 }}
+        >
+          {rechecking ? (
+            <>
+              <svg className="spin" style={{ width: 14, height: 14 }} viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity="0.25"/>
+                <path fill="currentColor" opacity="0.75" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>
+              Rechecking…
+            </>
+          ) : (
+            <>
+              <svg style={{ width: 14, height: 14 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Recheck Assignments
+            </>
+          )}
+        </button>
+
+        {/* AI Summary */}
+        {aiSummary && !rechecking && (
+          <div className="fade-up" style={{
+            marginTop: 16, padding: "14px 16px",
+            background: "var(--amber-glow)", border: "1px solid var(--amber-border)",
+            borderRadius: 8,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--amber)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                AI Scheduler Summary
+              </span>
+            </div>
+            <p style={{ fontSize: 13, color: "#fbbf24", lineHeight: 1.6 }}>{aiSummary}</p>
+            {aiReasoning.length > 0 && (
+              <div style={{ marginTop: 10 }}>
                 <button
-                  onClick={() => setRecheckLogs([])}
-                  className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+                  onClick={() => setShowReasoning(v => !v)}
+                  style={{ fontSize: 11, color: "var(--amber)", background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-mono)", textDecoration: "underline" }}
                 >
-                  clear
+                  {showReasoning ? "▲ Hide" : "▼ View"} reasoning ({aiReasoning.length})
                 </button>
-              </div>
-              <div className="bg-zinc-900 rounded-lg p-3 h-64 overflow-y-auto font-mono text-xs leading-relaxed">
-                {recheckLogs.map((line, i) => {
-                  const isStep = line.startsWith("Step ") || line.startsWith("━━━");
-                  const isOk = line.includes("OK ") || line.includes("✓") || line.includes("done") || line.includes("COMPLETE");
-                  const isConflict = line.includes("CONFLICT") || line.includes("outsourced") || line.includes("❌");
-                  const isBump = line.includes("BUMP") || line.includes("displaced") || line.includes("swapped");
-                  const isEnforce = line.includes("[enforceInvoice]");
-                  const isDouble = line.includes("[eliminateDoubleBookings]");
-                  let color = "text-zinc-400";
-                  if (isStep) color = "text-cyan-400 font-semibold";
-                  else if (isOk) color = "text-green-400";
-                  else if (isConflict) color = "text-red-400";
-                  else if (isBump) color = "text-yellow-400";
-                  else if (isEnforce || isDouble) color = "text-purple-400";
-                  return (
-                    <div key={i} className={`${color} whitespace-pre-wrap break-all`}>
-                      {line}
-                    </div>
-                  );
-                })}
-                {rechecking && (
-                  <div className="text-zinc-500 animate-pulse">▋</div>
+                {showReasoning && (
+                  <div style={{ marginTop: 8, maxHeight: 200, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                    {aiReasoning.map((r, i) => (
+                      <div key={i} style={{ display: "flex", gap: 8, fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                        <span style={{ color: r.action === "outsourced" ? "var(--orange)" : "var(--green)", fontWeight: 600, flexShrink: 0 }}>
+                          {r.action === "outsourced" ? "⚠" : "✓"}
+                        </span>
+                        <span style={{ color: "#fbbf24" }}>
+                          <span style={{ fontWeight: 600 }}>#{r.bookingId}</span>
+                          {r.van && <span style={{ color: "var(--amber)" }}> → {r.van}</span>}
+                          {": "}{r.reasoning}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 )}
-                <div ref={logEndRef} />
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Danger Zone */}
-        <div className="bg-white rounded-xl border border-red-200 shadow-sm p-5">
-          <h2 className="text-sm font-semibold text-red-700 mb-1">Danger Zone</h2>
-          <p className="text-xs text-zinc-500 mb-4">These actions are irreversible. Use with caution.</p>
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => setShowClearAllModal(true)}
-              className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
-            >
-              Clear All Bookings
-            </button>
-            <button
-              onClick={() => setShowClearDuplicatesModal(true)}
-              className="px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600"
-            >
-              Remove Duplicate Bookings
-            </button>
+            )}
           </div>
-        </div>
-      </main>
+        )}
 
-      {/* Clear All modal */}
+        {/* Terminal log */}
+        {recheckLogs.length > 0 && (
+          <div style={{ marginTop: 16 }} className="fade-up">
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", letterSpacing: "0.06em" }}>RECHECK LOG</span>
+              <button onClick={() => setRecheckLogs([])} style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}>clear</button>
+            </div>
+            <div className="terminal" style={{ height: 224 }}>
+              {recheckLogs.map((line, i) => {
+                const isStep     = line.startsWith("Step ") || line.startsWith("━━━");
+                const isOk       = line.includes("OK ") || line.includes("✓") || line.includes("done") || line.includes("COMPLETE");
+                const isConflict = line.includes("CONFLICT") || line.includes("outsourced") || line.includes("❌");
+                const isBump     = line.includes("BUMP") || line.includes("displaced") || line.includes("swapped");
+                const isEnforce  = line.includes("[enforceInvoice]") || line.includes("[eliminateDoubleBookings]");
+                let color = "var(--text-muted)";
+                if (isStep)     color = "var(--cyan)";
+                else if (isOk)  color = "var(--green)";
+                else if (isConflict) color = "var(--red)";
+                else if (isBump) color = "var(--amber)";
+                else if (isEnforce) color = "var(--purple)";
+                return (
+                  <div key={i} style={{ color, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{line}</div>
+                );
+              })}
+              {rechecking && <div style={{ color: "var(--text-muted)" }} className="pulse-dot">▋</div>}
+              <div ref={logEndRef} />
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Danger Zone ──────────────────────────────────────── */}
+      <section style={{ ...S.card, borderColor: "rgba(248,81,73,0.25)" }}>
+        <p style={S.sectionHeader}>Danger Zone</p>
+        <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 14 }}>Irreversible actions. Use with caution.</p>
+        {actionMessage && actionMessage !== "" && !rechecking && (
+          <div className="alert alert-warn fade-up" style={{ marginBottom: 14 }}>{actionMessage.replace(/^(done:|error:)/, "")}</div>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <button
+            className="btn btn-danger"
+            onClick={() => setShowClearAllModal(true)}
+          >
+            🗑 Clear All Bookings
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ borderColor: "rgba(251,146,60,0.4)", color: "var(--orange)" }}
+            onClick={() => setShowClearDuplicatesModal(true)}
+          >
+            ⊘ Remove Duplicates
+          </button>
+        </div>
+      </section>
+
+      {/* Modals */}
       {showClearAllModal && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-          onClick={() => setShowClearAllModal(false)}
-        >
-          <div
-            className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">Clear all bookings?</h2>
-            <p className="text-sm text-gray-600 mb-6">
-              This will permanently delete ALL booking rows from the database. This cannot be undone.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowClearAllModal(false)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleClearAll}
-                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
-              >
-                Yes, delete everything
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal
+          title="Clear all bookings?"
+          body="This will permanently delete ALL booking rows from the database. This cannot be undone."
+          confirmLabel="Delete everything"
+          confirm={handleClearAll}
+          onClose={() => setShowClearAllModal(false)}
+          danger
+        />
       )}
-
-      {/* Remove Duplicates modal */}
       {showClearDuplicatesModal && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-          onClick={() => setShowClearDuplicatesModal(false)}
-        >
-          <div
-            className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">Remove duplicate bookings?</h2>
-            <p className="text-sm text-gray-600 mb-6">
-              This will delete all rows where the same invoice number, date and amount appear more than once.
-              The first entry of each duplicate will be kept.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowClearDuplicatesModal(false)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleClearDuplicates}
-                className="px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600"
-              >
-                Yes, remove duplicates
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal
+          title="Remove duplicate bookings?"
+          body="Deletes rows where the same invoice number, date, and amount appear more than once. First entry of each duplicate is kept."
+          confirmLabel="Remove duplicates"
+          confirm={handleClearDuplicates}
+          onClose={() => setShowClearDuplicatesModal(false)}
+        />
       )}
     </div>
   );

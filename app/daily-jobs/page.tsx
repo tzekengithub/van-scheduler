@@ -72,16 +72,22 @@ function clientPhone(row: BookingRow): string {
 }
 
 function tripTypeBadge(t: TripType | null) {
+  const base: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", gap: 3,
+    padding: "2px 7px", borderRadius: 4, fontSize: 10, fontWeight: 700,
+    fontFamily: "var(--font-mono)", letterSpacing: "0.04em", whiteSpace: "nowrap",
+    border: "1px solid",
+  };
   switch (t) {
     case "one_way_ride":
-      return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 whitespace-nowrap">🔵 One Way</span>;
+      return <span style={{ ...base, background: "rgba(88,166,255,0.12)", borderColor: "rgba(88,166,255,0.3)", color: "var(--blue)" }}>→ One Way</span>;
     case "round_trip":
-      return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 whitespace-nowrap">🟢 Round Trip</span>;
+      return <span style={{ ...base, background: "rgba(63,185,80,0.12)", borderColor: "rgba(63,185,80,0.3)", color: "var(--green)" }}>⇄ Round Trip</span>;
     case "day_trip":
-      return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-800 whitespace-nowrap">🟡 Day Trip</span>;
+      return <span style={{ ...base, background: "rgba(245,158,11,0.12)", borderColor: "rgba(245,158,11,0.3)", color: "var(--amber)" }}>◎ Day Trip</span>;
     case "trip":
     default:
-      return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 whitespace-nowrap">🟠 Trip</span>;
+      return <span style={{ ...base, background: "rgba(251,146,60,0.12)", borderColor: "rgba(251,146,60,0.3)", color: "var(--orange)" }}>◷ Trip</span>;
   }
 }
 
@@ -890,8 +896,8 @@ export default function DailyJobsPage() {
   function TripTable({ groupRows }: { groupRows: BookingRow[] }) {
     if (groupRows.length === 0) return null;
     return (
-      <div className="bg-white rounded-xl border border-zinc-200 overflow-auto shadow-sm">
-        <table className="w-full text-xs border-collapse">
+      <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "auto" }}>
+        <table className="data-table">
           <thead>
             <tr className="bg-zinc-50 border-b border-zinc-200">
               {COL_HEADERS.map((col, i) => (
@@ -1072,7 +1078,7 @@ export default function DailyJobsPage() {
   const shortDateLabel = formatShortDate(day, month, year);
 
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans">
+    <div style={{ minHeight: "100vh", background: "var(--bg-base)" }}>
       <style>{`
         @media print {
           .no-print { display: none !important; }
@@ -1082,28 +1088,16 @@ export default function DailyJobsPage() {
         }
       `}</style>
 
-      {/* Header */}
-      <header className="bg-white border-b border-zinc-200 px-6 py-4 no-print">
-        <div className="max-w-full mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-zinc-900">Daily Jobs Record</h1>
-          <nav className="flex gap-4 text-sm font-medium">
-            <Link href="/" className="text-zinc-500 hover:text-zinc-900 transition-colors">Dashboard</Link>
-            <Link href="/all-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">All Jobs</Link>
-            <Link href="/van-schedule" className="text-zinc-500 hover:text-zinc-900 transition-colors">Van Schedule</Link>
-            <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">Daily Jobs</span>
-          </nav>
-        </div>
-      </header>
-
       <main className="px-4 py-6 space-y-4">
 
         {/* Top bar — date nav + actions */}
         <div className="flex gap-3 items-end flex-wrap no-print">
-          {/* Prev/next arrows */}
+          {/* Prev arrow */}
           <div className="flex items-center gap-1">
             <button
               onClick={() => navigateDay(-1)}
-              className="w-8 h-9 flex items-center justify-center rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 font-bold"
+              className="btn btn-secondary"
+              style={{ width: 34, padding: 0, fontFamily: "var(--font-mono)" }}
               title="Previous day"
             >
               ←
@@ -1112,9 +1106,10 @@ export default function DailyJobsPage() {
 
           {/* Day selector */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Day</label>
+            <label style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Day</label>
             <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="input-base"
+              style={{ height: 34, padding: "0 10px" }}
               value={day}
               onChange={(e) => setDay(e.target.value)}
             >
@@ -1122,9 +1117,10 @@ export default function DailyJobsPage() {
             </select>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Month</label>
+            <label style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Month</label>
             <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="input-base"
+              style={{ height: 34, padding: "0 10px" }}
               value={month}
               onChange={(e) => setMonth(e.target.value)}
             >
@@ -1132,9 +1128,10 @@ export default function DailyJobsPage() {
             </select>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Year</label>
+            <label style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Year</label>
             <select
-              className="h-9 px-3 rounded-lg border border-zinc-300 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="input-base"
+              style={{ height: 34, padding: "0 10px" }}
               value={year}
               onChange={(e) => setYear(e.target.value)}
             >
@@ -1145,45 +1142,47 @@ export default function DailyJobsPage() {
           {/* Next arrow */}
           <button
             onClick={() => navigateDay(1)}
-            className="w-8 h-9 flex items-center justify-center rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 font-bold self-end"
+            className="btn btn-secondary"
+            style={{ width: 34, padding: 0, fontFamily: "var(--font-mono)", alignSelf: "flex-end" }}
             title="Next day"
           >
             →
           </button>
 
-          <div className="flex gap-2 ml-2 self-end">
-            <button
-              onClick={() => setUploadOpen(true)}
-              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
-            >
-              Upload Invoice PDF
+          <div className="flex gap-2 ml-2 self-end flex-wrap">
+            <button onClick={() => setUploadOpen(true)} className="btn btn-secondary">
+              ↑ Upload PDF
             </button>
-            <button
-              onClick={handleAddRow}
-              className="h-9 px-4 rounded-lg border border-zinc-300 bg-white text-sm font-medium text-zinc-900 hover:bg-zinc-50 transition-colors"
-            >
+            <button onClick={handleAddRow} className="btn btn-secondary">
               + Add Row
             </button>
             <button
               onClick={handleRecheck}
               disabled={rechecking}
-              className="h-9 px-4 rounded-lg border border-blue-300 bg-blue-50 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-              title="Re-run rules engine: enforce same invoice = same van, fix double-bookings, outsource unassigned"
+              className="btn"
+              style={{
+                background: "rgba(88,166,255,0.1)", border: "1px solid rgba(88,166,255,0.3)",
+                color: "var(--blue)",
+              }}
+              title="Re-run rules engine"
             >
               {rechecking ? (
-                <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                <svg className="spin" style={{ width: 13, height: 13 }} viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity="0.25"/>
+                  <path fill="currentColor" opacity="0.75" d="M4 12a8 8 0 018-8v8z"/>
                 </svg>
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg style={{ width: 13, height: 13 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               )}
-              {rechecking ? "Rechecking…" : "Recheck (Rules)"}
+              {rechecking ? "Rechecking…" : "Recheck"}
             </button>
             {recheckMsg && (
-              <span className={`text-xs font-medium self-center ${recheckMsg.startsWith("✅") ? "text-green-600" : "text-red-600"}`}>
+              <span style={{
+                fontSize: 11, fontFamily: "var(--font-mono)", alignSelf: "center",
+                color: recheckMsg.startsWith("✅") ? "var(--green)" : "var(--red)",
+              }}>
                 {recheckMsg}
               </span>
             )}
@@ -1196,26 +1195,27 @@ export default function DailyJobsPage() {
                     const all: BookingRow[] = await res.json();
                     const legs = all.filter(r => r.invoiceNo && invoiceSet.has(r.invoiceNo));
                     setWhatsappLegs(legs.length ? legs : rows);
-                  } else {
-                    setWhatsappLegs(rows);
-                  }
-                } catch {
-                  setWhatsappLegs(rows);
-                }
+                  } else { setWhatsappLegs(rows); }
+                } catch { setWhatsappLegs(rows); }
                 setWhatsappOpen(true);
               }}
-              className="h-9 px-4 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors"
+              className="btn"
+              style={{ background: "rgba(63,185,80,0.12)", border: "1px solid rgba(63,185,80,0.3)", color: "var(--green)" }}
             >
               📱 WhatsApp
             </button>
             <button
               onClick={() => window.print()}
-              className="h-9 px-4 rounded-lg bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 transition-colors"
+              className="btn btn-secondary"
             >
-              Print as PDF
+              Print PDF
             </button>
             {/* Delete by invoice number */}
-            <div className="flex items-center gap-1 border border-red-200 rounded-lg overflow-hidden bg-white">
+            <div style={{
+              display: "flex", alignItems: "center",
+              border: "1px solid rgba(248,81,73,0.3)", borderRadius: 6,
+              overflow: "hidden", background: "var(--bg-muted)",
+            }}>
               <datalist id="delete-inv-list">
                 {allInvoiceNos.map((inv) => <option key={inv} value={inv} />)}
               </datalist>
@@ -1226,31 +1226,38 @@ export default function DailyJobsPage() {
                 value={deleteInvoiceInput}
                 onChange={(e) => { setDeleteInvoiceInput(e.target.value); setDeleteInvoiceState("idle"); }}
                 onKeyDown={(e) => { if (e.key === "Enter") handleDeleteByInvoice(); if (e.key === "Escape") { setDeleteInvoiceInput(""); setDeleteInvoiceState("idle"); } }}
-                className="h-9 px-3 text-sm text-zinc-900 focus:outline-none w-44 bg-transparent"
+                style={{
+                  height: 34, padding: "0 10px", fontSize: 12,
+                  background: "transparent", border: "none", outline: "none",
+                  color: "var(--text-primary)", width: 156,
+                  fontFamily: "var(--font-mono)",
+                }}
               />
               <button
                 onClick={handleDeleteByInvoice}
                 disabled={!deleteInvoiceInput.trim() || deleteInvoiceState === "deleting"}
-                className={`h-9 px-3 text-sm font-medium transition-colors whitespace-nowrap ${
-                  deleteInvoiceState === "confirm"
-                    ? "bg-red-600 text-white hover:bg-red-700"
-                    : deleteInvoiceState === "deleting"
-                    ? "bg-red-300 text-white cursor-wait"
-                    : "bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                }`}
+                style={{
+                  height: 34, padding: "0 10px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap",
+                  border: "none", cursor: deleteInvoiceInput.trim() ? "pointer" : "not-allowed",
+                  background: deleteInvoiceState === "confirm" ? "var(--red)"
+                    : deleteInvoiceState === "deleting" ? "rgba(248,81,73,0.5)"
+                    : "transparent",
+                  color: deleteInvoiceState === "confirm" ? "#fff" : "var(--red)",
+                  transition: "all 0.15s",
+                }}
               >
-                {deleteInvoiceState === "confirm" ? "Confirm delete?" : deleteInvoiceState === "deleting" ? "Deleting…" : "Delete Invoice"}
+                {deleteInvoiceState === "confirm" ? "Confirm?" : deleteInvoiceState === "deleting" ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>
         </div>
 
         {/* Date heading */}
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-bold text-zinc-900">
-            📅 {fullDateLabel}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2 style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>
+            {fullDateLabel}
           </h2>
-          <span className="text-xs text-zinc-400">{shortDateLabel}</span>
+          <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>{shortDateLabel}</span>
         </div>
 
         {/* Print heading */}
@@ -1259,22 +1266,19 @@ export default function DailyJobsPage() {
         </div>
 
 
-        {/* Inline patch error (e.g. double-booking on manual van change) */}
+        {/* Inline patch error */}
         {patchError && (
-          <div className="rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-orange-800">⚠️ {patchError}</span>
-            <button
-              onClick={() => setPatchError(null)}
-              className="text-orange-400 hover:text-orange-600 font-bold text-base leading-none px-1 ml-4"
-            >×</button>
+          <div className="alert alert-warn fade-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>⚠ {patchError}</span>
+            <button onClick={() => setPatchError(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--amber)", fontSize: 18 }}>×</button>
           </div>
         )}
 
         {/* Conflict banner */}
         {!loading && (noVanRows.length > 0 || outsourceNeededRows.length > 0 || doubleBookedRows.length > 0) && (
-          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 space-y-1">
-            <div className="font-bold text-red-800 text-sm">
-              ⚠️ CONFLICT — {noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length} issue{noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length !== 1 ? "s" : ""} found
+          <div className="alert alert-error fade-up" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              ⚠ CONFLICT — {noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length} issue{noVanRows.length + outsourceNeededRows.length + doubleBookedRows.length !== 1 ? "s" : ""}
             </div>
             {(() => {
               const alphardOut = outsourceNeededRows.filter((r) => r.vehicleCategory === "Alphard");
@@ -1322,52 +1326,69 @@ export default function DailyJobsPage() {
 
         {/* Summary bar */}
         {!loading && (
-          <div className="no-print flex gap-6 text-sm text-zinc-900 bg-white rounded-lg border border-zinc-200 px-4 py-2 w-fit">
-            <span>Rows: <strong>{rows.length}</strong></span>
-            <span>Total: <strong>MYR {totalAmount.toFixed(2)}</strong></span>
-            <span>Paid: <strong className="text-green-600">{paidCount}</strong></span>
-            <span>Unpaid: <strong className="text-red-500">{unpaidCount}</strong></span>
+          <div className="no-print" style={{
+            display: "flex", gap: 20, fontSize: 12, fontFamily: "var(--font-mono)",
+            background: "var(--bg-surface)", border: "1px solid var(--border)",
+            borderRadius: 8, padding: "8px 16px", width: "fit-content",
+            color: "var(--text-secondary)",
+          }}>
+            <span>Rows: <strong style={{ color: "var(--text-primary)" }}>{rows.length}</strong></span>
+            <span>Total: <strong style={{ color: "var(--amber)" }}>MYR {totalAmount.toFixed(2)}</strong></span>
+            <span>Paid: <strong style={{ color: "var(--green)" }}>{paidCount}</strong></span>
+            <span>Unpaid: <strong style={{ color: "var(--red)" }}>{unpaidCount}</strong></span>
           </div>
         )}
 
         {/* WhatsApp export modal */}
         {whatsappOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 no-print" onClick={() => setWhatsappOpen(false)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center no-print" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={() => setWhatsappOpen(false)}>
+            <div className="fade-up" style={{
+              background: "var(--bg-elevated)", border: "1px solid var(--border)",
+              borderRadius: 14, width: "100%", maxWidth: 520,
+              margin: "0 16px", display: "flex", flexDirection: "column",
+              maxHeight: "90vh", boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+            }} onClick={(e) => e.stopPropagation()}>
               {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 bg-green-50 shrink-0">
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "14px 18px",
+                borderBottom: "1px solid var(--border)",
+                background: "rgba(63,185,80,0.06)",
+                flexShrink: 0, borderRadius: "14px 14px 0 0",
+              }}>
                 <div>
-                  <div className="font-bold text-zinc-900 text-base">📱 WhatsApp Schedule</div>
-                  <div className="text-xs text-zinc-500 mt-0.5">{fullDateLabel}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>📱 WhatsApp Schedule</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, fontFamily: "var(--font-mono)" }}>{fullDateLabel}</div>
                 </div>
-                <button onClick={() => setWhatsappOpen(false)} className="text-zinc-400 hover:text-zinc-700 text-xl font-bold leading-none px-1">×</button>
+                <button onClick={() => setWhatsappOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: 20 }}>×</button>
               </div>
               {/* Scrollable job blocks */}
-              <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+              <div style={{ overflowY: "auto", flex: 1, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
                 {whatsappBlocks.length === 0 && (
-                  <div className="text-center py-8 text-zinc-400 text-sm">No bookings</div>
+                  <div style={{ textAlign: "center", padding: "32px 0", fontSize: 13, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>No bookings</div>
                 )}
                 {whatsappBlocks.map((block) => (
-                  <div key={block.key} className="border border-zinc-200 rounded-xl overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-zinc-50 border-b border-zinc-200">
-                      <span className="text-xs font-semibold text-zinc-600">{block.label}</span>
+                  <div key={block.key} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "var(--bg-muted)", borderBottom: "1px solid var(--border)" }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>{block.label}</span>
                       <button
                         onClick={async () => {
                           await navigator.clipboard.writeText(whatsappTexts[block.key] ?? block.text);
                           setWhatsappCopied(prev => ({ ...prev, [block.key]: true }));
                           setTimeout(() => setWhatsappCopied(prev => ({ ...prev, [block.key]: false })), 2500);
                         }}
-                        className={`text-xs font-semibold px-3 py-1 rounded-lg transition-colors ${
-                          whatsappCopied[block.key]
-                            ? "bg-green-500 text-white"
-                            : "bg-green-600 text-white hover:bg-green-700"
-                        }`}
+                        style={{
+                          fontSize: 11, fontWeight: 600, padding: "4px 12px", borderRadius: 6,
+                          background: whatsappCopied[block.key] ? "rgba(63,185,80,0.3)" : "rgba(63,185,80,0.12)",
+                          border: "1px solid rgba(63,185,80,0.4)", color: "var(--green)",
+                          cursor: "pointer", transition: "all 0.15s",
+                        }}
                       >
                         {whatsappCopied[block.key] ? "✓ Copied!" : "Copy"}
                       </button>
                     </div>
                     <textarea
-                      className="w-full text-sm font-mono text-zinc-800 bg-white p-3 resize-none focus:outline-none focus:ring-1 focus:ring-green-400"
+                      style={{ width: "100%", fontSize: 12, fontFamily: "var(--font-mono)", background: "var(--bg-surface)", color: "var(--text-primary)", padding: 12, resize: "none", border: "none", outline: "none" }}
                       rows={10}
                       value={whatsappTexts[block.key] ?? block.text}
                       onChange={(e) => setWhatsappTexts(prev => ({ ...prev, [block.key]: e.target.value }))}
@@ -1379,7 +1400,8 @@ export default function DailyJobsPage() {
               <div className="px-5 py-3 border-t border-zinc-200 shrink-0">
                 <button
                   onClick={() => setWhatsappOpen(false)}
-                  className="w-full h-10 rounded-xl text-sm font-medium border border-zinc-300 text-zinc-700 hover:bg-zinc-50 transition-colors"
+                  className="btn btn-secondary"
+                  style={{ width: "100%" }}
                 >
                   Close
                 </button>
@@ -1390,9 +1412,9 @@ export default function DailyJobsPage() {
 
         {/* Trip-type tables */}
         {loading ? (
-          <div className="text-center py-20 text-zinc-400 text-sm">Loading…</div>
+          <div style={{ textAlign: "center", padding: "80px 0", fontSize: 13, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>Loading…</div>
         ) : rows.length === 0 ? (
-          <div className="bg-white rounded-xl border border-zinc-200 p-12 text-center text-zinc-400 text-sm">
+          <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 48, textAlign: "center", fontSize: 13, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
             No bookings for {fullDateLabel}
           </div>
         ) : (

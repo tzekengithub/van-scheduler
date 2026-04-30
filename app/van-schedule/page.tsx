@@ -505,34 +505,34 @@ export default function VanSchedulePage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans">
+    <div style={{ minHeight: "100vh", background: "var(--bg-base)" }}>
       {/* Bottom Edit Panel */}
       {editPanel && editForm && (
         <div
-          className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t-2 border-zinc-200 shadow-2xl flex flex-col"
-          style={{ maxHeight: "56vh" }}
+          style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 50, background: "var(--bg-elevated)", borderTop: "2px solid var(--amber-border)", boxShadow: "0 -8px 40px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", maxHeight: "56vh" }}
         >
           {/* Panel header */}
-          <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 bg-zinc-50 flex-shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-1 h-8 rounded-full bg-blue-500 flex-shrink-0" />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderBottom: "1px solid var(--border)", background: "var(--bg-surface)", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 3, height: 32, borderRadius: 2, background: "var(--amber)", flexShrink: 0 }} />
               <div>
-                <div className="text-sm font-semibold text-zinc-900 flex items-center gap-2">
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8 }}>
                   {editForm.invoiceNo
-                    ? <span className="font-mono text-blue-700">{editForm.invoiceNo}</span>
-                    : <span className="text-zinc-400">No invoice</span>}
-                  <span className="text-zinc-300">·</span>
+                    ? <span style={{ fontFamily: "var(--font-mono)", color: "var(--amber)" }}>{editForm.invoiceNo}</span>
+                    : <span style={{ color: "var(--text-muted)" }}>No invoice</span>}
+                  <span style={{ color: "var(--border)" }}>·</span>
                   <span>{editPanel.vanLabel}</span>
-                  <span className="text-zinc-300">·</span>
-                  <span className="text-zinc-500">{MONTH_SHORT[viewMonth]} {editPanel.booking.day}</span>
+                  <span style={{ color: "var(--border)" }}>·</span>
+                  <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: 12 }}>{MONTH_SHORT[viewMonth]} {editPanel.booking.day}</span>
                 </div>
-                <div className="text-[11px] text-zinc-400 mt-0.5">Click any field to edit · press Save when done</div>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, fontFamily: "var(--font-mono)" }}>Click any field to edit · press Save when done</div>
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
               <button
                 onClick={() => { setEditPanel(null); setEditForm(null); }}
-                className="px-3 py-1.5 rounded-lg border border-zinc-300 text-zinc-600 text-xs font-medium hover:bg-zinc-100 transition-colors"
+                className="btn btn-secondary"
+                style={{ fontSize: 12 }}
               >
                 Cancel
               </button>
@@ -835,18 +835,7 @@ export default function VanSchedulePage() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="bg-white border-b border-zinc-200 px-6 py-4">
-        <div className="max-w-full mx-auto flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-zinc-900">Van Schedule</h1>
-          <nav className="flex gap-4 text-sm font-medium">
-            <Link href="/" className="text-zinc-500 hover:text-zinc-900 transition-colors">Dashboard</Link>
-            <Link href="/daily-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">Daily Jobs</Link>
-            <Link href="/all-jobs" className="text-zinc-500 hover:text-zinc-900 transition-colors">All Jobs</Link>
-            <span className="text-zinc-900 border-b-2 border-zinc-900 pb-0.5">Van Schedule</span>
-          </nav>
-        </div>
-      </header>
+      {/* no local header — AppNav handles it */}
 
       <main className={`px-4 py-6 space-y-4 transition-all ${editPanel ? "pb-[58vh]" : ""}`}>
         {/* Month nav + issue badge */}
@@ -854,27 +843,29 @@ export default function VanSchedulePage() {
           <div className="flex items-center gap-2">
             <button
               onClick={prevMonth}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 font-bold transition-colors"
+              className="btn btn-secondary"
+              style={{ width: 32, height: 32, padding: 0, fontFamily: "var(--font-mono)" }}
             >
               ←
             </button>
-            <span className="text-base font-semibold text-zinc-900 w-36 text-center">
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: "var(--text-primary)", width: 144, textAlign: "center", display: "inline-block" }}>
               {MONTH_NAMES[viewMonth]} {viewYear}
             </span>
             <button
               onClick={nextMonth}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 font-bold transition-colors"
+              className="btn btn-secondary"
+              style={{ width: 32, height: 32, padding: 0, fontFamily: "var(--font-mono)" }}
             >
               →
             </button>
           </div>
           {!loading && (
             totalIssues > 0 ? (
-              <span className="px-3 py-1 rounded-full bg-red-100 border border-red-200 text-red-700 text-xs font-semibold">
-                ⚠ {totalIssues} conflict{totalIssues !== 1 ? "s" : ""} found
+              <span style={{ padding: "3px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)", background: "var(--red-dim)", border: "1px solid rgba(248,81,73,0.3)", color: "var(--red)" }}>
+                ⚠ {totalIssues} conflict{totalIssues !== 1 ? "s" : ""}
               </span>
             ) : (
-              <span className="px-3 py-1 rounded-full bg-green-100 border border-green-200 text-green-700 text-xs font-semibold">
+              <span style={{ padding: "3px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)", background: "var(--green-dim)", border: "1px solid rgba(63,185,80,0.3)", color: "var(--green)" }}>
                 ✓ All clear
               </span>
             )
