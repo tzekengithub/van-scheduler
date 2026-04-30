@@ -745,16 +745,22 @@ export default function DailyJobsPage() {
     }
   }
 
-  // After editing a location field, re-run reassign for the whole invoice group
-  // if the new location needs SG/TH capability (so all legs stay on the same capable van).
+  // After editing a location field:
+  // - blank toLocation → auto-set tripType to "trip" (day trip convention)
+  // - SG/TH destination → reassign whole invoice group to a capable van
   async function patchLocation(row: BookingRow, field: "fromLocation" | "toLocation", newValue: string) {
-    await patchRow(row.id, field, newValue);
-    if (!row.vanId) return;
     const from = field === "fromLocation" ? newValue : (row.fromLocation ?? "");
     const to   = field === "toLocation"   ? newValue : (row.toLocation ?? "");
+
+    if (field === "toLocation" && newValue === "" && (row.toLocation ?? "") !== "") {
+      await patchFields(row.id, { toLocation: "", tripType: "trip" }, "toLocation");
+    } else {
+      await patchRow(row.id, field, newValue);
+    }
+
     const combined = `${from} ${to}`.toLowerCase();
     if (!combined.includes("singapore") && !combined.includes("thailand")) return;
-    // Collect all sibling booking IDs for the same invoice so reassign respects continuity.
+    if (!row.vanId) return;
     let siblingIds: number[] = [];
     if (row.invoiceNo) {
       const res = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(row.invoiceNo)}`);
@@ -974,7 +980,7 @@ export default function DailyJobsPage() {
                       key={`to-${row.id}`}
                       className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${cellStates[`${row.id}-toLocation`] === "saved" ? "border-green-400" : cellStates[`${row.id}-toLocation`] === "error" ? "border-red-400" : "border-zinc-200"}`}
                       defaultValue={row.toLocation ?? ""}
-                      placeholder="To"
+                      placeholder="To (blank = day trip)"
                       onBlur={(e) => { const v = e.target.value.trim(); if (v !== (row.toLocation ?? "")) patchLocation(row, "toLocation", v); }}
                     />
                   </div>
