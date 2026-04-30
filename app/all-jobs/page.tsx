@@ -43,6 +43,7 @@ interface BookingRow {
   month: string | null;
   year: string | null;
   tripType: TripType | null;
+  isAlphardTrip: number | null;
   tourGuide: string | null;
   vehicleIndex: number | null;
   numberOfVehicles: number | null;
@@ -447,9 +448,9 @@ export default function AllJobsPage() {
               </th>
               <th className={thPlain}>Client Name</th>
               <th className={thPlain}>Client Phone</th>
-              <th className={thPlain}>Location</th>
+              <th className={thPlain}>Location (From → To)</th>
               <th className={thPlain}>Type</th>
-              <th className={thPlain}>Description</th>
+              <th className={thPlain}>Requirements</th>
               <th className={thPlain}>Van Plate</th>
               <th className={thPlain}>Driver Name</th>
               <th className={thPlain}>Driver Contact</th>
@@ -505,18 +506,55 @@ export default function AllJobsPage() {
                   {clientPhone(row) || <span className="text-zinc-300">—</span>}
                 </td>
                 {/* Location */}
-                <td className="px-3 py-2 min-w-[200px] whitespace-nowrap text-zinc-800">
-                  {row.toLocation
-                    ? `${row.fromLocation} → ${row.toLocation}`
-                    : row.fromLocation || "—"}
+                <td className="px-3 py-2 min-w-[220px]">
+                  <div className="flex flex-col gap-0.5">
+                    <EditableText id={row.id} field="fromLocation" value={row.fromLocation} placeholder="From" />
+                    {(row.fromLocation || row.toLocation) && <span className="text-zinc-300 text-[10px] px-1">↓</span>}
+                    <EditableText id={row.id} field="toLocation" value={row.toLocation} placeholder="To" />
+                  </div>
                 </td>
-                {/* Trip Type badge */}
-                <td className="px-3 py-2 whitespace-nowrap min-w-[110px]">
-                  {tripTypeBadge(row.tripType)}
+                {/* Trip Type — button group selector */}
+                <td className="px-3 py-2 whitespace-nowrap min-w-[130px]">
+                  {(() => {
+                    const types: TripType[] = ["trip", "one_way_ride", "round_trip", "day_trip"];
+                    const labels: Record<TripType, string> = { trip: "Trip", one_way_ride: "1-Way", round_trip: "Round", day_trip: "Day" };
+                    const saving = cellStates[`${row.id}-tripType`] === "saving";
+                    const saved  = cellStates[`${row.id}-tripType`] === "saved";
+                    return (
+                      <div className={`flex flex-wrap gap-0.5 ${saving ? "opacity-50 pointer-events-none" : ""}`}>
+                        {types.map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={async () => { if (row.tripType !== t) await patchRow(row.id, "tripType", t); }}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border transition-colors ${
+                              row.tripType === t
+                                ? t === "one_way_ride" ? "bg-blue-500 text-white border-blue-500"
+                                : t === "round_trip"   ? "bg-green-500 text-white border-green-500"
+                                : t === "day_trip"     ? "bg-yellow-500 text-white border-yellow-500"
+                                :                        "bg-orange-500 text-white border-orange-500"
+                                : `bg-white text-zinc-400 border-zinc-200 hover:border-zinc-400 ${saved ? "border-green-300" : ""}`
+                            }`}
+                          >{labels[t]}</button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </td>
-                {/* Description */}
-                <td className="px-3 py-2 whitespace-nowrap text-zinc-600 text-xs min-w-[90px]">
-                  {tripTypeLabel(row.tripType)}
+                {/* Requirements — special flags */}
+                <td className="px-3 py-2 min-w-[120px]">
+                  <div className="flex flex-col gap-0.5">
+                    {row.isAlphardTrip === 1 && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-300 whitespace-nowrap">★ Alphard</span>
+                    )}
+                    {row.vehicleCategory === "Car" && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-300 whitespace-nowrap">🚗 Car</span>
+                    )}
+                    {row.vehicleCategory === "Alphard" && row.isAlphardTrip !== 1 && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap">Alphard</span>
+                    )}
+                    <span className="text-zinc-500 text-[10px]">{tripTypeLabel(row.tripType)}</span>
+                  </div>
                 </td>
                 {/* Van Plate */}
                 <td className="px-3 py-2 min-w-[110px]">
