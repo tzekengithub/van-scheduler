@@ -982,7 +982,7 @@ export default function DailyJobsPage() {
                 {/* Trip Type — button group selector */}
                 <td className="px-3 py-2 whitespace-nowrap min-w-[130px]">
                   {(() => {
-                    const types: TripType[] = ["trip", "one_way_ride", "round_trip", "day_trip"];
+                    const types: TripType[] = ["trip", "one_way_ride"];
                     const labels: Record<TripType, string> = { trip: "Trip", one_way_ride: "1-Way", round_trip: "Round", day_trip: "Day" };
                     const saving = cellStates[`${row.id}-tripType`] === "saving";
                     const saved  = cellStates[`${row.id}-tripType`] === "saved";
