@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const NAV_LINKS = [
   { href: "/",             label: "Fleet",    icon: "◈" },
@@ -12,6 +13,28 @@ const NAV_LINKS = [
 
 export default function AppNav() {
   const pathname = usePathname();
+  const [light, setLight] = useState(false);
+
+  // Read saved preference on mount (before paint to avoid flash)
+  useEffect(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved === "light") {
+      setLight(true);
+      document.documentElement.classList.add("light");
+    }
+  }, []);
+
+  function toggleTheme() {
+    const next = !light;
+    setLight(next);
+    if (next) {
+      document.documentElement.classList.add("light");
+      localStorage.setItem("theme", "light");
+    } else {
+      document.documentElement.classList.remove("light");
+      localStorage.setItem("theme", "dark");
+    }
+  }
 
   return (
     <header
@@ -21,6 +44,7 @@ export default function AppNav() {
         position: "sticky",
         top: 0,
         zIndex: 30,
+        transition: "background 0.2s, border-color 0.2s",
       }}
     >
       <div
@@ -46,7 +70,7 @@ export default function AppNav() {
               alignItems: "center",
               justifyContent: "center",
               fontSize: 14,
-              color: "var(--text-inverse)",
+              color: "#fff",
               fontWeight: 800,
               fontFamily: "var(--font-display)",
               letterSpacing: "-0.02em",
@@ -109,19 +133,52 @@ export default function AppNav() {
           })}
         </nav>
 
-        {/* Right: status indicator */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
-            color: "var(--text-muted)",
-          }}
-        >
-          <span className="dot dot-green pulse-dot" />
-          <span>live</span>
+        {/* Right side */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* Live dot */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-muted)",
+            }}
+          >
+            <span className="dot dot-green pulse-dot" />
+            <span>live</span>
+          </div>
+
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            title={light ? "Switch to dark mode" : "Switch to light mode"}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              background: "var(--bg-muted)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 15,
+              transition: "all 0.15s",
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)";
+              (e.currentTarget as HTMLElement).style.borderColor = "var(--amber-border)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.background = "var(--bg-muted)";
+              (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+            }}
+          >
+            {light ? "🌙" : "☀️"}
+          </button>
         </div>
       </div>
     </header>
