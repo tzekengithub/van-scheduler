@@ -69,16 +69,21 @@ Trip 1:
   Date: [DD Month YYYY]
   Vehicles: [number]
   Price: RM [amount] per vehicle
-  Type: [Standard / One-Way Ride / Alphard / 15 Pax / Car]
 
 Trip 2:
   Route: [From] - [To]
   Date: [DD Month YYYY]
   Vehicles: [number]
   Price: RM [amount] per vehicle
-  Type: [Standard / One-Way Ride / Alphard / 15 Pax / Car]
 
-Notes: [any special requests or remarks]`;
+Notes: [any special requests or remarks]
+
+---
+Only add a Type line if NOT standard:
+  Type: One-Way Ride   ← drop-off only, no return
+  Type: Alphard        ← Toyota Alphard required
+  Type: 15 Pax         ← 15-seater van required
+  Type: Car            ← 5-seater car (outsourced)`;
 
 export default function InvoiceCreatorPage() {
   const { setPreviewRows, setUploadOpen } = useUploadContext();
