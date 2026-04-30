@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Van Scheduler — How It Works</title>
+<style>
+  :root {
+    --navy: #0f172a;
+    --navy2: #1e293b;
+    --navy3: #334155;
+    --teal: #0ea5e9;
+    --teal2: #38bdf8;
+    --orange: #f97316;
+    --green: #22c55e;
+    --purple: #a855f7;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --card: #1e293b;
+    --border: #334155;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--navy);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* NAV */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(15,23,42,0.9);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+  }
+  .nav-logo { font-weight: 700; font-size: 1rem; color: var(--teal); letter-spacing: -0.02em; }
+  .nav-links { display: flex; gap: 1.5rem; }
+  .nav-links a {
+    font-size: 0.82rem; font-weight: 500; color: var(--muted);
+    text-decoration: none; transition: color .2s;
+  }
+  .nav-links a:hover { color: var(--text); }
+
+  /* SECTIONS */
+  section { padding: 6rem 2rem; max-width: 1100px; margin: 0 auto; }
+  .section-label {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--teal); margin-bottom: .75rem;
+  }
+  h1 { font-size: clamp(2.2rem, 5vw, 3.5rem); font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
+  h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 1rem; }
+  h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
+  p { color: var(--muted); font-size: 0.95rem; }
+
+  /* HERO */
+  #hero {
+    min-height: 100vh;
+    display: flex; flex-direction: column; justify-content: center;
+    padding-top: 56px;
+    position: relative; overflow: hidden;
+  }
+  .hero-bg {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse 80% 60% at 60% 40%, rgba(14,165,233,.08) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 40% at 20% 70%, rgba(168,85,247,.06) 0%, transparent 60%);
+  }
+  .hero-grid {
+    position: absolute; inset: 0;
+    background-image: linear-gradient(var(--border) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px; opacity: .15;
+  }
+  .hero-content { position: relative; z-index: 1; }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: .5rem;
+    background: rgba(14,165,233,.1); border: 1px solid rgba(14,165,233,.25);
+    border-radius: 999px; padding: .3rem .9rem;
+    font-size: .78rem; font-weight: 600; color: var(--teal2);
+    margin-bottom: 1.5rem;
+  }
+  .hero-badge span { width: 6px; height: 6px; border-radius: 50%; background: var(--teal2); animation: pulse 2s infinite; }
+  .hero-sub { font-size: 1.1rem; color: var(--muted); max-width: 600px; margin-top: 1rem; }
+  .hero-cta {
+    margin-top: 2.5rem; display: flex; gap: 1rem; flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: .65rem 1.4rem; border-radius: 8px;
+    font-size: .88rem; font-weight: 600; cursor: pointer;
+    text-decoration: none; transition: all .2s; border: none;
+  }
+  .btn-primary { background: var(--teal); color: #fff; }
+  .btn-primary:hover { background: var(--teal2); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(14,165,233,.3); }
+  .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--navy2); border-color: var(--muted); }
+
+  /* STAT CARDS */
+  .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 3rem; }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.25rem 1.5rem; flex: 1; min-width: 140px;
+  }
+  .stat-num { font-size: 1.8rem; font-weight: 800; color: var(--teal); }
+  .stat-label { font-size: .78rem; color: var(--muted); margin-top: .2rem; }
+
+  /* FLOW DIAGRAM */
+  .flow { display: flex; align-items: center; gap: 0; flex-wrap: wrap; margin: 2rem 0; }
+  .flow-step {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1rem 1.25rem;
+    display: flex; flex-direction: column; align-items: center;
+    gap: .4rem; min-width: 110px; text-align: center;
+    cursor: pointer; transition: all .2s;
+  }
+  .flow-step:hover { border-color: var(--teal); transform: translateY(-2px); }
+  .flow-step .icon { font-size: 1.6rem; }
+  .flow-step .label { font-size: .75rem; font-weight: 600; }
+  .flow-step .sub { font-size: .65rem; color: var(--muted); }
+  .flow-arrow {
+    color: var(--border); font-size: 1.2rem; padding: 0 .3rem;
+    flex-shrink: 0;
+  }
+  .flow-step.active { border-color: var(--teal); background: rgba(14,165,233,.08); }
+  .flow-step.active .label { color: var(--teal); }
+
+  /* CARDS GRID */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; margin-top: 2rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.5rem;
+    transition: all .25s; cursor: default;
+  }
+  .card:hover { border-color: var(--teal); transform: translateY(-3px); box-shadow: 0 12px 32px rgba(0,0,0,.3); }
+  .card-icon { font-size: 1.8rem; margin-bottom: .75rem; }
+  .card-title { font-size: .95rem; font-weight: 700; margin-bottom: .4rem; }
+  .card-body { font-size: .82rem; color: var(--muted); line-height: 1.55; }
+  .tag {
+    display: inline-block; padding: .15rem .55rem; border-radius: 999px;
+    font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+    margin-bottom: .5rem;
+  }
+  .tag-teal { background: rgba(14,165,233,.15); color: var(--teal2); }
+  .tag-orange { background: rgba(249,115,22,.15); color: var(--orange); }
+  .tag-purple { background: rgba(168,85,247,.15); color: var(--purple); }
+  .tag-green { background: rgba(34,197,94,.15); color: var(--green); }
+  .tag-red { background: rgba(239,68,68,.15); color: var(--red); }
+  .tag-yellow { background: rgba(234,179,8,.15); color: var(--yellow); }
+
+  /* PRIORITY LADDER */
+  .priority-ladder { margin: 2rem 0; display: flex; flex-direction: column; gap: .6rem; }
+  .priority-row {
+    display: flex; align-items: center; gap: 1rem;
+    padding: .9rem 1.2rem; border-radius: 10px;
+    border: 1px solid var(--border);
+    cursor: pointer; transition: all .2s;
+    position: relative;
+  }
+  .priority-row:hover { transform: translateX(6px); }
+  .priority-row.p1 { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.25); }
+  .priority-row.p1:hover { border-color: var(--red); }
+  .priority-row.p2 { background: rgba(249,115,22,.08); border-color: rgba(249,115,22,.25); }
+  .priority-row.p2:hover { border-color: var(--orange); }
+  .priority-row.p3 { background: rgba(234,179,8,.08); border-color: rgba(234,179,8,.25); }
+  .priority-row.p3:hover { border-color: var(--yellow); }
+  .priority-row.p4 { background: rgba(14,165,233,.08); border-color: rgba(14,165,233,.25); }
+  .priority-row.p4:hover { border-color: var(--teal); }
+  .p-rank {
+    font-size: 1.1rem; font-weight: 800; min-width: 28px;
+    text-align: center;
+  }
+  .p1 .p-rank { color: var(--red); }
+  .p2 .p-rank { color: var(--orange); }
+  .p3 .p-rank { color: var(--yellow); }
+  .p4 .p-rank { color: var(--teal); }
+  .p-name { font-size: .9rem; font-weight: 600; flex: 1; }
+  .p-desc { font-size: .75rem; color: var(--muted); }
+  .p-badge {
+    font-size: .65rem; font-weight: 700; padding: .15rem .5rem;
+    border-radius: 999px; white-space: nowrap;
+  }
+  .p1 .p-badge { background: rgba(239,68,68,.2); color: var(--red); }
+  .p2 .p-badge { background: rgba(249,115,22,.2); color: var(--orange); }
+  .p3 .p-badge { background: rgba(234,179,8,.2); color: var(--yellow); }
+  .p4 .p-badge { background: rgba(14,165,233,.2); color: var(--teal); }
+
+  /* LOCK RULES */
+  .lock-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+  .lock-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.25rem;
+    display: flex; flex-direction: column; gap: .5rem;
+  }
+  .lock-icon { font-size: 1.4rem; }
+  .lock-title { font-size: .88rem; font-weight: 700; }
+  .lock-desc { font-size: .78rem; color: var(--muted); }
+
+  /* SIMULATOR */
+  #simulator {
+    background: var(--navy2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 2rem; margin-top: 2rem;
+    position: relative; overflow: hidden;
+  }
+  .sim-title { font-size: 1rem; font-weight: 700; margin-bottom: 1.5rem; color: var(--text); }
+  .sim-area {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+  }
+  @media (max-width: 640px) { .sim-area { grid-template-columns: 1fr; } }
+  .sim-panel { }
+  .sim-panel-label {
+    font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--muted); margin-bottom: .75rem;
+  }
+  .van-slot {
+    background: var(--navy); border: 1px solid var(--border);
+    border-radius: 10px; padding: .75rem 1rem;
+    margin-bottom: .5rem; min-height: 56px;
+    transition: all .4s cubic-bezier(.34,1.56,.64,1);
+    position: relative;
+  }
+  .van-slot-label {
+    font-size: .72rem; font-weight: 700; color: var(--muted);
+    display: flex; align-items: center; gap: .4rem;
+  }
+  .van-slot.has-booking { border-color: var(--green); background: rgba(34,197,94,.05); }
+  .van-slot.outsourced { border-color: var(--orange); background: rgba(249,115,22,.05); }
+  .van-slot.bumped { animation: bump .6s ease; }
+  .booking-chip {
+    margin-top: .4rem; padding: .3rem .6rem; border-radius: 6px;
+    font-size: .72rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: .35rem;
+    animation: slideIn .35s cubic-bezier(.34,1.56,.64,1);
+  }
+  .chip-datrip { background: rgba(239,68,68,.2); color: var(--red); }
+  .chip-trip { background: rgba(249,115,22,.2); color: var(--orange); }
+  .chip-round { background: rgba(234,179,8,.2); color: var(--yellow); }
+  .chip-oneway { background: rgba(14,165,233,.2); color: var(--teal); }
+  .chip-out { background: rgba(168,85,247,.2); color: var(--purple); }
+
+  .booking-queue { display: flex; flex-direction: column; gap: .5rem; }
+  .queue-item {
+    background: var(--navy); border: 1px solid var(--border);
+    border-radius: 8px; padding: .6rem .9rem;
+    font-size: .78rem; display: flex; align-items: center; justify-content: space-between;
+    transition: all .3s;
+  }
+  .queue-item.assigned { opacity: .35; text-decoration: line-through; }
+  .queue-item.processing {
+    border-color: var(--teal); background: rgba(14,165,233,.06);
+    animation: glow 1s infinite;
+  }
+  .queue-info { display: flex; flex-direction: column; gap: .1rem; }
+  .q-name { font-weight: 600; font-size: .8rem; }
+  .q-meta { font-size: .67rem; color: var(--muted); }
+
+  .sim-controls { margin-top: 1.25rem; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+  .sim-log {
+    margin-top: 1rem; background: var(--navy); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1rem; font-family: monospace;
+    font-size: .73rem; color: var(--muted); max-height: 120px; overflow-y: auto;
+    line-height: 1.6;
+  }
+  .log-ok { color: var(--green); }
+  .log-warn { color: var(--orange); }
+  .log-info { color: var(--teal); }
+
+  /* PAGES SHOWCASE */
+  .pages-tabs { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .page-tab {
+    padding: .45rem 1rem; border-radius: 8px; font-size: .82rem; font-weight: 600;
+    cursor: pointer; transition: all .2s;
+    background: var(--navy2); border: 1px solid var(--border); color: var(--muted);
+  }
+  .page-tab.active { background: var(--teal); border-color: var(--teal); color: #fff; }
+  .page-panel { display: none; }
+  .page-panel.active { display: block; animation: fadeIn .3s ease; }
+  .mock-ui {
+    background: var(--navy); border: 1px solid var(--border);
+    border-radius: 14px; overflow: hidden;
+  }
+  .mock-header {
+    background: var(--navy2); border-bottom: 1px solid var(--border);
+    padding: .75rem 1.25rem; display: flex; align-items: center; gap: .75rem;
+  }
+  .mock-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .mock-title { font-size: .82rem; font-weight: 600; margin-left: .25rem; }
+  .mock-body { padding: 1.25rem; }
+  .mock-table { width: 100%; border-collapse: collapse; font-size: .75rem; }
+  .mock-table th { color: var(--muted); font-weight: 600; text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--border); }
+  .mock-table td { padding: .5rem .6rem; border-bottom: 1px solid rgba(51,65,85,.5); }
+  .mock-table tr:last-child td { border-bottom: none; }
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: .3rem; }
+  .dot-green { background: var(--green); }
+  .dot-orange { background: var(--orange); }
+  .dot-purple { background: var(--purple); }
+  .mock-calendar {
+    display: grid; grid-template-columns: auto repeat(7, 1fr); gap: 1px;
+    background: var(--border); border-radius: 8px; overflow: hidden;
+    font-size: .68rem;
+  }
+  .cal-cell {
+    background: var(--navy2); padding: .4rem .3rem; text-align: center;
+    min-height: 36px;
+  }
+  .cal-header { background: var(--navy3); font-weight: 600; color: var(--muted); }
+  .cal-van { background: var(--navy3); font-weight: 600; font-size: .65rem; text-align: left; padding: .4rem .5rem; display: flex; align-items: center; }
+  .cal-booking {
+    background: rgba(14,165,233,.25); border-radius: 3px;
+    font-size: .6rem; padding: .1rem .3rem; margin: .1rem 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: var(--teal2); font-weight: 600;
+  }
+  .cal-booking.out { background: rgba(168,85,247,.25); color: var(--purple); }
+
+  /* SSE ANIMATION */
+  .sse-stream {
+    background: var(--navy); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.25rem; margin-top: 1.5rem;
+    font-family: monospace; font-size: .76rem; line-height: 1.8;
+  }
+  .sse-line { opacity: 0; transform: translateX(-8px); transition: all .3s; }
+  .sse-line.show { opacity: 1; transform: translateX(0); }
+
+  /* ANIMATIONS */
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .5; transform: scale(.8); }
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; } to { opacity: 1; }
+  }
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(14,165,233,0); }
+    50% { box-shadow: 0 0 12px 2px rgba(14,165,233,.25); }
+  }
+  @keyframes bump {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.04); background: rgba(249,115,22,.12); }
+    100% { transform: scale(1); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+
+  /* DIVIDER */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 0; }
+
+  /* TOOLTIP */
+  [data-tip] { position: relative; cursor: help; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: var(--navy3); color: var(--text); font-size: .72rem;
+    padding: .4rem .7rem; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .2s;
+    border: 1px solid var(--border); z-index: 10;
+  }
+  [data-tip]:hover::after { opacity: 1; }
+
+  /* STEP LIST */
+  .steps { display: flex; flex-direction: column; gap: .5rem; counter-reset: step; }
+  .step {
+    display: flex; gap: 1rem; padding: 1rem 1.25rem;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    transition: all .2s;
+  }
+  .step:hover { border-color: var(--teal); }
+  .step-num {
+    background: rgba(14,165,233,.15); color: var(--teal);
+    font-size: .8rem; font-weight: 800;
+    min-width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-text { font-size: .85rem; color: var(--muted); }
+  .step-text strong { color: var(--text); }
+
+  /* UPLOAD FLOW */
+  .upload-flow {
+    display: flex; gap: 0; align-items: stretch;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; overflow: hidden; margin-top: 1.5rem;
+  }
+  .uf-step {
+    flex: 1; padding: 1.25rem 1rem;
+    border-right: 1px solid var(--border);
+    text-align: center; position: relative;
+    transition: background .2s;
+  }
+  .uf-step:last-child { border-right: none; }
+  .uf-step:hover { background: rgba(14,165,233,.04); }
+  .uf-icon { font-size: 1.8rem; margin-bottom: .5rem; }
+  .uf-title { font-size: .82rem; font-weight: 700; margin-bottom: .25rem; }
+  .uf-desc { font-size: .7rem; color: var(--muted); }
+  .uf-arrow {
+    position: absolute; right: -1px; top: 50%; transform: translateY(-50%);
+    background: var(--teal); color: #fff;
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .65rem; z-index: 1;
+  }
+
+  /* FOOTER */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem; text-align: center;
+    font-size: .78rem; color: var(--muted);
+  }
+
+  /* SCROLL FADE IN */
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity .5s ease, transform .5s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* PROGRESS BAR */
+  .progress-bar {
+    position: fixed; top: 0; left: 0; height: 2px;
+    background: var(--teal); z-index: 200;
+    transition: width .1s;
+  }
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progress"></div>
+
+<nav>
+  <div class="nav-logo">🚐 Van Scheduler</div>
+  <div class="nav-links">
+    <a href="#how">How It Works</a>
+    <a href="#upload">Uploading</a>
+    <a href="#engines">Engines</a>
+    <a href="#priority">Priority</a>
+    <a href="#demo">Live Demo</a>
+    <a href="#pages">Pages</a>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════ HERO -->
+<section id="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-grid"></div>
+  <div class="hero-content">
+    <div class="hero-badge">
+      <span></span> Interactive System Guide
+    </div>
+    <h1>Your Van Booking<br><span style="color:var(--teal)">Brain, Explained.</span></h1>
+    <p class="hero-sub">
+      A plain-English walkthrough of how the van scheduler automatically assigns drivers, handles priorities, resolves conflicts, and keeps everything organised — no tech background needed.
+    </p>
+    <div class="hero-cta">
+      <a href="#how" class="btn btn-primary">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        Start Learning
+      </a>
+      <a href="#demo" class="btn btn-ghost">Try the Demo →</a>
+    </div>
+    <div class="stats reveal">
+      <div class="stat-card">
+        <div class="stat-num">2</div>
+        <div class="stat-label">Scheduling Engines</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">7</div>
+        <div class="stat-label">Recheck Steps</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">4</div>
+        <div class="stat-label">Priority Tiers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">3</div>
+        <div class="stat-label">Main Pages</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ HOW IT WORKS -->
+<section id="how">
+  <div class="section-label">The Big Picture</div>
+  <h2>How the whole system works</h2>
+  <p>Think of this as a very smart secretary. You upload a PDF invoice, and it figures out which van and driver should handle each trip — automatically. Here's the journey every booking takes.</p>
+
+  <div class="upload-flow reveal" style="margin-top:2rem">
+    <div class="uf-step">
+      <div class="uf-icon">📄</div>
+      <div class="uf-title">PDF Invoice</div>
+      <div class="uf-desc">You upload a customer invoice PDF</div>
+      <div class="uf-arrow">›</div>
+    </div>
+    <div class="uf-step">
+      <div class="uf-icon">🔍</div>
+      <div class="uf-title">Parse</div>
+      <div class="uf-desc">System reads and extracts all trip details</div>
+      <div class="uf-arrow">›</div>
+    </div>
+    <div class="uf-step">
+      <div class="uf-icon">🧠</div>
+      <div class="uf-title">Assign</div>
+      <div class="uf-desc">Rules Engine or AI assigns the right van</div>
+      <div class="uf-arrow">›</div>
+    </div>
+    <div class="uf-step">
+      <div class="uf-icon">✅</div>
+      <div class="uf-title">Schedule</div>
+      <div class="uf-desc">Booking appears on your schedule, conflict-free</div>
+    </div>
+  </div>
+
+  <div class="cards reveal">
+    <div class="card">
+      <div class="tag tag-teal">Step 1</div>
+      <div class="card-icon">📋</div>
+      <div class="card-title">Bookings Come In</div>
+      <div class="card-body">Staff uploads a PDF invoice. The system extracts client name, travel date, route, passenger count, vehicle type, and more — automatically.</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-orange">Step 2</div>
+      <div class="card-icon">🚐</div>
+      <div class="card-title">Vans Get Assigned</div>
+      <div class="card-body">The scheduling engine matches each booking to the best available van — considering date, location, passenger capacity, and whether the van can cross borders (Singapore / Thailand).</div>
+    </div>
+    <div class="card">
+      <div class="tag tag-green">Step 3</div>
+      <div class="card-icon">⚖️</div>
+      <div class="card-title">Conflicts Resolved</div>
+      <div class="card-body">If two bookings compete for the same van, the higher-priority trip wins. The lower one either gets moved to another van or is flagged for outsourcing.</div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ UPLOAD FLOWS -->
+<section id="upload">
+  <div class="section-label">Getting Bookings In</div>
+  <h2>Two ways to upload</h2>
+  <p>There are two upload flows. Both end with the same result — bookings in the system, vans assigned. The difference is whether you get to review before it saves.</p>
+
+  <div class="cards reveal" style="margin-top:2rem">
+    <div class="card" style="border-color:rgba(14,165,233,.3)">
+      <div class="tag tag-teal">Upload Flow</div>
+      <div class="card-icon">⚡</div>
+      <div class="card-title">Quick Upload <code style="font-size:.7rem;background:var(--navy3);padding:.1rem .4rem;border-radius:4px">/api/upload</code></div>
+      <div class="card-body">
+        Upload → Parse → Insert → Run Rules Engine. Everything happens at once, no confirmation step. Best when you trust the invoice is correct.
+        <br><br>
+        <span style="color:var(--teal2);font-size:.78rem">✓ Fastest route — one click, done.</span>
+      </div>
+    </div>
+    <div class="card" style="border-color:rgba(168,85,247,.3)">
+      <div class="tag tag-purple">Preview Flow</div>
+      <div class="card-icon">👀</div>
+      <div class="card-title">Preview → Confirm <code style="font-size:.7rem;background:var(--navy3);padding:.1rem .4rem;border-radius:4px">/api/preview → /api/insert</code></div>
+      <div class="card-body">
+        Upload → Parse → Show preview table → Staff confirms → Insert → Run AI Scheduler. You see all extracted rows before anything is saved.
+        <br><br>
+        <span style="color:var(--purple);font-size:.78rem">✓ Safer — review first, then commit.</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:2rem" class="reveal">
+    <h3 style="margin-bottom:1rem">What the system reads from a PDF</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;">
+      <span class="tag tag-teal">📅 Travel date</span>
+      <span class="tag tag-orange">🗺️ From / To location</span>
+      <span class="tag tag-purple">👥 Passenger count</span>
+      <span class="tag tag-green">🚐 Vehicle type (Van / Alphard / Car)</span>
+      <span class="tag tag-yellow">📋 Invoice number</span>
+      <span class="tag tag-teal">💰 Amount</span>
+      <span class="tag tag-red">↩️ Round trip / One-way</span>
+      <span class="tag tag-orange">👤 Client name</span>
+    </div>
+    <p style="margin-top:1rem;font-size:.82rem">Car trips are <em>always</em> outsourced automatically — the system knows your fleet only handles vans and Alphards.</p>
+  </div>
+
+  <div class="sse-stream reveal" style="margin-top:2rem" id="sseDemo">
+    <div class="sim-panel-label" style="margin-bottom:.75rem">📡 Live progress stream (what you see while uploading)</div>
+    <div class="sse-line" style="color:var(--teal)">▶ Parsing PDF…</div>
+    <div class="sse-line" style="color:var(--muted)">  ✓ Extracted 4 booking rows from invoice #INV-2604-001</div>
+    <div class="sse-line" style="color:var(--muted)">  ✓ Detected: 2× Van, 1× Alphard, 1× Car (auto-outsource)</div>
+    <div class="sse-line" style="color:var(--teal)">▶ Inserting bookings into database…</div>
+    <div class="sse-line" style="color:var(--muted)">  ✓ 4 bookings saved</div>
+    <div class="sse-line" style="color:var(--teal)">▶ Running scheduler — Step 1/7: scanning auto-managed bookings…</div>
+    <div class="sse-line" style="color:var(--muted)">  ✓ Found 4 bookings to assign</div>
+    <div class="sse-line" style="color:var(--green)">  ✓ Assigned booking #12 → WXY 1234 (KL→Penang)</div>
+    <div class="sse-line" style="color:var(--green)">  ✓ Assigned booking #13 → ABC 5678 (Penang→JB)</div>
+    <div class="sse-line" style="color:var(--orange)">  ⚠ Booking #14 outsourced — no Alphard available on 2026-05-03</div>
+    <div class="sse-line" style="color:var(--green)">✅ Done — 3 assigned, 1 needs outsource company name</div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ ENGINES -->
+<section id="engines">
+  <div class="section-label">The Scheduling Brain</div>
+  <h2>Two engines, one goal</h2>
+  <p>The system has two scheduling engines. They both assign vans — but in very different ways. Think of them as a rulebook vs a smart advisor.</p>
+
+  <div class="cards reveal" style="margin-top:2rem">
+    <div class="card" style="border-color:rgba(14,165,233,.3)">
+      <div class="tag tag-teal">Engine 1</div>
+      <div class="card-icon">⚙️</div>
+      <div class="card-title">Rules Engine</div>
+      <div class="card-body">
+        Fast, deterministic, zero cost. Follows a strict 7-step process every time. Same input always produces the same output. Great for predictable schedules.
+        <br><br>
+        <strong style="color:var(--text)">Used by:</strong> Recheck button, Quick Upload, per-row reassign
+      </div>
+    </div>
+    <div class="card" style="border-color:rgba(168,85,247,.3)">
+      <div class="tag tag-purple">Engine 2</div>
+      <div class="card-icon">🤖</div>
+      <div class="card-title">AI Scheduler (Gemini 2.5 Pro)</div>
+      <div class="card-body">
+        Smarter decisions for complex conflicts. Understands context, can reason about edge cases. Sends bookings to Gemini in batches of 50. Falls back to the Rules Engine if the API fails.
+        <br><br>
+        <strong style="color:var(--text)">Used by:</strong> Preview → Insert flow, AI chat
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:2rem" class="reveal">
+    <h3 style="margin-bottom:1rem">The 7-Step Rules Engine Process</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text"><strong>Reset auto-managed bookings</strong> — Clears all van assignments that were set automatically (not manually by staff), so we start fresh.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text"><strong>Run priority-based assignment</strong> — Goes through all bookings in priority order. Day trips first, then standard trips, then one-way rides. Higher priority can bump lower ones.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text"><strong>Enforce invoice continuity</strong> — Same invoice number = same van, always. If a customer has a multi-day trip or return leg, they get the same driver throughout.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-text"><strong>Fix same-day multi-vehicle conflicts</strong> — If one invoice needs 3 vans on the same day, makes sure they're all different vehicles.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-text"><strong>Eliminate double-bookings</strong> — Finds any van assigned to two trips at the same time. Keeps the higher-priority one; displaces or outsources the other.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-text"><strong>Mark remaining as outsourced</strong> — Any booking still without a van gets flagged as "needs outsourcing". Staff will be alerted to fill in the outsource company.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">7</div>
+        <div class="step-text"><strong>Final validation</strong> — One last sweep to catch any remaining double-bookings, unnecessary outsources, or capability rule violations.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ PRIORITY -->
+<section id="priority">
+  <div class="section-label">Priority System</div>
+  <h2>Who gets the van first?</h2>
+  <p>When two bookings want the same van on the same day, the system uses a priority ladder. Higher tier wins. Click each tier to learn more.</p>
+
+  <div class="priority-ladder reveal" id="priorityLadder">
+    <div class="priority-row p1" onclick="expandPriority(this, 'p1')">
+      <div class="p-rank">#1</div>
+      <div style="flex:1">
+        <div class="p-name">Day Trips & Multi-Day</div>
+        <div class="p-desc" id="p1desc">Full-day or overnight journeys — the longest, highest-value bookings</div>
+      </div>
+      <span class="p-badge">day_trip</span>
+    </div>
+    <div class="priority-row p2" onclick="expandPriority(this, 'p2')">
+      <div class="p-rank">#2</div>
+      <div style="flex:1">
+        <div class="p-name">Standard Trips</div>
+        <div class="p-desc" id="p2desc">Regular bookings — airport transfers, group tours, standard routes</div>
+      </div>
+      <span class="p-badge">trip / round_trip</span>
+    </div>
+    <div class="priority-row p3" onclick="expandPriority(this, 'p3')">
+      <div class="p-rank">#3</div>
+      <div style="flex:1">
+        <div class="p-name">One-Way Rides</div>
+        <div class="p-desc" id="p3desc">Single-direction transfers — can be bumped by higher-priority jobs</div>
+      </div>
+      <span class="p-badge">one_way_ride</span>
+    </div>
+    <div class="priority-row p4" onclick="expandPriority(this, 'p4')">
+      <div class="p-rank">★</div>
+      <div style="flex:1">
+        <div class="p-name">Singapore / Thailand Override</div>
+        <div class="p-desc" id="p4desc">Cross-border trips can bump <em>any</em> Malaysia-only trip to claim a border-capable van</div>
+      </div>
+      <span class="p-badge">SG/TH cap</span>
+    </div>
+  </div>
+
+  <div class="card reveal" style="margin-top:1.5rem;border-color:rgba(249,115,22,.25)">
+    <div class="card-icon">🔄</div>
+    <div class="card-title">How "Bumping" Works</div>
+    <div class="card-body">
+      When a high-priority trip needs a van that's already taken by a lower-priority booking, the system <strong style="color:var(--orange)">bumps</strong> the lower one out. The bumped booking then gets a second pass to find another free van. If it still can't find one — it gets outsourced. The bumped booking <em>cannot</em> bump anyone else on its second pass.
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ LOCKS -->
+<section id="locks">
+  <div class="section-label">Protection Rules</div>
+  <h2>What the system will never touch</h2>
+  <p>Some bookings are locked and immune to any automated changes. The system respects these absolutely — no exceptions.</p>
+
+  <div class="lock-grid reveal">
+    <div class="lock-card" style="border-color:rgba(239,68,68,.3)">
+      <div class="lock-icon">🔒</div>
+      <div class="lock-title">Manual Lock</div>
+      <div class="lock-desc">Staff clicked "lock" on a booking. It will never be automatically reassigned, bumped, or touched by any engine — ever.</div>
+    </div>
+    <div class="lock-card" style="border-color:rgba(168,85,247,.3)">
+      <div class="lock-icon">🏢</div>
+      <div class="lock-title">Confirmed Outsource</div>
+      <div class="lock-desc">Marked as outsourced AND has a company name filled in. That's a deliberate human decision — the system leaves it alone.</div>
+    </div>
+    <div class="lock-card" style="border-color:rgba(249,115,22,.3)">
+      <div class="lock-icon">🚗</div>
+      <div class="lock-title">Car Trips</div>
+      <div class="lock-desc">Vehicle category "Car" is always outsourced, always. Your fleet doesn't have cars — so the system never tries to assign one.</div>
+    </div>
+    <div class="lock-card" style="border-color:rgba(234,179,8,.3)">
+      <div class="lock-icon">👑</div>
+      <div class="lock-title">Alphard Trips</div>
+      <div class="lock-desc">Only Toyota Alphard vans can be assigned. Regular vans and Alphards never mix — even if a regular van is free.</div>
+    </div>
+  </div>
+
+  <div class="card reveal" style="margin-top:1.5rem;border-color:rgba(34,197,94,.25)">
+    <div class="card-icon">💡</div>
+    <div class="card-title">Outsource Reason</div>
+    <div class="card-body">
+      When the system outsources a booking automatically, it now records <em>why</em> — so you can see at a glance whether it was bumped by a priority trip, or just because no van was free. The reason shows in orange below the company name field.
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ DEMO -->
+<section id="demo">
+  <div class="section-label">Interactive Demo</div>
+  <h2>Watch the scheduler in action</h2>
+  <p>Here's a simplified simulation of how the rules engine assigns bookings to vans. Press <strong style="color:var(--text)">Run Scheduler</strong> to watch it work.</p>
+
+  <div id="simulator" class="reveal">
+    <div class="sim-title">🎮 Mini Scheduler Simulator</div>
+    <div class="sim-area">
+      <div class="sim-panel">
+        <div class="sim-panel-label">🚐 Fleet (3 vans)</div>
+        <div class="van-slot" id="van1">
+          <div class="van-slot-label">🚐 WXY 1234 <span style="color:var(--muted);font-size:.65rem">· KL · 7 pax</span></div>
+        </div>
+        <div class="van-slot" id="van2">
+          <div class="van-slot-label">🚐 ABC 5678 <span style="color:var(--muted);font-size:.65rem">· KL · 7 pax · SG ✓</span></div>
+        </div>
+        <div class="van-slot" id="van3">
+          <div class="van-slot-label">🚐 DEF 9012 <span style="color:var(--muted);font-size:.65rem">· KL · 7 pax</span></div>
+        </div>
+      </div>
+      <div class="sim-panel">
+        <div class="sim-panel-label">📋 Booking Queue (today's jobs)</div>
+        <div class="booking-queue" id="bookingQueue">
+          <div class="queue-item" id="bk1" data-priority="day_trip" data-sg="0">
+            <div class="queue-info">
+              <div class="q-name">🔴 Airport Transfer — Full Day</div>
+              <div class="q-meta">day_trip · 5 pax · KL→KLIA</div>
+            </div>
+            <span class="tag tag-red" style="font-size:.65rem">Tier 1</span>
+          </div>
+          <div class="queue-item" id="bk2" data-priority="trip" data-sg="0">
+            <div class="queue-info">
+              <div class="q-name">🟠 Group Tour — KL City</div>
+              <div class="q-meta">trip · 6 pax · KL→Putrajaya</div>
+            </div>
+            <span class="tag tag-orange" style="font-size:.65rem">Tier 2</span>
+          </div>
+          <div class="queue-item" id="bk3" data-priority="one_way_ride" data-sg="0">
+            <div class="queue-info">
+              <div class="q-name">🔵 One-Way Drop Off</div>
+              <div class="q-meta">one_way_ride · 3 pax · KL→Genting</div>
+            </div>
+            <span class="tag tag-teal" style="font-size:.65rem">Tier 3</span>
+          </div>
+          <div class="queue-item" id="bk4" data-priority="trip" data-sg="1">
+            <div class="queue-info">
+              <div class="q-name">🟡 Singapore Transfer</div>
+              <div class="q-meta">trip · 4 pax · KL→Singapore · 🇸🇬</div>
+            </div>
+            <span class="tag tag-yellow" style="font-size:.65rem">SG Cap</span>
+          </div>
+          <div class="queue-item" id="bk5" data-priority="day_trip" data-sg="0">
+            <div class="queue-info">
+              <div class="q-name">🔴 Wedding Convoy — Full Day</div>
+              <div class="q-meta">day_trip · 7 pax · KL→Seremban</div>
+            </div>
+            <span class="tag tag-red" style="font-size:.65rem">Tier 1</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="sim-log" id="simLog">Press "Run Scheduler" to start the simulation…</div>
+    <div class="sim-controls">
+      <button class="btn btn-primary" id="runBtn" onclick="runSimulator()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Run Scheduler
+      </button>
+      <button class="btn btn-ghost" onclick="resetSimulator()">↺ Reset</button>
+      <span id="simStatus" style="font-size:.78rem;color:var(--muted)"></span>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ PAGES -->
+<section id="pages">
+  <div class="section-label">The Three Pages</div>
+  <h2>Where you spend your time</h2>
+  <p>The system has three main working pages. Each serves a different view of your schedule.</p>
+
+  <div class="pages-tabs reveal">
+    <div class="page-tab active" onclick="switchTab('daily')">📅 Daily Jobs</div>
+    <div class="page-tab" onclick="switchTab('all')">📋 All Jobs</div>
+    <div class="page-tab" onclick="switchTab('schedule')">🗓️ Van Schedule</div>
+  </div>
+
+  <!-- DAILY JOBS -->
+  <div class="page-panel active" id="tab-daily">
+    <p style="margin-bottom:1rem">View all bookings for a selected day. Upload PDFs, edit inline, manually reassign per row, and export a WhatsApp briefing for drivers.</p>
+    <div class="mock-ui">
+      <div class="mock-header">
+        <div class="mock-dot" style="background:#ef4444"></div>
+        <div class="mock-dot" style="background:#eab308;margin-left:4px"></div>
+        <div class="mock-dot" style="background:#22c55e;margin-left:4px"></div>
+        <div class="mock-title">Daily Jobs Record — 3 May 2026</div>
+        <div style="margin-left:auto;display:flex;gap:.5rem">
+          <span style="font-size:.65rem;background:rgba(14,165,233,.15);color:var(--teal);padding:.2rem .5rem;border-radius:4px;font-weight:600">Upload PDF</span>
+          <span style="font-size:.65rem;background:rgba(14,165,233,.15);color:var(--teal);padding:.2rem .5rem;border-radius:4px;font-weight:600">+ Add Row</span>
+          <span style="font-size:.65rem;background:rgba(14,165,233,.15);color:var(--teal2);padding:.2rem .5rem;border-radius:4px;font-weight:600">Recheck (Rules)</span>
+          <span style="font-size:.65rem;background:rgba(34,197,94,.2);color:var(--green);padding:.2rem .5rem;border-radius:4px;font-weight:600">📱 WhatsApp</span>
+        </div>
+      </div>
+      <div class="mock-body">
+        <table class="mock-table">
+          <thead>
+            <tr><th>Invoice</th><th>Client</th><th>Route</th><th>Van</th><th>I/O</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>INV-001</td>
+              <td>Ahmad Family</td>
+              <td>KL → KLIA</td>
+              <td style="color:var(--green)">WXY 1234</td>
+              <td><span style="background:rgba(14,165,233,.2);color:var(--teal);font-size:.65rem;padding:.1rem .4rem;border-radius:3px;font-weight:700">I</span></td>
+              <td><span class="status-dot dot-green"></span>Assigned</td>
+            </tr>
+            <tr>
+              <td>INV-002</td>
+              <td>Lee Siew Ming</td>
+              <td>KL → Singapore</td>
+              <td style="color:var(--green)">ABC 5678</td>
+              <td><span style="background:rgba(14,165,233,.2);color:var(--teal);font-size:.65rem;padding:.1rem .4rem;border-radius:3px;font-weight:700">I</span></td>
+              <td><span class="status-dot dot-green"></span>Assigned</td>
+            </tr>
+            <tr>
+              <td>INV-003</td>
+              <td>Wedding Convoy</td>
+              <td>KL → Seremban</td>
+              <td style="color:var(--orange)">— outsourced —</td>
+              <td><span style="background:rgba(249,115,22,.2);color:var(--orange);font-size:.65rem;padding:.1rem .4rem;border-radius:3px;font-weight:700">O</span></td>
+              <td><span class="status-dot dot-orange"></span>Needs company</td>
+            </tr>
+            <tr>
+              <td>INV-004</td>
+              <td>Corporate Tour</td>
+              <td>KL → Genting</td>
+              <td style="color:var(--green)">DEF 9012</td>
+              <td><span style="background:rgba(14,165,233,.2);color:var(--teal);font-size:.65rem;padding:.1rem .4rem;border-radius:3px;font-weight:700">I</span></td>
+              <td><span class="status-dot dot-green"></span>Assigned</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:.75rem">
+      <div class="card" style="flex:1;min-width:200px;padding:1rem">
+        <div class="card-title" style="font-size:.82rem">📱 WhatsApp Export</div>
+        <div class="card-body" style="font-size:.75rem">Generates a ready-to-send job brief for each booking — client name, route, time, driver. Copy and paste into WhatsApp.</div>
+      </div>
+      <div class="card" style="flex:1;min-width:200px;padding:1rem">
+        <div class="card-title" style="font-size:.82rem">✏️ Inline Editing</div>
+        <div class="card-body" style="font-size:.75rem">Click any cell to edit. Changes save instantly. Toggle I/O to mark a booking as outsourced, or switch it back to in-house.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ALL JOBS -->
+  <div class="page-panel" id="tab-all">
+    <p style="margin-bottom:1rem">See every booking across all dates. Search, sort, filter by invoice number, delete by invoice, and trigger a full recheck.</p>
+    <div class="mock-ui">
+      <div class="mock-header">
+        <div class="mock-dot" style="background:#ef4444"></div>
+        <div class="mock-dot" style="background:#eab308;margin-left:4px"></div>
+        <div class="mock-dot" style="background:#22c55e;margin-left:4px"></div>
+        <div class="mock-title">All Jobs</div>
+        <div style="margin-left:auto;display:flex;gap:.5rem">
+          <span style="font-size:.65rem;background:rgba(14,165,233,.1);color:var(--muted);padding:.2rem .6rem;border-radius:4px">🔍 Search…</span>
+          <span style="font-size:.65rem;background:rgba(14,165,233,.15);color:var(--teal2);padding:.2rem .5rem;border-radius:4px;font-weight:600">Recheck (Rules)</span>
+          <span style="font-size:.65rem;background:rgba(51,65,85,.5);color:var(--text);padding:.2rem .5rem;border-radius:4px;font-weight:600">Print PDF</span>
+        </div>
+      </div>
+      <div class="mock-body">
+        <table class="mock-table">
+          <thead>
+            <tr><th>Date</th><th>Invoice</th><th>Client</th><th>Route</th><th>Van</th><th>Outsource Co.</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>03 May</td><td>INV-001</td><td>Ahmad Family</td><td>KL → KLIA</td>
+              <td style="color:var(--green)">WXY 1234</td><td style="color:var(--muted)">—</td>
+            </tr>
+            <tr>
+              <td>03 May</td><td>INV-003</td><td>Wedding Convoy</td><td>KL → Seremban</td>
+              <td style="color:var(--orange)">—</td>
+              <td>
+                <div style="font-size:.72rem">
+                  <input style="background:var(--navy3);border:1px solid var(--border);border-radius:4px;padding:.15rem .4rem;font-size:.7rem;color:var(--text);width:100px" placeholder="Company name" disabled>
+                  <div style="color:var(--orange);font-size:.65rem;margin-top:.15rem">Bumped by priority trip</div>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td>04 May</td><td>INV-005</td><td>Lee Corp</td><td>KL → Penang</td>
+              <td style="color:var(--green)">WXY 1234</td><td style="color:var(--muted)">—</td>
+            </tr>
+            <tr>
+              <td>05 May</td><td>INV-006</td><td>Tan Family</td><td>KL → JB</td>
+              <td style="color:var(--purple)">—</td>
+              <td><span style="color:var(--purple);font-size:.72rem">Happy Transport</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- VAN SCHEDULE -->
+  <div class="page-panel" id="tab-schedule">
+    <p style="margin-bottom:1rem">Monthly calendar view. Rows = vans, columns = days. Drag and drop to reassign. Conflict sidebar shows any issues.</p>
+    <div class="mock-ui">
+      <div class="mock-header">
+        <div class="mock-dot" style="background:#ef4444"></div>
+        <div class="mock-dot" style="background:#eab308;margin-left:4px"></div>
+        <div class="mock-dot" style="background:#22c55e;margin-left:4px"></div>
+        <div class="mock-title">Van Schedule — May 2026</div>
+      </div>
+      <div class="mock-body" style="overflow-x:auto">
+        <div class="mock-calendar">
+          <div class="cal-cell cal-header cal-van"></div>
+          <div class="cal-cell cal-header">Mon 1</div>
+          <div class="cal-cell cal-header">Tue 2</div>
+          <div class="cal-cell cal-header">Wed 3</div>
+          <div class="cal-cell cal-header">Thu 4</div>
+          <div class="cal-cell cal-header">Fri 5</div>
+          <div class="cal-cell cal-header">Sat 6</div>
+          <div class="cal-cell cal-header">Sun 7</div>
+
+          <div class="cal-cell cal-van">🚐 WXY 1234</div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"><div class="cal-booking">INV-009</div></div>
+          <div class="cal-cell"><div class="cal-booking">INV-001</div></div>
+          <div class="cal-cell"><div class="cal-booking">INV-005</div></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"><div class="cal-booking">INV-011</div></div>
+          <div class="cal-cell"></div>
+
+          <div class="cal-cell cal-van">🚐 ABC 5678</div>
+          <div class="cal-cell"><div class="cal-booking">INV-007</div></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"><div class="cal-booking">INV-002</div></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"><div class="cal-booking">INV-010</div></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"></div>
+
+          <div class="cal-cell cal-van">🚐 DEF 9012</div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"><div class="cal-booking">INV-004</div></div>
+          <div class="cal-cell"><div class="cal-booking">INV-008</div></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"><div class="cal-booking">INV-012</div></div>
+
+          <div class="cal-cell cal-van" style="color:var(--purple)">🏢 Happy Transport</div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"><div class="cal-booking out">INV-003</div></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"></div>
+          <div class="cal-cell"></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:.75rem">
+      <div class="card" style="flex:1;min-width:180px;padding:1rem">
+        <div class="card-title" style="font-size:.82rem">🟣 Purple = Outsourced</div>
+        <div class="card-body" style="font-size:.75rem">Outsourced bookings appear as a separate row at the bottom, under the outsource company's name.</div>
+      </div>
+      <div class="card" style="flex:1;min-width:180px;padding:1rem">
+        <div class="card-title" style="font-size:.82rem">🖱️ Drag & Drop</div>
+        <div class="card-body" style="font-size:.75rem">Drag any booking cell to a different van row to manually reassign it. The booking gets locked after a manual move.</div>
+      </div>
+      <div class="card" style="flex:1;min-width:180px;padding:1rem">
+        <div class="card-title" style="font-size:.82rem">⚠️ Conflict Sidebar</div>
+        <div class="card-body" style="font-size:.75rem">A panel shows all bookings with no van assigned, no driver, or outsource company missing — so nothing slips through.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ OUTSOURCE -->
+<section id="outsource">
+  <div class="section-label">Outsourcing</div>
+  <h2>When there's no van available</h2>
+  <p>Not every booking can be handled in-house. When the fleet is full, the system flags the booking for outsourcing rather than double-booking a van.</p>
+
+  <div class="flow reveal" style="flex-wrap:wrap;gap:.75rem;margin-top:1.5rem">
+    <div class="flow-step">
+      <div class="icon">📋</div>
+      <div class="label">Booking Arrives</div>
+      <div class="sub">No van free</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">
+      <div class="icon">🔄</div>
+      <div class="label">Try Bumping</div>
+      <div class="sub">Move lower-priority</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">
+      <div class="icon">❌</div>
+      <div class="label">Still No Van</div>
+      <div class="sub">All vans occupied</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="border-color:rgba(249,115,22,.4)">
+      <div class="icon">🏢</div>
+      <div class="label">Flag Outsourced</div>
+      <div class="sub">Shows reason</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="border-color:rgba(168,85,247,.4)">
+      <div class="icon">✍️</div>
+      <div class="label">Staff Fills In</div>
+      <div class="sub">Company name</div>
+    </div>
+  </div>
+
+  <div class="cards reveal">
+    <div class="card">
+      <div class="card-icon">🔴</div>
+      <div class="card-title">Auto-outsourced (needs action)</div>
+      <div class="card-body">System marked as outsourced but no company name yet. Shows as a conflict. Staff must fill in the outsource company name to confirm it.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">🟣</div>
+      <div class="card-title">Confirmed outsource</div>
+      <div class="card-body">Company name filled in. Protected — the system will never touch this booking again. Appears on the Van Schedule as a separate outsource row.</div>
+    </div>
+    <div class="card">
+      <div class="card-icon">🟠</div>
+      <div class="card-title">Outsource Reason</div>
+      <div class="card-body">Shows exactly <em>why</em> it was outsourced — e.g. "Bumped by higher-priority trip" or "No van available after schedule check".</div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════ GLOSSARY -->
+<section id="glossary">
+  <div class="section-label">Quick Reference</div>
+  <h2>Terms you'll see in the system</h2>
+  <div class="cards reveal">
+    <div class="card" style="padding:1rem">
+      <div class="card-title" style="font-size:.82rem"><span class="tag tag-teal" style="margin-right:.4rem">I</span>In-house</div>
+      <div class="card-body" style="font-size:.76rem">Booking handled by your own fleet. A van is (or will be) assigned.</div>
+    </div>
+    <div class="card" style="padding:1rem">
+      <div class="card-title" style="font-size:.82rem"><span class="tag tag-orange" style="margin-right:.4rem">O</span>Outsourced</div>
+      <div class="card-body" style="font-size:.76rem">Handled by an external company. No fleet van assigned.</div>
+    </div>
+    <div class="card" style="padding:1rem">
+      <div class="card-title" style="font-size:.82rem">🔒 manualChange = 1</div>
+      <div class="card-body" style="font-size:.76rem">Hard lock. Staff made a deliberate change. Immune to all automated recheck.</div>
+    </div>
+    <div class="card" style="padding:1rem">
+      <div class="card-title" style="font-size:.82rem">📡 SSE Stream</div>
+      <div class="card-body" style="font-size:.76rem">Real-time log messages that appear in the UI while the scheduler is running.</div>
+    </div>
+    <div class="card" style="padding:1rem">
+      <div class="card-title" style="font-size:.82rem">♻️ Recheck</div>
+      <div class="card-body" style="font-size:.76rem">Re-runs the entire scheduling process from scratch on all auto-managed bookings.</div>
+    </div>
+    <div class="card" style="padding:1rem">
+      <div class="card-title" style="font-size:.82rem">🔄 Bump</div>
+      <div class="card-body" style="font-size:.76rem">A higher-priority booking displaces a lower-priority one from its assigned van.</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Van Scheduler System — Internal Guide &nbsp;·&nbsp; Built with Next.js, Drizzle ORM, Neon DB &nbsp;·&nbsp; AI by Gemini 2.5 Pro via OpenRouter
+</footer>
+
+<script>
+  // ── Progress bar ──────────────────────────────────────────────────────────
+  window.addEventListener('scroll', () => {
+    const el = document.getElementById('progress');
+    const pct = (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100;
+    el.style.width = pct + '%';
+  });
+
+  // ── Scroll reveal ─────────────────────────────────────────────────────────
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); } });
+  }, { threshold: 0.1 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+  // ── SSE demo animation ────────────────────────────────────────────────────
+  const sseLines = document.querySelectorAll('#sseDemo .sse-line');
+  let sseStarted = false;
+  const sseObserver = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && !sseStarted) {
+      sseStarted = true;
+      sseLines.forEach((line, i) => {
+        setTimeout(() => line.classList.add('show'), i * 280);
+      });
+    }
+  }, { threshold: 0.4 });
+  sseObserver.observe(document.getElementById('sseDemo'));
+
+  // ── Priority expand ───────────────────────────────────────────────────────
+  const priorityInfo = {
+    p1: 'Day trips are the king. If a day trip needs a van, it gets it — even if another booking is already there. The displaced booking gets a second chance.',
+    p2: 'Standard trips: airport transfers, group tours, regular routes. Can bump one-way rides but yield to day trips.',
+    p3: 'One-way rides are the most flexible. They can be bumped by anything above them. If bumped, they look for another free van — but cannot bump anyone else.',
+    p4: 'Cross-border trips to Singapore or Thailand have a special override. They can claim any border-capable van, even bumping a standard Malaysia-only trip to do so.'
+  };
+  function expandPriority(el, key) {
+    const desc = el.querySelector('.p-desc');
+    const orig = { p1:'Full-day or overnight journeys — the longest, highest-value bookings', p2:'Regular bookings — airport transfers, group tours, standard routes', p3:'Single-direction transfers — can be bumped by higher-priority jobs', p4:'Cross-border trips can bump any Malaysia-only trip to claim a border-capable van' };
+    const isExpanded = el.classList.contains('expanded');
+    document.querySelectorAll('.priority-row').forEach(r => {
+      r.classList.remove('expanded');
+      const d = r.querySelector('.p-desc');
+      const k = r.className.match(/p[1-4]/)?.[0];
+      if (k && orig[k]) d.textContent = orig[k];
+    });
+    if (!isExpanded) {
+      el.classList.add('expanded');
+      desc.textContent = priorityInfo[key];
+    }
+  }
+
+  // ── Page tabs ─────────────────────────────────────────────────────────────
+  function switchTab(name) {
+    document.querySelectorAll('.page-tab').forEach((t, i) => {
+      const names = ['daily','all','schedule'];
+      t.classList.toggle('active', names[i] === name);
+    });
+    document.querySelectorAll('.page-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+  }
+
+  // ── Simulator ─────────────────────────────────────────────────────────────
+  const simState = {
+    running: false,
+    vans: [
+      { id: 'van1', name: 'WXY 1234', sg: false, booking: null },
+      { id: 'van2', name: 'ABC 5678', sg: true,  booking: null },
+      { id: 'van3', name: 'DEF 9012', sg: false, booking: null },
+    ],
+    bookings: [
+      { id: 'bk1', name: 'Airport Transfer — Full Day', type: 'day_trip', sg: false, pax: 5, color: 'chip-datrip', label: '🔴 day_trip' },
+      { id: 'bk2', name: 'Group Tour — KL City',        type: 'trip',     sg: false, pax: 6, color: 'chip-trip',   label: '🟠 trip' },
+      { id: 'bk3', name: 'One-Way Drop Off',            type: 'one_way_ride', sg: false, pax: 3, color: 'chip-oneway', label: '🔵 one_way' },
+      { id: 'bk4', name: 'Singapore Transfer',          type: 'trip',     sg: true,  pax: 4, color: 'chip-round',  label: '🟡 SG' },
+      { id: 'bk5', name: 'Wedding Convoy — Full Day',   type: 'day_trip', sg: false, pax: 7, color: 'chip-datrip', label: '🔴 day_trip' },
+    ]
+  };
+
+  function simLog(msg, cls = '') {
+    const log = document.getElementById('simLog');
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = msg;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function clearVanSlot(vanId) {
+    const slot = document.getElementById(vanId);
+    const chip = slot.querySelector('.booking-chip');
+    if (chip) chip.remove();
+    slot.classList.remove('has-booking','outsourced','bumped');
+  }
+
+  function assignVanSlot(vanId, booking, label) {
+    const slot = document.getElementById(vanId);
+    const chip = document.createElement('div');
+    chip.className = `booking-chip ${booking.color}`;
+    chip.textContent = `${label} ${booking.name}`;
+    slot.appendChild(chip);
+    slot.classList.add('has-booking');
+  }
+
+  function markOutsourced(bookingId, reason) {
+    const qItem = document.getElementById(bookingId);
+    if (qItem) {
+      qItem.style.borderColor = 'rgba(168,85,247,.4)';
+      qItem.style.background = 'rgba(168,85,247,.05)';
+      const chip = document.createElement('div');
+      chip.className = 'booking-chip chip-out';
+      chip.style.display = 'block';
+      chip.style.marginTop = '.3rem';
+      chip.style.fontSize = '.65rem';
+      chip.textContent = `⚠ Outsourced — ${reason}`;
+      qItem.appendChild(chip);
+    }
+  }
+
+  function markAssigned(bookingId) {
+    const el = document.getElementById(bookingId);
+    if (el) el.classList.add('assigned');
+  }
+
+  function highlightQueue(bookingId) {
+    document.querySelectorAll('.queue-item').forEach(i => i.classList.remove('processing'));
+    const el = document.getElementById(bookingId);
+    if (el) el.classList.add('processing');
+  }
+
+  function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function runSimulator() {
+    if (simState.running) return;
+    simState.running = true;
+    document.getElementById('runBtn').disabled = true;
+    document.getElementById('simLog').innerHTML = '';
+    document.getElementById('simStatus').textContent = 'Running…';
+
+    // reset van slots
+    simState.vans.forEach(v => { v.booking = null; clearVanSlot(v.id); });
+    document.querySelectorAll('.queue-item').forEach(i => { i.classList.remove('assigned','processing'); while(i.querySelector('.booking-chip')) i.querySelector('.booking-chip').remove(); });
+
+    await delay(400);
+    simLog('━━━ SCHEDULER STARTED ━━━', 'log-info');
+    await delay(300);
+    simLog('Step 1/7 — Reset auto-managed bookings…', 'log-info');
+    await delay(400);
+    simLog('Step 2/7 — Priority-based assignment…', 'log-info');
+    await delay(300);
+
+    // Sort: day_trip first, then trip, then one_way_ride. SG override.
+    const sorted = [...simState.bookings].sort((a,b) => {
+      const rank = { day_trip: 0, trip: 1, one_way_ride: 2 };
+      return rank[a.type] - rank[b.type];
+    });
+
+    let bumpedBooking = null;
+
+    for (const bk of sorted) {
+      highlightQueue(bk.id);
+      await delay(600);
+      simLog(`  Processing: "${bk.name}" [${bk.type}${bk.sg ? ' · SG' : ''}]`);
+      await delay(400);
+
+      // Find free van
+      let freeVan = simState.vans.find(v => !v.booking && (!bk.sg || v.sg));
+
+      if (freeVan) {
+        freeVan.booking = bk;
+        assignVanSlot(freeVan.id, bk, '✓');
+        markAssigned(bk.id);
+        simLog(`  → Assigned to ${freeVan.name}`, 'log-ok');
+      } else if (bk.type !== 'one_way_ride') {
+        // Try bumping a one_way_ride
+        const bumpTarget = simState.vans.find(v => v.booking && v.booking.type === 'one_way_ride' && (!bk.sg || v.sg));
+        if (bumpTarget) {
+          const displaced = bumpTarget.booking;
+          simLog(`  → No free van. Bumping "${displaced.name}" (one_way_ride)…`, 'log-warn');
+          await delay(400);
+          clearVanSlot(bumpTarget.id);
+          document.getElementById(bumpTarget.id).classList.add('bumped');
+          bumpTarget.booking = bk;
+          assignVanSlot(bumpTarget.id, bk, '✓');
+          markAssigned(bk.id);
+          simLog(`  → Assigned to ${bumpTarget.name} (bumped ${displaced.name})`, 'log-ok');
+          bumpedBooking = displaced;
+          await delay(300);
+        } else {
+          markOutsourced(bk.id, 'No free van after full check');
+          simLog(`  → No van available — outsourced`, 'log-warn');
+        }
+      } else {
+        markOutsourced(bk.id, 'No van available');
+        simLog(`  → No van available — outsourced`, 'log-warn');
+      }
+      await delay(300);
+    }
+
+    // Second pass for bumped booking
+    if (bumpedBooking) {
+      await delay(400);
+      simLog(`\nStep 2b — Second pass for bumped booking: "${bumpedBooking.name}"`, 'log-info');
+      highlightQueue(bumpedBooking.id);
+      await delay(500);
+      const freeVan = simState.vans.find(v => !v.booking);
+      if (freeVan) {
+        freeVan.booking = bumpedBooking;
+        assignVanSlot(freeVan.id, bumpedBooking, '↺');
+        markAssigned(bumpedBooking.id);
+        simLog(`  → Recovered to ${freeVan.name}`, 'log-ok');
+      } else {
+        markOutsourced(bumpedBooking.id, 'No van after second pass');
+        simLog(`  → Still no van — outsourced`, 'log-warn');
+      }
+    }
+
+    document.querySelectorAll('.queue-item').forEach(i => i.classList.remove('processing'));
+
+    await delay(400);
+    simLog('\n━━━ RECHECK COMPLETE ━━━', 'log-info');
+    const assigned = simState.vans.filter(v => v.booking).length;
+    simLog(`✅ ${assigned} assigned · ${simState.bookings.length - assigned} outsourced`, 'log-ok');
+    document.getElementById('simStatus').textContent = `Done — ${assigned}/5 assigned`;
+    document.getElementById('runBtn').disabled = false;
+    simState.running = false;
+  }
+
+  function resetSimulator() {
+    simState.running = false;
+    simState.vans.forEach(v => { v.booking = null; clearVanSlot(v.id); });
+    document.querySelectorAll('.queue-item').forEach(i => {
+      i.classList.remove('assigned','processing');
+      while(i.querySelector('.booking-chip')) i.querySelector('.booking-chip').remove();
+      i.style.borderColor = '';
+      i.style.background = '';
+    });
+    document.getElementById('simLog').textContent = 'Press "Run Scheduler" to start the simulation…';
+    document.getElementById('simStatus').textContent = '';
+    document.getElementById('runBtn').disabled = false;
+  }
+</script>
+</body>
+</html>

@@ -115,120 +115,377 @@ function formatShortDate(day: string, month: string, year: string): string {
 // ── WhatsApp export ───────────────────────────────────────────────────────────
 
 function formatBriefDate(travelDate: string): string {
-  if (!travelDate) return "";
-  const d = new Date(travelDate + "T00:00:00");
-  if (isNaN(d.getTime())) return travelDate;
-  return `${d.getDate()}/${d.getMonth() + 1}`;
+  const raw = cleanText(travelDate);
+  if (!raw) return "";
+  const d = new Date(raw + "T00:00:00");
+  if (isNaN(d.getTime())) return raw;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+function cleanText(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (/^(undefined|null|nan)$/i.test(text)) return "";
+  if (text === "-" || (text.length === 1 && text.charCodeAt(0) === 8212)) return "";
+  return text;
+}
+
+function finishWhatsAppText(lines: string[]): string {
+  return lines
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+}
+
+function pushBlank(lines: string[]) {
+  if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("");
+}
+
+function pushSection(lines: string[], label: string, value: string, always = false) {
+  const cleanValue = cleanText(value);
+  if (!always && !cleanValue) return;
+  pushBlank(lines);
+  lines.push(label, cleanValue);
+}
+
+function pushInlineSection(lines: string[], label: string, value: string, always = false) {
+  const cleanValue = cleanText(value);
+  if (!always && !cleanValue) return;
+  lines.push(cleanValue ? `${label} ${cleanValue}` : label);
+}
+
+function normalizeComparable(value: string): string {
+  return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function uniqueBy<T>(items: T[], keyFor: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    const key = keyFor(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+function rowHaystack(row: BookingRow): string {
+  return [
+    row.fromLocation,
+    row.toLocation,
+    row.details,
+    row.clientDetails,
+    row.tourGuide,
+  ].map(cleanText).filter(Boolean).join(" ");
+}
+
+function rowsHaystack(rows: BookingRow[]): string {
+  return rows.map(rowHaystack).join(" ");
+}
+
+function extractTime(row: BookingRow): string {
+  const match = rowHaystack(row).match(
+    /\b((?:[01]?\d|2[0-3])[:.][0-5]\d\s*(?:am|pm)?|(?:[1-9]|1[0-2])\s*(?:am|pm))\b/i
+  );
+  return cleanText(match?.[1]);
+}
+
+function extractFlightNo(row: BookingRow): string {
+  const text = rowHaystack(row);
+  const explicit = text.match(/\bflight\s*(?:no\.?|number)?\s*[:#-]?\s*([A-Z0-9]{2,4}\s?\d{2,5}[A-Z]?)\b/i);
+  if (explicit?.[1]) return cleanText(explicit[1]).toUpperCase();
+  const general = text.match(/\b([A-Z]{2}\s?\d{2,5}[A-Z]?)\b/);
+  return cleanText(general?.[1]).toUpperCase();
+}
+
+function extractHotel(rows: BookingRow[]): string {
+  const hotelPattern = /\b(hotel|resort|inn|suite|suites|serviced residence)\b/i;
+  for (const row of rows) {
+    const locations = [row.fromLocation, row.toLocation].map(cleanText);
+    const match = locations.find((location) => hotelPattern.test(location));
+    if (match) return match;
+  }
+  const detailLine = rows
+    .flatMap((row) => cleanText(row.details).split(/\n+/))
+    .map(cleanText)
+    .find((line) => hotelPattern.test(line));
+  return cleanText(detailLine);
+}
+
+function isLikelyPhone(value: string): boolean {
+  return /(?:\+?\d[\d\s-]{6,}\d)/.test(value);
+}
+
+function guestContactLines(row: BookingRow): string[] {
+  const lines = cleanText(row.clientDetails).split(/\n+/).map(cleanText).filter(Boolean);
+  if (lines.length === 0) return [];
+
+  const phones = lines.filter(isLikelyPhone);
+  const names = lines.filter((line) => !isLikelyPhone(line));
+
+  if (phones.length === 0 || names.length === 0) return lines;
+  if (phones.length === 1) return names.map((name) => `${name} - ${phones[0]}`);
+
+  const paired = names.map((name, index) => {
+    const phone = phones[index] ?? phones[phones.length - 1];
+    return `${name} - ${phone}`;
+  });
+  const extraPhones = phones.slice(names.length);
+  return [...paired, ...extraPhones];
+}
+
+function passengerAndLuggage(row: BookingRow): string {
+  const pax = typeof row.passengerCount === "number" && row.passengerCount > 0
+    ? `${row.passengerCount} pax`
+    : "";
+  const details = rowHaystack(row);
+  const lower = details.toLowerCase();
+
+  let luggage = "";
+  const luggageCount = details.match(/\b\d+\s*(?:pcs?|pieces?|bags?|luggages?)\b/i);
+  if (luggageCount?.[0]) {
+    luggage = luggageCount[0];
+  } else if (/\b(with|including)\s+luggage\b/i.test(details)) {
+    luggage = "with luggage";
+  } else if (/\b(no|without)\s+luggage\b/i.test(lower)) {
+    luggage = "without luggage";
+  }
+
+  return [pax, luggage].filter(Boolean).join(" ");
+}
+
+function remarksFor(row: BookingRow): string {
+  const remarks = cleanText(row.details);
+  if (!remarks) return "";
+
+  const from = cleanText(row.fromLocation);
+  const to = cleanText(row.toLocation);
+  const normalizedRemarks = normalizeComparable(remarks);
+  const routeForms = [
+    from,
+    `${from} ${to}`,
+    `${from} to ${to}`,
+    `${from} ${to} one way`,
+    `${from} ${to} one-way`,
+    `${from} ${to} ride only`,
+  ].map(normalizeComparable);
+
+  if (routeForms.includes(normalizedRemarks)) return "";
+  return remarks;
+}
+
+function combinedRemarks(rows: BookingRow[]): string {
+  return uniqueBy(
+    rows.map(remarksFor).filter(Boolean),
+    (remark) => normalizeComparable(remark)
+  ).join("\n");
+}
+
+function serviceValue(rows: BookingRow[], yesPattern: RegExp, noPattern: RegExp): string {
+  const text = rowsHaystack(rows).toLowerCase();
+  if (noPattern.test(text)) return "No";
+  if (yesPattern.test(text)) return "Yes";
+  return "";
+}
+
+function pushServiceRequirements(lines: string[], rows: BookingRow[]) {
+  pushBlank(lines);
+  lines.push("Service Requirements:");
+  pushInlineSection(lines, "Paging:", serviceValue(rows, /\bpaging\b/i, /\b(no|without)\s+paging\b/i), true);
+  pushInlineSection(
+    lines,
+    "Hotel Check-In Assistance:",
+    serviceValue(rows, /\b(help\s+to\s+)?check[-\s]?in\b|\bhotel\s+check[-\s]?in\b/i, /\b(no|without)\s+(hotel\s+)?check[-\s]?in\b/i),
+    true
+  );
+  pushInlineSection(
+    lines,
+    "Luggage Assistance:",
+    serviceValue(rows, /\b(luggage\s+assistance|assist(?:ance)?\s+with\s+luggage|help\s+with\s+luggage|porter)\b/i, /\b(no|without)\s+luggage\s+assistance\b/i),
+    true
+  );
+  pushInlineSection(lines, "Remarks:", combinedRemarks(rows), true);
+}
+
+function inferTripType(row: BookingRow, allLegs: BookingRow[]): string {
+  const uniqueDates = new Set(allLegs.map((leg) => cleanText(leg.travelDate)).filter(Boolean));
+  if (uniqueDates.size > 1) return "Multi-Day Trip";
+
+  const text = rowsHaystack([row, ...allLegs]);
+  if (/\b(KLIA\s*1|KLIA\s*2|KLIA|airport|terminal|arrival|departure)\b/i.test(text) || extractFlightNo(row)) {
+    return "Airport Transfer";
+  }
+  if (/\b(10\s*hours?|10\s*hrs?|day\s*trip|full\s*day|melaka\s+day\s+trip|kl\s+day\s+trip)\b/i.test(text) || row.tripType === "day_trip") {
+    return "Day Trip";
+  }
+  if (/\b(convention\s+cent(?:er|re)|event\s+venue|hotel\s+event|event|expo|exhibition|conference|ballroom|banquet|wedding)\b/i.test(text)) {
+    return "Event Transfer";
+  }
+  if (cleanText(row.fromLocation) && cleanText(row.toLocation)) return "Point-to-Point Transfer";
+  return "Transfer";
+}
+
+function hasDriverData(row: BookingRow | undefined): boolean {
+  if (!row) return false;
+  return Boolean(
+    cleanText(row.driverName) ||
+    cleanText(row.driverContact) ||
+    cleanText(row.vehiclePlate) ||
+    cleanText(row.vanNumber)
+  );
+}
+
+function driverLines(row: BookingRow | undefined): string[] {
+  if (!row) return [];
+  return [
+    cleanText(row.driverName),
+    cleanText(row.driverContact),
+    cleanText(row.vehiclePlate) || cleanText(row.vanNumber),
+  ].filter(Boolean);
+}
+
+function driverByVehicle(legs: BookingRow[]): Map<number, BookingRow> {
+  const drivers = new Map<number, BookingRow>();
+  for (const leg of legs) {
+    const vi = leg.vehicleIndex && leg.vehicleIndex > 0 ? leg.vehicleIndex : 1;
+    if (!drivers.has(vi) && hasDriverData(leg)) drivers.set(vi, leg);
+  }
+  return drivers;
+}
+
+function vehicleCount(legs: BookingRow[], repRow: BookingRow): number {
+  const declared = repRow.numberOfVehicles && repRow.numberOfVehicles > 0 ? repRow.numberOfVehicles : 1;
+  const maxIndex = legs.reduce((max, leg) => Math.max(max, leg.vehicleIndex ?? 1), 1);
+  return Math.max(declared, maxIndex);
+}
+
+function vehicleLabel(row: BookingRow | undefined, fallback: BookingRow): string {
+  const category = cleanText(row?.vehicleCategory) || cleanText(fallback.vehicleCategory);
+  return category && category.toLowerCase() !== "van" ? category : "Van";
+}
+
+function pushDriverInformation(lines: string[], legs: BookingRow[], repRow: BookingRow) {
+  const drivers = driverByVehicle(legs);
+  const count = vehicleCount(legs, repRow);
+  const isMultiVehicle = count > 1 || drivers.size > 1;
+
+  pushBlank(lines);
+  if (isMultiVehicle) {
+    const indexes = Array.from(
+      new Set([
+        ...Array.from({ length: count }, (_, index) => index + 1),
+        ...Array.from(drivers.keys()),
+      ])
+    ).sort((a, b) => a - b);
+
+    for (const index of indexes) {
+      const driver = drivers.get(index);
+      lines.push(`${vehicleLabel(driver, repRow)} ${index} Driver Information:`);
+      const info = driverLines(driver);
+      lines.push(...(info.length > 0 ? info : ["No driver assigned"]));
+      lines.push("");
+    }
+    return;
+  }
+
+  const driver = drivers.get(1) ?? legs.find(hasDriverData) ?? repRow;
+  const info = driverLines(driver);
+  if (info.length === 0) {
+    lines.push("No driver assigned");
+    return;
+  }
+
+  lines.push("Driver Information:");
+  lines.push(...info);
+}
+
+function legKey(leg: BookingRow): string {
+  return [
+    cleanText(leg.travelDate),
+    normalizeComparable(cleanText(leg.fromLocation)),
+    normalizeComparable(cleanText(leg.toLocation)),
+    normalizeComparable(cleanText(leg.details)),
+  ].join("|");
 }
 
 function buildInvBlock(invKey: string, allInvLegs: BookingRow[], repRow: BookingRow): string {
   const lines: string[] = [];
 
-  // Deduplicate legs by date+route (multi-van rows share same date/route)
-  const seenLegKeys = new Set<string>();
-  const uniqueLegs: BookingRow[] = [];
-  for (const leg of allInvLegs) {
-    const k = `${leg.travelDate}|${leg.fromLocation}|${leg.toLocation}`;
-    if (!seenLegKeys.has(k)) { seenLegKeys.add(k); uniqueLegs.push(leg); }
+  // Deduplicate legs by date and route so multi-van rows share one itinerary leg.
+  const uniqueLegs = uniqueBy(allInvLegs, legKey)
+    .sort((a, b) => (a.travelDate ?? "").localeCompare(b.travelDate ?? "") || a.id - b.id);
+
+  const isMultiLeg = uniqueLegs.length > 1;
+
+  if (isMultiLeg) {
+    if (!invKey.startsWith("__solo_")) pushSection(lines, "Invoice No:", invKey, true);
+    pushSection(lines, "Group / Booking:", clientName(repRow) || remarksFor(repRow), true);
+    pushSection(lines, "Pax & Luggage:", passengerAndLuggage(repRow), true);
+    pushSection(lines, "Hotel:", extractHotel(allInvLegs), true);
+
+    pushBlank(lines);
+    lines.push("Itinerary:");
+
+    uniqueLegs.forEach((leg, index) => {
+      lines.push("");
+      lines.push(`Day ${index + 1} - ${formatBriefDate(leg.travelDate)}`);
+      lines.push("Time:");
+      lines.push(extractTime(leg));
+      lines.push("From:");
+      lines.push(cleanText(leg.fromLocation));
+      lines.push("To:");
+      lines.push(cleanText(leg.toLocation));
+      lines.push("Remarks:");
+      lines.push(remarksFor(leg));
+    });
+
+    pushDriverInformation(lines, allInvLegs, repRow);
+    pushServiceRequirements(lines, allInvLegs);
+    return finishWhatsAppText(lines);
   }
 
-  const isMultiDay = uniqueLegs.length > 1;
-  const isMultiVan = (repRow.numberOfVehicles ?? 1) > 1 ||
-    new Set(allInvLegs.map(r => r.vehicleIndex ?? 1)).size > 1;
+  pushSection(lines, "Date:", formatBriefDate(repRow.travelDate), true);
+  pushSection(lines, "Time:", extractTime(repRow), true);
+  pushSection(lines, "Flight No.:", extractFlightNo(repRow), true);
+  pushSection(lines, "Trip Type:", inferTripType(repRow, allInvLegs), true);
+  pushSection(lines, "From:", cleanText(repRow.fromLocation), true);
+  pushSection(lines, "To:", cleanText(repRow.toLocation), true);
+  pushSection(lines, "Pax & Luggage:", passengerAndLuggage(repRow), true);
+  pushSection(lines, "Guest Contact:", guestContactLines(repRow).join("\n"), true);
+  pushSection(lines, "Tour Guide:", cleanText(repRow.tourGuide), true);
+  pushServiceRequirements(lines, [repRow]);
+  pushDriverInformation(lines, allInvLegs, repRow);
 
-  // Collect one driver row per vehicleIndex
-  const driverByVehicle = new Map<number, BookingRow>();
-  for (const leg of allInvLegs) {
-    const vi = leg.vehicleIndex ?? 1;
-    if (!driverByVehicle.has(vi) && (leg.driverName || leg.vehiclePlate || leg.vanNumber)) {
-      driverByVehicle.set(vi, leg);
-    }
-  }
+  return finishWhatsAppText(lines);
+}
 
-  // ── Itinerary ──
-  if (isMultiDay) {
-    for (const leg of uniqueLegs) {
-      const d = formatBriefDate(leg.travelDate);
-      const from = leg.fromLocation?.trim() || "?";
-      const to = leg.toLocation?.trim() || "?";
-      if (leg.tripType === "day_trip") {
-        lines.push(`${d} - ${from} Day Trip`);
-      } else {
-        lines.push(`${d} - ${from} → ${to}`);
-      }
-    }
-  } else {
-    lines.push(formatBriefDate(repRow.travelDate));
-    lines.push(``);
-    lines.push(`_______`);
-    lines.push(``);
-    const from = repRow.fromLocation?.trim() || "";
-    const to = repRow.toLocation?.trim() || "";
-    if (repRow.tripType === "day_trip") {
-      lines.push(`Day Trip: ${from}`);
-    } else {
-      if (from) { lines.push(`From:`); lines.push(from); }
-      lines.push(``);
-      if (to) { lines.push(`To:`); lines.push(to); }
-    }
-  }
+function buildOutsourcedBlock(outsourced: BookingRow[]): string {
+  const lines: string[] = [];
+  const dates = uniqueBy(
+    outsourced.map((row) => formatBriefDate(row.travelDate)).filter(Boolean),
+    (date) => date
+  );
+  const dateLabel = dates.length > 0 ? ` (${dates.join(", ")})` : "";
+  lines.push(`OUTSOURCED${dateLabel}`);
 
-  lines.push(``);
+  outsourced.forEach((row, index) => {
+    pushBlank(lines);
+    lines.push(`Job ${index + 1}`);
+    pushSection(lines, "Date:", formatBriefDate(row.travelDate), true);
+    pushSection(lines, "Time:", extractTime(row), true);
+    pushSection(lines, "From:", cleanText(row.fromLocation), true);
+    pushSection(lines, "To:", cleanText(row.toLocation), true);
+    pushSection(lines, "Pax & Luggage:", passengerAndLuggage(row), true);
+    pushSection(lines, "Supplier / Outsourced To:", cleanText(row.outsourcedCompany), true);
+    pushDriverInformation(lines, [row], row);
+    pushSection(lines, "Remarks:", [remarksFor(row), cleanText(row.outsourceReason)].filter(Boolean).join("\n"), true);
+  });
 
-  // ── Pax ──
-  if (repRow.passengerCount) lines.push(`${repRow.passengerCount} pax with luggage`);
-
-  // ── Remarks ──
-  const remarks = repRow.details?.trim() || "";
-  if (remarks) { lines.push(``); lines.push(remarks); }
-
-  // ── Client contact ──
-  const cName = clientName(repRow);
-  const cPhone = clientPhone(repRow);
-  if (cName || cPhone) {
-    lines.push(``);
-    lines.push(`Guest contact:`);
-    if (cName && cPhone) lines.push(`${cName} - ${cPhone}`);
-    else lines.push(cName || cPhone);
-  }
-
-  // ── Tour guide ──
-  const guide = repRow.tourGuide?.trim() || "";
-  if (guide) { lines.push(``); lines.push(`Tour Guide: ${guide}`); }
-
-  lines.push(``);
-
-  // ── Driver info ──
-  if (isMultiVan) {
-    const numVans = repRow.numberOfVehicles ?? driverByVehicle.size;
-    const viList = [...new Set([...Array.from(driverByVehicle.keys()), ...Array.from({length: numVans}, (_, i) => i + 1)])].sort((a, b) => a - b);
-    for (const vi of viList) {
-      const dr = driverByVehicle.get(vi);
-      const name = dr?.driverName?.trim() || "";
-      const contact = dr?.driverContact?.trim() || "";
-      const plate = dr?.vehiclePlate?.trim() || dr?.vanNumber?.trim() || "";
-      lines.push(`Van ${vi} Driver Information:`);
-      if (name) lines.push(name);
-      if (contact) lines.push(contact);
-      if (plate) lines.push(plate);
-      lines.push(``);
-    }
-  } else {
-    const dr = driverByVehicle.get(1) || repRow;
-    const name = dr.driverName?.trim() || "";
-    const contact = dr.driverContact?.trim() || "";
-    const plate = dr.vehiclePlate?.trim() || dr.vanNumber?.trim() || "";
-    if (name || contact || plate) {
-      lines.push(`Driver Information:`);
-      if (name) lines.push(name);
-      if (contact) lines.push(contact);
-      if (plate) lines.push(plate);
-    } else {
-      lines.push(`⚠️ No driver assigned`);
-    }
-  }
-
-  return lines.join("\n").trimEnd();
+  return finishWhatsAppText(lines);
 }
 
 function generateWhatsAppBlocks(
@@ -275,23 +532,7 @@ function generateWhatsAppBlocks(
 
   // Outsourced block
   if (outsourced.length > 0) {
-    const lines: string[] = [];
-    lines.push(`OUTSOURCED (${outsourced.length})`);
-    lines.push(``);
-    for (const r of outsourced) {
-      const from = r.fromLocation?.trim() || "?";
-      const to = r.toLocation?.trim() || "?";
-      const company = r.outsourcedCompany?.trim() || "⚠️ No company assigned";
-      const pax = r.passengerCount ? ` · ${r.passengerCount} pax` : "";
-      const cName = clientName(r);
-      const cPhone = clientPhone(r);
-      lines.push(`• ${from} → ${to}  [${company}${pax}]`);
-      if (cName || cPhone) lines.push(`  Guest: ${cName}${cPhone ? ` - ${cPhone}` : ""}`);
-      const remarks = r.details?.trim() || "";
-      if (remarks) lines.push(`  ${remarks}`);
-      lines.push(``);
-    }
-    blocks.push({ key: "__outsourced", label: `Outsourced (${outsourced.length})`, text: lines.join("\n").trimEnd() });
+    blocks.push({ key: "__outsourced", label: `Outsourced (${outsourced.length})`, text: buildOutsourcedBlock(outsourced) });
   }
 
   return blocks;

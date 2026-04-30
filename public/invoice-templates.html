@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Invoice Templates — WhatsApp Format</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #111b21;
+      color: #e9edef;
+      min-height: 100vh;
+    }
+
+    .topbar {
+      background: #202c33;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid #2a3942;
+    }
+
+    .topbar-avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: #00a884;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; font-weight: 700; color: #fff;
+      flex-shrink: 0;
+    }
+
+    .topbar-info h2 { font-size: 1rem; font-weight: 600; color: #e9edef; }
+    .topbar-info p  { font-size: 0.75rem; color: #8696a0; }
+
+    .chat {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 20px 16px 60px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .section-label {
+      text-align: center;
+      margin: 28px 0 10px;
+    }
+
+    .section-label span {
+      background: #182229;
+      color: #8696a0;
+      font-size: 0.72rem;
+      padding: 4px 12px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .sys-note {
+      text-align: center;
+      background: #182229;
+      border: 1px solid #2a3942;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 0.78rem;
+      color: #8696a0;
+      margin: 4px auto;
+      max-width: 500px;
+      line-height: 1.5;
+    }
+
+    /* ── MESSAGE ── */
+    .msg {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      max-width: 78%;
+    }
+
+    .msg.sent {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .bubble-wrap { position: relative; }
+
+    .bubble {
+      background: #202c33;
+      border-radius: 8px 8px 8px 0;
+      padding: 10px 14px;
+      font-size: 0.88rem;
+      line-height: 1.75;
+      color: #e9edef;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: inherit;
+      position: relative;
+    }
+
+    .msg.sent .bubble {
+      background: #005c4b;
+      border-radius: 8px 8px 0 8px;
+    }
+
+    .bubble::before {
+      content: "";
+      position: absolute;
+      top: 0; left: -7px;
+      border: 7px solid transparent;
+      border-top-color: #202c33;
+      border-left: 0;
+    }
+
+    .msg.sent .bubble::before {
+      left: auto; right: -7px;
+      border-top-color: #005c4b;
+      border-left: 7px solid transparent;
+      border-right: 0;
+    }
+
+    .msg-time {
+      font-size: 0.7rem;
+      color: #8696a0;
+      margin-top: 3px;
+      padding: 0 4px;
+    }
+
+    .tag {
+      display: inline-block;
+      background: rgba(0,168,132,0.18);
+      color: #00a884;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      padding: 1px 5px;
+      font-weight: 700;
+      vertical-align: middle;
+      margin-left: 4px;
+    }
+
+    /* text colours inside bubbles */
+    .bubble .hl  { color: #00a884; font-weight: 700; }
+    .bubble .amt { color: #fccd42; font-weight: 700; }
+    .bubble .dim { color: #8696a0; font-size: 0.82rem; }
+
+    /* copy button */
+    .copy-btn {
+      position: absolute;
+      top: 6px; right: 6px;
+      background: #2a3942;
+      border: none;
+      color: #8696a0;
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 0.7rem;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .bubble-wrap:hover .copy-btn { opacity: 1; }
+    .copy-btn:active { background: #00a884; color: #fff; }
+
+    /* ── REFERENCE TABLE ── */
+    .ref-card {
+      background: #202c33;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 4px;
+      width: 100%;
+      max-width: 660px;
+    }
+
+    .ref-head {
+      display: grid;
+      grid-template-columns: 1fr 1fr 130px;
+      background: #182229;
+      border-bottom: 1px solid #2a3942;
+    }
+
+    .ref-head span {
+      padding: 8px 14px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: #8696a0;
+      font-weight: 700;
+    }
+
+    .ref-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 130px;
+      border-bottom: 1px solid #2a3942;
+    }
+
+    .ref-row:last-child { border-bottom: none; }
+
+    .ref-row div {
+      padding: 10px 14px;
+      font-size: 0.83rem;
+      border-right: 1px solid #2a3942;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .ref-row div:last-child { border-right: none; }
+
+    .ref-keyword { color: #53bdeb; font-family: monospace; line-height: 1.9; }
+    .ref-what    { color: #94a3b8; }
+    .ref-effect  { color: #00a884; font-size: 0.75rem; font-family: monospace; }
+
+    /* ── TIPS ── */
+    .tip  { background:#1d2d23; border-left:3px solid #00a884; border-radius:0 8px 8px 0; padding:10px 14px; font-size:0.83rem; color:#8696a0; margin:5px 0; }
+    .warn { background:#2d2316; border-left:3px solid #fccd42; border-radius:0 8px 8px 0; padding:10px 14px; font-size:0.83rem; color:#8696a0; margin:5px 0; }
+    .tip strong, .warn strong { color:#e9edef; }
+
+    code {
+      background: #2a3942; color: #53bdeb;
+      padding: 1px 5px; border-radius: 4px;
+      font-family: monospace; font-size: 0.82rem;
+    }
+
+    @media (max-width: 520px) {
+      .msg { max-width: 92%; }
+      .ref-head, .ref-row { grid-template-columns: 1fr; }
+      .ref-row div { border-right: none; border-bottom: 1px solid #2a3942; }
+      .ref-row div:last-child { border-bottom: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-avatar">B</div>
+  <div class="topbar-info">
+    <h2>Invoice Creator — Paste Templates</h2>
+    <p>Copy any template · paste into Invoice Creator · invoice number auto-generated</p>
+  </div>
+</div>
+
+<div class="chat">
+
+  <div class="sys-note">
+    Paste raw text into <strong>Invoice Creator → Step 1</strong>.<br/>
+    AI reads it and fills in the form. Invoice number is auto-generated — don't include it.
+  </div>
+
+  <!-- ══════════ STANDARD TRIPS ══════════ -->
+  <div class="section-label"><span>Standard Trips</span></div>
+
+  <!-- One-Way -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: Tan Ah Kow
+Phone: +60 12-345 6789
+Date: 20 April 2026
+
+1. KL - KLIA
+   One-way
+   RM 350</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">One-way transfer <span class="tag">one_way_ride</span></span>
+  </div>
+
+  <!-- Round Trip -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: Lee Mei Ling
+Phone: +60 16-999 8888
+Date: 22 April 2026
+
+1. KL - Malacca - KL
+   RM 600</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">Round trip — no keyword needed, route detects it <span class="tag">round_trip</span></span>
+  </div>
+
+  <!-- Day Trip -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: Daro International
+Phone: +60 3-1234 5678
+Date: 25 April 2026
+
+1. KL Day Trip
+   RM 550</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">Highest scheduling priority <span class="tag">day_trip</span></span>
+  </div>
+
+  <!-- ══════════ SPECIAL VEHICLES ══════════ -->
+  <div class="section-label"><span>Special Vehicles</span></div>
+
+  <!-- Alphard -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: VIP Client
+Phone: +60 11-2222 3333
+Date: 27 April 2026
+
+1. KL - KLIA
+   Alphard
+   RM 800</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">Toyota Alphard only <span class="tag">isAlphard</span></span>
+  </div>
+
+  <!-- 15 Pax -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: School Group
+Phone: +60 3-8888 0000
+Date: 29 April 2026
+
+1. KL - Genting
+   15 pax
+   RM 450</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">15-seater van required <span class="tag">is15Pax</span></span>
+  </div>
+
+  <!-- Car -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: Corporate Client
+Phone: +60 12-777 5555
+Date: 30 April 2026
+
+1. KL - Putrajaya
+   5-seater car
+   RM 250</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">Auto-outsourced — no fleet van <span class="tag">Car</span></span>
+  </div>
+
+  <!-- ══════════ MULTI ══════════ -->
+  <div class="section-label"><span>Multiple Rows / Vehicles</span></div>
+
+  <!-- Multi-vehicle -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: Tour Group
+Phone: +60 3-6666 2222
+Date: 2 May 2026
+
+1. KL - Penang
+   2 vans
+   RM 1,200 per van</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">Expands into 2 bookings — each gets its own van <span class="tag">numberOfVehicles: 2</span></span>
+  </div>
+
+  <!-- Multi-row -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: E Like Travel
+Phone: +60 17-490 9901
+Date: 18 April 2026
+
+1. KL - Kuantan
+   5 May 2026, one-way
+   RM 480
+
+2. Kuantan - KL
+   7 May 2026, one-way
+   RM 480
+
+3. KL Day Trip
+   9 May 2026
+   RM 600</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">3 bookings on 1 invoice</span>
+  </div>
+
+  <!-- ══════════ CROSS-BORDER ══════════ -->
+  <div class="section-label"><span>Cross-Border</span></div>
+
+  <!-- Singapore -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: SG Traveller
+Phone: +65 9123 4567
+Date: 10 May 2026
+
+1. KL - Singapore
+   One-way
+   RM 900</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">Assigns singaporeEnabled van only</span>
+  </div>
+
+  <!-- Thailand -->
+  <div class="msg">
+    <div class="bubble-wrap">
+      <div class="bubble">Customer: Thai Tour
+Phone: +60 4-555 1234
+Date: 15 May 2026
+
+1. KL - Thailand
+   One-way
+   RM 1,100</div>
+      <button class="copy-btn" onclick="copyBubble(this)">Copy</button>
+    </div>
+    <span class="msg-time">Assigns thailandEnabled van only</span>
+  </div>
+
+  <!-- ══════════ KEYWORDS ══════════ -->
+  <div class="section-label"><span>Keyword Reference</span></div>
+
+  <div class="sys-note">AI understands natural language — these are just reliable keywords that always work.</div>
+
+  <div class="ref-card">
+    <div class="ref-head">
+      <span>Write this</span>
+      <span>What it means</span>
+      <span>Sets flag</span>
+    </div>
+    <div class="ref-row">
+      <div class="ref-keyword">one-way<br/>one way<br/>airport transfer<br/>ride only</div>
+      <div class="ref-what">Single direction, no return</div>
+      <div class="ref-effect">isOneWay = true</div>
+    </div>
+    <div class="ref-row">
+      <div class="ref-keyword">KL - Melaka - KL<br/>(same start &amp; end)</div>
+      <div class="ref-what">Round trip — auto-detected from route</div>
+      <div class="ref-effect">isOneWay = false</div>
+    </div>
+    <div class="ref-row">
+      <div class="ref-keyword">Day Trip<br/>KL Day Trip</div>
+      <div class="ref-what">Full-day disposal, highest priority</div>
+      <div class="ref-effect">day_trip</div>
+    </div>
+    <div class="ref-row">
+      <div class="ref-keyword">Alphard</div>
+      <div class="ref-what">Toyota Alphard only</div>
+      <div class="ref-effect">isAlphard = true</div>
+    </div>
+    <div class="ref-row">
+      <div class="ref-keyword">15 pax<br/>15pax<br/>15-seater</div>
+      <div class="ref-what">Requires 15-seat van</div>
+      <div class="ref-effect">is15Pax = true</div>
+    </div>
+    <div class="ref-row">
+      <div class="ref-keyword">5-seater car<br/>7-seater car</div>
+      <div class="ref-what">Private car — auto-outsourced</div>
+      <div class="ref-effect">isCar = true</div>
+    </div>
+    <div class="ref-row">
+      <div class="ref-keyword">2 vans<br/>3 vehicles</div>
+      <div class="ref-what">Multiple vans same trip</div>
+      <div class="ref-effect">vehicleCount = N</div>
+    </div>
+  </div>
+
+  <!-- ══════════ TIPS ══════════ -->
+  <div class="section-label"><span>Tips</span></div>
+
+  <div class="tip"><strong>Invoice number is auto-generated.</strong> Never include it in the paste — the system assigns the next available number after you click Generate.</div>
+  <div class="tip"><strong>Route separator:</strong> Always use <code>KL - KLIA</code> (space-hyphen-space). Arrows like → or the word "to" also work but hyphens are safest.</div>
+  <div class="tip"><strong>Date anywhere works:</strong> Put date on the invoice header line OR per trip row. If a row has no date, the header date is used.</div>
+  <div class="tip"><strong>Free-form text is fine.</strong> The AI reads natural language — you can paste a WhatsApp message as-is and it will extract the data.</div>
+  <div class="warn"><strong>No Chinese characters.</strong> They are stripped during PDF generation. Write routes in English only.</div>
+  <div class="warn"><strong>No slash in routes.</strong> <code>KL - KLIA / airport</code> → everything after <code>/</code> is cut. Keep routes clean.</div>
+
+</div>
+
+<script>
+  function copyBubble(btn) {
+    const bubble = btn.closest('.bubble-wrap').querySelector('.bubble');
+    const text = bubble.innerText.replace(/\s*Copy\s*$/, '').trim();
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    });
+  }
+</script>
+</body>
+</html>

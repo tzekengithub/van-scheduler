@@ -1,0 +1,1544 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Van Scheduler Flow Game</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #64748b;
+      --paper: #ffffff;
+      --bg: #eef3f8;
+      --soft: #f7f9fc;
+      --line: #d8e1ec;
+      --blue: #2563eb;
+      --teal: #0f766e;
+      --green: #15803d;
+      --amber: #b45309;
+      --red: #b91c1c;
+      --violet: #6d28d9;
+      --shadow: 0 18px 48px rgba(23, 32, 51, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.45;
+    }
+
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+    code {
+      font-family: Consolas, Monaco, monospace;
+      background: #edf2f7;
+      border: 1px solid #dbe4ef;
+      border-radius: 5px;
+      padding: 0.05rem 0.32rem;
+      font-size: 0.9em;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(255, 255, 255, 0.94);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+
+    .topbar-inner {
+      max-width: 1420px;
+      margin: 0 auto;
+      padding: 0.65rem 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+
+    .mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: #172033;
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 0.78rem;
+      font-weight: 900;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .button {
+      border: 1px solid #c5d0df;
+      background: #fff;
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 0.55rem 0.8rem;
+      font-weight: 800;
+      min-height: 38px;
+    }
+
+    .button.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .button.good {
+      background: var(--green);
+      border-color: var(--green);
+      color: #fff;
+    }
+
+    .button.warn {
+      background: #fff7ed;
+      border-color: #fed7aa;
+      color: var(--amber);
+    }
+
+    .layout {
+      max-width: 1420px;
+      margin: 0 auto;
+      padding: 1rem;
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr) 360px;
+      gap: 1rem;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 0.95rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+
+    .panel-body { padding: 1rem; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 1.1rem; line-height: 1.1; }
+    h2 { font-size: 1rem; line-height: 1.2; }
+    h3 { font-size: 0.92rem; line-height: 1.2; }
+    p { color: var(--muted); }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 0.72rem;
+      font-weight: 900;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 0.2rem;
+    }
+
+    .mission-title {
+      font-size: 1.35rem;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 0.45rem;
+    }
+
+    .mission-text {
+      font-size: 0.94rem;
+      margin-bottom: 1rem;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.55rem;
+      margin-bottom: 1rem;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.7rem;
+      background: #fbfdff;
+      min-height: 74px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 1.25rem;
+      line-height: 1.1;
+    }
+
+    .stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-top: 0.25rem;
+    }
+
+    .action-stack {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .hint {
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      border-radius: 8px;
+      padding: 0.75rem;
+      color: #1e40af;
+      font-size: 0.86rem;
+      margin-top: 0.8rem;
+    }
+
+    .stage-list {
+      display: grid;
+      gap: 0.45rem;
+      margin-top: 1rem;
+    }
+
+    .stage-item {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 0.6rem;
+      align-items: start;
+      padding: 0.58rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .stage-num {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      background: #e2e8f0;
+      color: #475569;
+      display: grid;
+      place-items: center;
+      font-size: 0.76rem;
+      font-weight: 900;
+    }
+
+    .stage-item.active {
+      border-color: #93c5fd;
+      background: #eff6ff;
+    }
+
+    .stage-item.done {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+    }
+
+    .stage-item.active .stage-num { background: var(--blue); color: #fff; }
+    .stage-item.done .stage-num { background: var(--green); color: #fff; }
+    .stage-item strong { display: block; font-size: 0.84rem; }
+    .stage-item span { display: block; color: var(--muted); font-size: 0.74rem; }
+
+    .game-board {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+
+    .station {
+      min-height: 150px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 0.8rem;
+      position: relative;
+      transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .station.active {
+      border-color: #60a5fa;
+      background: #eff6ff;
+      transform: translateY(-2px);
+    }
+
+    .station.ready {
+      border-color: #86efac;
+      background: #f0fdf4;
+    }
+
+    .station.droppable {
+      outline: 2px dashed #2563eb;
+      outline-offset: 3px;
+    }
+
+    .station h3 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.45rem;
+    }
+
+    .station-body {
+      min-height: 76px;
+      display: grid;
+      gap: 0.45rem;
+      align-content: start;
+    }
+
+    .token {
+      border: 1px solid #bfdbfe;
+      background: #dbeafe;
+      color: #1e40af;
+      border-radius: 8px;
+      padding: 0.55rem;
+      font-weight: 800;
+      font-size: 0.83rem;
+      box-shadow: 0 8px 18px rgba(37, 99, 235, 0.15);
+      user-select: none;
+    }
+
+    .token[draggable="true"] { cursor: grab; }
+    .token.moving { animation: hop 0.4s ease; }
+
+    @keyframes hop {
+      0% { transform: translateY(0); }
+      40% { transform: translateY(-9px); }
+      100% { transform: translateY(0); }
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 5px;
+      padding: 0.16rem 0.42rem;
+      font-size: 0.72rem;
+      font-weight: 900;
+      border: 1px solid transparent;
+      white-space: nowrap;
+      width: fit-content;
+    }
+
+    .pill.blue { color: #1d4ed8; background: #dbeafe; border-color: #bfdbfe; }
+    .pill.green { color: #166534; background: #dcfce7; border-color: #bbf7d0; }
+    .pill.amber { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+    .pill.red { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+    .pill.violet { color: #5b21b6; background: #ede9fe; border-color: #ddd6fe; }
+    .pill.gray { color: #475569; background: #e2e8f0; border-color: #cbd5e1; }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+      gap: 1rem;
+      align-items: start;
+    }
+
+    .subpanel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .subpanel-head {
+      padding: 0.75rem 0.85rem;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.65rem;
+    }
+
+    .subpanel-body { padding: 0.85rem; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.84rem;
+    }
+
+    th, td {
+      padding: 0.55rem 0.5rem;
+      border-bottom: 1px solid #e5edf5;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: #fbfdff;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .van-board {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .van-row {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      min-height: 62px;
+      display: grid;
+      grid-template-columns: 130px minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .van-name {
+      background: #f8fafc;
+      border-right: 1px solid var(--line);
+      padding: 0.7rem;
+    }
+
+    .van-name strong {
+      display: block;
+      font-size: 0.86rem;
+    }
+
+    .van-name span {
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+
+    .van-slots {
+      padding: 0.55rem;
+      display: flex;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .booking-chip {
+      max-width: 190px;
+      border-radius: 7px;
+      padding: 0.42rem 0.5rem;
+      border: 1px solid #bfdbfe;
+      background: #dbeafe;
+      color: #1e40af;
+      font-size: 0.76rem;
+      font-weight: 800;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      animation: chipIn 0.25s ease;
+    }
+
+    .booking-chip.trip { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
+    .booking-chip.sg { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+    .booking-chip.alphard { border-color: #ddd6fe; background: #f5f3ff; color: #6d28d9; }
+    .booking-chip.out { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+
+    @keyframes chipIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .empty-slot {
+      color: #94a3b8;
+      font-size: 0.78rem;
+    }
+
+    .log {
+      background: #111827;
+      color: #d1d5db;
+      border-radius: 8px;
+      padding: 0.85rem;
+      height: 430px;
+      overflow: auto;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 0.76rem;
+      line-height: 1.55;
+    }
+
+    .log-line { margin-bottom: 0.22rem; white-space: pre-wrap; }
+    .log-line.ok { color: #86efac; }
+    .log-line.warn { color: #fcd34d; }
+    .log-line.err { color: #fca5a5; }
+    .log-line.api { color: #93c5fd; }
+    .log-line.db { color: #c4b5fd; }
+
+    .conflict-list {
+      display: grid;
+      gap: 0.7rem;
+    }
+
+    .conflict {
+      border: 1px solid #fecaca;
+      background: #fff7f7;
+      border-radius: 8px;
+      padding: 0.8rem;
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .conflict.resolved {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+    }
+
+    .conflict input {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 0.55rem 0.65rem;
+      min-height: 38px;
+    }
+
+    .tiny-actions {
+      display: flex;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+    }
+
+    .tiny {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      border-radius: 6px;
+      padding: 0.36rem 0.5rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    .explain {
+      border-left: 5px solid var(--teal);
+      background: #f0fdfa;
+      border-radius: 8px;
+      padding: 0.85rem;
+      color: #115e59;
+      font-size: 0.88rem;
+    }
+
+    .final-box {
+      border: 1px solid #bbf7d0;
+      background: #f0fdf4;
+      color: #166534;
+      border-radius: 8px;
+      padding: 1rem;
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%) translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+      background: #172033;
+      color: #fff;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      box-shadow: var(--shadow);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 50;
+      font-weight: 800;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    @media (max-width: 1180px) {
+      .layout {
+        grid-template-columns: 280px minmax(0, 1fr);
+      }
+      .right-col {
+        grid-column: 1 / -1;
+      }
+      .pipeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 860px) {
+      .layout, .split {
+        grid-template-columns: 1fr;
+      }
+      .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .topbar-inner {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .top-actions { justify-content: flex-start; }
+    }
+
+    @media (max-width: 560px) {
+      .layout { padding: 0.7rem; }
+      .pipeline { grid-template-columns: 1fr; }
+      .status-grid { grid-template-columns: 1fr; }
+      .van-row { grid-template-columns: 1fr; }
+      .van-name { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="mark">FLOW</div>
+        <div>
+          <h1>Van Scheduler Flow Game</h1>
+          <p class="small">Play the exact route from invoice PDF to final daily schedule.</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="button" id="resetBtn" type="button">Reset Game</button>
+        <button class="button warn" id="autoBtn" type="button">Auto Play</button>
+        <a class="button" href="system-overview.html">Open Guide</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Mission Control</p>
+          <h2 id="missionTitle">Choose the invoice PDF</h2>
+        </div>
+      </div>
+      <div class="panel-body">
+        <p class="mission-text" id="missionText"></p>
+        <div class="status-grid">
+          <div class="stat">
+            <strong id="scoreText">0</strong>
+            <span>Flow score</span>
+          </div>
+          <div class="stat">
+            <strong id="issueText">0</strong>
+            <span>Open issues</span>
+          </div>
+        </div>
+        <div class="action-stack" id="actionStack"></div>
+        <div class="hint" id="hintBox"></div>
+        <div class="stage-list" id="stageList"></div>
+      </div>
+    </aside>
+
+    <main class="game-board">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Live System Path</p>
+            <h2>Move the booking through the real app flow</h2>
+          </div>
+          <span class="pill blue" id="stageBadge">Stage 1</span>
+        </div>
+        <div class="panel-body">
+          <div class="pipeline" id="pipeline"></div>
+        </div>
+      </section>
+
+      <section class="split">
+        <div class="subpanel">
+          <div class="subpanel-head">
+            <h2>Fleet and schedule board</h2>
+            <span class="pill gray" id="boardDate">30 Apr 2026</span>
+          </div>
+          <div class="subpanel-body">
+            <div class="van-board" id="vanBoard"></div>
+          </div>
+        </div>
+
+        <div class="subpanel">
+          <div class="subpanel-head">
+            <h2>Preview, database, or conflicts</h2>
+            <span class="pill" id="tableBadge">Waiting</span>
+          </div>
+          <div class="subpanel-body" id="detailPane"></div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="panel right-col">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Live Events</p>
+          <h2>What the app would stream back</h2>
+        </div>
+        <button class="tiny" id="clearLogBtn" type="button">Clear</button>
+      </div>
+      <div class="panel-body">
+        <div class="log" id="log"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const stages = [
+      {
+        key: "choose",
+        title: "Choose PDF",
+        text: "Pick the invoice PDF that arrived from staff, client, Invoice Creator, or the Telegram bot.",
+        hint: "Click Choose Invoice PDF. After that, drag the PDF token into the Upload Panel or use the action button.",
+        station: "inbox"
+      },
+      {
+        key: "upload",
+        title: "Upload Panel",
+        text: "The floating upload panel receives the PDF. This is the same panel used in Daily Jobs and All Jobs.",
+        hint: "Drop or send the invoice to Upload Panel. This starts the real preview path: /api/preview.",
+        station: "upload"
+      },
+      {
+        key: "service",
+        title: "Wake PDF Service",
+        text: "The browser checks whether the Python PDF service is ready. If it is cold, staff wait while it starts.",
+        hint: "Click Wake PDF Service. The game will run a small health-check sequence.",
+        station: "service"
+      },
+      {
+        key: "parse",
+        title: "Extract and Parse",
+        text: "The app sends the PDF to the Python service, gets text back, then the parser turns that text into booking rows.",
+        hint: "Click Run PDF Preview. Watch the preview rows appear from the extracted invoice.",
+        station: "parser"
+      },
+      {
+        key: "preview",
+        title: "Confirm Preview",
+        text: "Staff checks the preview table before saving anything. This is the safety step before the database changes.",
+        hint: "Inspect the rows, then confirm insert. The system will store them as booking rows.",
+        station: "preview"
+      },
+      {
+        key: "insert",
+        title: "Insert to Database",
+        text: "The app inserts booking rows into PostgreSQL and streams progress back to the upload panel.",
+        hint: "Click Confirm Insert. You can also try Emergency Cancel before scheduling starts.",
+        station: "database"
+      },
+      {
+        key: "schedule",
+        title: "Run Scheduler",
+        text: "The rules engine assigns vans, protects manual choices, handles car trips, checks special routes, and marks outsource needs.",
+        hint: "Run the scheduler and watch one lower-priority one-way booking get bumped by a higher-priority day trip.",
+        station: "scheduler"
+      },
+      {
+        key: "review",
+        title: "Review and Fix",
+        text: "The system is not finished until staff resolves visible issues, especially outsource jobs without company names.",
+        hint: "Fill outsource company names for every open issue, then save them.",
+        station: "screens"
+      },
+      {
+        key: "ready",
+        title: "Ready",
+        text: "The schedule is ready for Daily Jobs, Van Schedule, print, WhatsApp copy, or export.",
+        hint: "You completed the end-to-end flow. Reset or auto-play to run it again.",
+        station: "screens"
+      }
+    ];
+
+    const stations = [
+      { id: "inbox", title: "Invoice Inbox", sub: "PDF waits here" },
+      { id: "upload", title: "Upload Panel", sub: "User preview flow" },
+      { id: "service", title: "PDF Service", sub: "Flask + PyMuPDF" },
+      { id: "parser", title: "Parser", sub: "Text to booking rows" },
+      { id: "preview", title: "Preview Table", sub: "Staff checks rows" },
+      { id: "database", title: "Database", sub: "PostgreSQL rows" },
+      { id: "scheduler", title: "Rules Engine", sub: "Assign vans" },
+      { id: "screens", title: "Work Screens", sub: "Review and finish" }
+    ];
+
+    const baseVans = [
+      { id: 1, plate: "WXY1234", driver: "Amir", type: "van", cap: 10, sg: false, th: false },
+      { id: 2, plate: "SG8888", driver: "Mei", type: "van", cap: 10, sg: true, th: false },
+      { id: 3, plate: "ALP700", driver: "Kumar", type: "toyota alphard", cap: 4, sg: false, th: false },
+      { id: 4, plate: "VAN15", driver: "Siti", type: "van", cap: 15, sg: false, th: false }
+    ];
+
+    const existingBooking = {
+      id: 90,
+      invoiceNo: "INV-OLD-0090",
+      client: "Existing Airport Guest",
+      route: "KLIA - KL",
+      date: "2026-04-30",
+      tripType: "one_way_ride",
+      category: "Van",
+      pax: 3,
+      needs: [],
+      vanId: 1,
+      status: "I",
+      outsourceCompany: "",
+      reason: "",
+      source: "already in database"
+    };
+
+    const parsedRows = [
+      {
+        id: 101,
+        invoiceNo: "INV2026040101",
+        client: "Daro International",
+        route: "KL Day Trip",
+        date: "2026-04-30",
+        tripType: "trip",
+        category: "Van",
+        pax: 6,
+        amount: 800,
+        needs: ["normal van"],
+        source: "new PDF"
+      },
+      {
+        id: 102,
+        invoiceNo: "INV2026040101",
+        client: "Daro International",
+        route: "KL - Singapore",
+        date: "2026-04-30",
+        tripType: "trip",
+        category: "Van",
+        pax: 4,
+        amount: 900,
+        needs: ["singapore enabled"],
+        source: "new PDF"
+      },
+      {
+        id: 103,
+        invoiceNo: "INV2026040101",
+        client: "Daro International",
+        route: "KL - Genting",
+        date: "2026-04-30",
+        tripType: "trip",
+        category: "Van",
+        pax: 15,
+        amount: 650,
+        needs: ["15 pax capacity"],
+        source: "new PDF"
+      },
+      {
+        id: 104,
+        invoiceNo: "INV2026040101",
+        client: "Daro International",
+        route: "KL - KLIA",
+        date: "2026-04-30",
+        tripType: "trip",
+        category: "Alphard",
+        pax: 3,
+        amount: 800,
+        needs: ["toyota alphard"],
+        source: "new PDF"
+      },
+      {
+        id: 105,
+        invoiceNo: "INV2026040101",
+        client: "Daro International",
+        route: "KL - Putrajaya",
+        date: "2026-04-30",
+        tripType: "trip",
+        category: "Car",
+        pax: 2,
+        amount: 250,
+        needs: ["5-seater car"],
+        source: "new PDF"
+      }
+    ];
+
+    const state = {
+      stage: 0,
+      busy: false,
+      score: 0,
+      fileChosen: false,
+      uploaded: false,
+      service: "cold",
+      textExtracted: false,
+      previewRows: [],
+      dbRows: [{ ...existingBooking }],
+      schedulerRan: false,
+      issues: [],
+      emergencyAvailable: false,
+      toastTimer: null,
+      autoPlaying: false
+    };
+
+    const els = {
+      missionTitle: document.getElementById("missionTitle"),
+      missionText: document.getElementById("missionText"),
+      scoreText: document.getElementById("scoreText"),
+      issueText: document.getElementById("issueText"),
+      actionStack: document.getElementById("actionStack"),
+      hintBox: document.getElementById("hintBox"),
+      stageList: document.getElementById("stageList"),
+      pipeline: document.getElementById("pipeline"),
+      vanBoard: document.getElementById("vanBoard"),
+      detailPane: document.getElementById("detailPane"),
+      tableBadge: document.getElementById("tableBadge"),
+      log: document.getElementById("log"),
+      stageBadge: document.getElementById("stageBadge"),
+      toast: document.getElementById("toast")
+    };
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function cloneRow(row) {
+      return { ...row, needs: [...(row.needs || [])] };
+    }
+
+    function resetState() {
+      state.stage = 0;
+      state.busy = false;
+      state.score = 0;
+      state.fileChosen = false;
+      state.uploaded = false;
+      state.service = "cold";
+      state.textExtracted = false;
+      state.previewRows = [];
+      state.dbRows = [{ ...existingBooking }];
+      state.schedulerRan = false;
+      state.issues = [];
+      state.emergencyAvailable = false;
+      state.autoPlaying = false;
+      els.log.innerHTML = "";
+      log("Game reset. Existing one-way booking is already on WXY1234.", "api");
+      render();
+    }
+
+    function setStage(n) {
+      state.stage = Math.max(0, Math.min(stages.length - 1, n));
+      render();
+    }
+
+    function addScore(points) {
+      state.score += points;
+    }
+
+    function log(message, type) {
+      const line = document.createElement("div");
+      line.className = "log-line " + (type || "");
+      const time = new Date().toLocaleTimeString("en-GB", { hour12: false });
+      line.textContent = "[" + time + "] " + message;
+      els.log.appendChild(line);
+      els.log.scrollTop = els.log.scrollHeight;
+    }
+
+    function showToast(message) {
+      clearTimeout(state.toastTimer);
+      els.toast.textContent = message;
+      els.toast.classList.add("show");
+      state.toastTimer = setTimeout(() => els.toast.classList.remove("show"), 1700);
+    }
+
+    function stationStatus(id) {
+      const currentStation = stages[state.stage].station;
+      if (id === currentStation) return "active";
+      const stationIndex = stations.findIndex((s) => s.id === id);
+      const currentIndex = stations.findIndex((s) => s.id === currentStation);
+      if (stationIndex < currentIndex) return "ready";
+      return "";
+    }
+
+    function stationContent(id) {
+      if (id === "inbox") {
+        if (!state.fileChosen) return '<p class="small">No invoice selected yet.</p>';
+        if (state.stage <= 1) return pdfToken();
+        return '<span class="pill green">Sent</span>';
+      }
+      if (id === "upload") {
+        if (!state.uploaded && state.stage === 1) return '<p class="small">Drop the PDF here.</p>';
+        if (state.uploaded) return '<span class="pill green">PDF accepted</span><p class="small">Upload panel opened.</p>';
+        return '<p class="small">Waiting for file.</p>';
+      }
+      if (id === "service") {
+        const map = { cold: "Cold", starting: "Starting", ready: "Ready" };
+        const cls = state.service === "ready" ? "green" : state.service === "starting" ? "amber" : "gray";
+        return '<span class="pill ' + cls + '">' + map[state.service] + '</span><p class="small">GET /health before parsing.</p>';
+      }
+      if (id === "parser") {
+        if (state.textExtracted) return '<span class="pill green">Text extracted</span><p class="small">' + state.previewRows.length + ' booking rows found.</p>';
+        return '<p class="small">Waiting for PDF text.</p>';
+      }
+      if (id === "preview") {
+        if (state.previewRows.length) return '<span class="pill blue">' + state.previewRows.length + ' preview rows</span><p class="small">Staff must confirm.</p>';
+        return '<p class="small">No preview rows yet.</p>';
+      }
+      if (id === "database") {
+        return '<span class="pill violet">' + state.dbRows.length + ' booking rows</span><p class="small">Includes existing database row.</p>';
+      }
+      if (id === "scheduler") {
+        if (state.schedulerRan) return '<span class="pill green">Recheck complete</span><p class="small">Assignments written.</p>';
+        return '<p class="small">Rules engine waiting.</p>';
+      }
+      if (id === "screens") {
+        if (state.stage === 8) return '<span class="pill green">Ready</span><p class="small">Daily output is clean.</p>';
+        if (state.issues.length) return '<span class="pill red">' + openIssues().length + ' open issue(s)</span><p class="small">Staff action required.</p>';
+        return '<p class="small">Waiting for schedule result.</p>';
+      }
+      return "";
+    }
+
+    function pdfToken() {
+      const draggable = state.stage === 1 && !state.busy ? ' draggable="true"' : "";
+      return '<div class="token moving" id="pdfToken"' + draggable + '>INV2026040101.pdf<br><span class="small">5 trip lines inside</span></div>';
+    }
+
+    function openIssues() {
+      return state.issues.filter((issue) => !issue.resolved);
+    }
+
+    function renderPipeline() {
+      els.pipeline.innerHTML = stations.map((station) => {
+        const status = stationStatus(station.id);
+        const drop = state.stage === 1 && station.id === "upload" ? " droppable" : "";
+        return '<div class="station ' + status + drop + '" data-station="' + station.id + '">' +
+          '<h3><span>' + station.title + '</span><span class="pill gray">' + station.sub + '</span></h3>' +
+          '<div class="station-body">' + stationContent(station.id) + '</div>' +
+          '</div>';
+      }).join("");
+
+      const token = document.getElementById("pdfToken");
+      if (token) {
+        token.addEventListener("dragstart", (event) => {
+          event.dataTransfer.setData("text/plain", "pdf");
+        });
+      }
+      document.querySelectorAll(".station").forEach((station) => {
+        station.addEventListener("dragover", (event) => {
+          if (state.stage === 1 && station.dataset.station === "upload") event.preventDefault();
+        });
+        station.addEventListener("drop", (event) => {
+          event.preventDefault();
+          if (state.stage === 1 && station.dataset.station === "upload") uploadPdf();
+        });
+      });
+    }
+
+    function renderStages() {
+      els.stageList.innerHTML = stages.map((stage, idx) => {
+        const status = idx < state.stage ? "done" : idx === state.stage ? "active" : "";
+        return '<div class="stage-item ' + status + '">' +
+          '<div class="stage-num">' + (idx + 1) + '</div>' +
+          '<div><strong>' + stage.title + '</strong><span>' + stage.text + '</span></div>' +
+          '</div>';
+      }).join("");
+    }
+
+    function renderActions() {
+      const actions = [];
+      if (state.stage === 0) {
+        actions.push(btn("Choose Invoice PDF", "choosePdf", "primary"));
+      } else if (state.stage === 1) {
+        actions.push(btn("Send PDF to Upload Panel", "uploadPdf", "primary"));
+      } else if (state.stage === 2) {
+        actions.push(btn("Wake PDF Service", "wakeService", "primary"));
+      } else if (state.stage === 3) {
+        actions.push(btn("Run PDF Preview", "runPreview", "primary"));
+      } else if (state.stage === 4) {
+        actions.push(btn("Confirm Preview Rows", "goInsert", "primary"));
+      } else if (state.stage === 5) {
+        actions.push(btn("Confirm Insert to Database", "insertRows", "primary"));
+        if (state.emergencyAvailable) actions.push(btn("Emergency Cancel Insert", "emergencyCancel", "warn"));
+      } else if (state.stage === 6) {
+        actions.push(btn("Run Rules Engine Recheck", "runScheduler", "primary"));
+      } else if (state.stage === 7) {
+        actions.push(btn("Save Outsource Companies", "saveOutsource", "good"));
+      } else if (state.stage === 8) {
+        actions.push(btn("Copy WhatsApp-Style Summary", "copySummary", "primary"));
+        actions.push(btn("Play Again", "resetState", ""));
+      }
+      els.actionStack.innerHTML = actions.join("");
+      bindActionButtons();
+    }
+
+    function btn(label, action, cls) {
+      return '<button class="button ' + (cls || "") + '" data-action="' + action + '" type="button"' + (state.busy ? " disabled" : "") + '>' + label + '</button>';
+    }
+
+    function bindActionButtons() {
+      document.querySelectorAll("[data-action]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const action = button.dataset.action;
+          const fn = actions[action];
+          if (fn) fn();
+        });
+      });
+    }
+
+    function renderVanBoard() {
+      const outsourceRows = state.dbRows.filter((row) => row.status === "O");
+      const vanRows = baseVans.map((van) => {
+        const rows = state.dbRows.filter((row) => row.vanId === van.id && row.status !== "O");
+        const chips = rows.length ? rows.map(bookingChip).join("") : '<span class="empty-slot">Free on 30 Apr</span>';
+        return '<div class="van-row">' +
+          '<div class="van-name"><strong>' + van.plate + '</strong><span>' + van.driver + ' | cap ' + van.cap + seatsLabel(van) + '</span></div>' +
+          '<div class="van-slots">' + chips + '</div>' +
+          '</div>';
+      }).join("");
+      const outsourceLane = '<div class="van-row">' +
+        '<div class="van-name"><strong>OUTSOURCE</strong><span>External companies</span></div>' +
+        '<div class="van-slots">' + (outsourceRows.length ? outsourceRows.map(bookingChip).join("") : '<span class="empty-slot">No outsourced rows yet</span>') + '</div>' +
+        '</div>';
+      els.vanBoard.innerHTML = vanRows + outsourceLane;
+    }
+
+    function seatsLabel(van) {
+      const flags = [];
+      if (van.sg) flags.push("SG");
+      if (van.th) flags.push("TH");
+      if (van.type === "toyota alphard") flags.push("Alphard");
+      return flags.length ? " | " + flags.join(", ") : "";
+    }
+
+    function bookingChip(row) {
+      let cls = "booking-chip";
+      if (row.status === "O") cls += " out";
+      else if (row.category === "Alphard") cls += " alphard";
+      else if ((row.needs || []).includes("singapore enabled")) cls += " sg";
+      else if (row.tripType === "trip") cls += " trip";
+      const label = row.status === "O" && row.outsourceCompany
+        ? row.outsourceCompany + ": "
+        : "";
+      return '<div class="' + cls + '" title="' + row.invoiceNo + ' | ' + row.route + '">' + label + row.route + '</div>';
+    }
+
+    function renderDetailPane() {
+      if (state.stage <= 2) {
+        els.tableBadge.className = "pill gray";
+        els.tableBadge.textContent = "Waiting";
+        els.detailPane.innerHTML = '<div class="explain"><strong>Current state:</strong> One old one-way ride already exists in the database on WXY1234. Your new invoice has not entered the system yet.</div>';
+        return;
+      }
+      if (state.stage === 3 || state.stage === 4) {
+        els.tableBadge.className = "pill blue";
+        els.tableBadge.textContent = state.previewRows.length ? "Preview rows" : "Parsing";
+        els.detailPane.innerHTML = state.previewRows.length ? previewTable() : '<p class="small">Run preview to see parsed rows.</p>';
+        return;
+      }
+      if (state.stage === 5 || state.stage === 6) {
+        els.tableBadge.className = "pill violet";
+        els.tableBadge.textContent = "Database rows";
+        els.detailPane.innerHTML = databaseTable();
+        return;
+      }
+      if (state.stage === 7) {
+        els.tableBadge.className = openIssues().length ? "pill red" : "pill green";
+        els.tableBadge.textContent = openIssues().length ? "Action needed" : "Clean";
+        els.detailPane.innerHTML = conflictForm();
+        bindConflictButtons();
+        return;
+      }
+      els.tableBadge.className = "pill green";
+      els.tableBadge.textContent = "Ready";
+      els.detailPane.innerHTML = finalSummary();
+    }
+
+    function previewTable() {
+      const rows = state.previewRows.map((row) => {
+        return '<tr><td>' + row.invoiceNo + '</td><td>' + row.route + '</td><td>' + row.category + '</td><td>' + row.needs.join(", ") + '</td><td>MYR ' + row.amount + '</td></tr>';
+      }).join("");
+      return '<table><thead><tr><th>Invoice</th><th>Route</th><th>Vehicle</th><th>Rules read</th><th>Amount</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    function databaseTable() {
+      const rows = state.dbRows.map((row) => {
+        const van = baseVans.find((v) => v.id === row.vanId);
+        const status = row.status === "O" ? "Outsource" : (van ? van.plate : "Unassigned");
+        return '<tr><td>#' + row.id + '</td><td>' + row.invoiceNo + '</td><td>' + row.route + '</td><td>' + row.tripType + '</td><td>' + status + '</td></tr>';
+      }).join("");
+      return '<table><thead><tr><th>ID</th><th>Invoice</th><th>Route</th><th>Type</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
+    function conflictForm() {
+      if (!state.issues.length) return '<div class="explain">No issues yet. Run the scheduler first.</div>';
+      const issueHtml = state.issues.map((issue) => {
+        const row = state.dbRows.find((b) => b.id === issue.bookingId);
+        const resolved = issue.resolved ? " resolved" : "";
+        return '<div class="conflict' + resolved + '" data-issue="' + issue.bookingId + '">' +
+          '<div><span class="pill ' + (issue.resolved ? "green" : "red") + '">' + (issue.resolved ? "Resolved" : "Action needed") + '</span></div>' +
+          '<h3>' + row.route + '</h3>' +
+          '<p class="small">' + issue.reason + '</p>' +
+          '<input value="' + (row.outsourceCompany || "") + '" placeholder="Type outsource company name">' +
+          '<div class="tiny-actions">' +
+          '<button class="tiny" type="button" data-fill="' + issue.bookingId + '" data-company="FastRide Partner">FastRide Partner</button>' +
+          '<button class="tiny" type="button" data-fill="' + issue.bookingId + '" data-company="CityLink Transport">CityLink Transport</button>' +
+          '</div>' +
+          '</div>';
+      }).join("");
+      return '<div class="conflict-list">' + issueHtml + '</div>';
+    }
+
+    function bindConflictButtons() {
+      document.querySelectorAll("[data-fill]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = button.closest(".conflict");
+          item.querySelector("input").value = button.dataset.company;
+        });
+      });
+    }
+
+    function finalSummary() {
+      const inHouse = state.dbRows.filter((row) => row.status !== "O").length;
+      const out = state.dbRows.filter((row) => row.status === "O").length;
+      return '<div class="final-box">' +
+        '<h3>Schedule ready</h3>' +
+        '<p>' + inHouse + ' in-house booking rows and ' + out + ' outsourced booking rows are clean. No missing outsource company remains.</p>' +
+        '<p>Daily Jobs can now print, build WhatsApp text, or let staff make final edits.</p>' +
+        '</div>';
+    }
+
+    function render() {
+      const stage = stages[state.stage];
+      els.missionTitle.textContent = stage.title;
+      els.missionText.textContent = stage.text;
+      els.hintBox.textContent = stage.hint;
+      els.scoreText.textContent = state.score;
+      els.issueText.textContent = openIssues().length;
+      els.stageBadge.textContent = "Stage " + (state.stage + 1) + " of " + stages.length;
+      renderActions();
+      renderStages();
+      renderPipeline();
+      renderVanBoard();
+      renderDetailPane();
+    }
+
+    async function runBusy(fn) {
+      if (state.busy) return;
+      state.busy = true;
+      render();
+      try {
+        await fn();
+      } finally {
+        state.busy = false;
+        render();
+      }
+    }
+
+    const actions = {
+      choosePdf,
+      uploadPdf,
+      wakeService,
+      runPreview,
+      goInsert,
+      insertRows,
+      emergencyCancel,
+      runScheduler,
+      saveOutsource,
+      copySummary,
+      resetState
+    };
+
+    function choosePdf() {
+      state.fileChosen = true;
+      addScore(5);
+      log("User selected INV2026040101.pdf.", "api");
+      setStage(1);
+      showToast("PDF selected. Drag it to Upload Panel.");
+    }
+
+    function uploadPdf() {
+      if (!state.fileChosen) return;
+      state.uploaded = true;
+      addScore(5);
+      log("Upload panel opened from Daily Jobs / All Jobs.", "api");
+      log("File accepted: INV2026040101.pdf.", "ok");
+      setStage(2);
+    }
+
+    function wakeService() {
+      runBusy(async () => {
+        state.service = "starting";
+        log("GET NEXT_PUBLIC_PDF_SERVICE_URL/health -> cold, starting service.", "api");
+        render();
+        await sleep(600);
+        log("PDF service waking up. Waiting for Railway-style cold start...", "warn");
+        await sleep(700);
+        state.service = "ready";
+        addScore(10);
+        log("GET /health -> 200 OK. PDF service is ready.", "ok");
+        setStage(3);
+      });
+    }
+
+    function runPreview() {
+      runBusy(async () => {
+        log("POST /api/preview with PDF file.", "api");
+        await sleep(450);
+        log("Backend sends PDF bytes to PDF_SERVICE_URL/parse.", "api");
+        await sleep(550);
+        log("Python Flask service uses PyMuPDF and returns raw text.", "ok");
+        state.textExtracted = true;
+        render();
+        await sleep(550);
+        log("parseRawText reads invoice number, customer, dates, routes, amounts, and vehicle labels.", "db");
+        await sleep(450);
+        state.previewRows = parsedRows.map(cloneRow);
+        addScore(15);
+        log("Preview complete: 5 booking row(s) found.", "ok");
+        setStage(4);
+      });
+    }
+
+    function goInsert() {
+      log("Staff reviewed preview rows and clicked Confirm.", "ok");
+      addScore(5);
+      state.emergencyAvailable = true;
+      setStage(5);
+    }
+
+    function insertRows() {
+      runBusy(async () => {
+        log("POST /api/insert with parsed JSON rows.", "api");
+        await sleep(450);
+        log("data: { type: \"parsed\", total: 5 }", "api");
+        for (let i = 0; i < state.previewRows.length; i++) {
+          const row = cloneRow(state.previewRows[i]);
+          row.vanId = null;
+          row.status = row.category === "Car" ? "O" : "I";
+          row.outsourceCompany = "";
+          row.reason = row.category === "Car" ? "Car trip - external vehicle required" : "";
+          state.dbRows.push(row);
+          log("Inserted booking row #" + row.id + ": " + row.route + ".", "db");
+          log("data: { type: \"progress\", inserted: " + (i + 1) + ", total: 5 }", "api");
+          render();
+          await sleep(260);
+        }
+        state.emergencyAvailable = false;
+        addScore(15);
+        log("Rows inserted. Next event: data: { type: \"recheck\" }", "ok");
+        setStage(6);
+      });
+    }
+
+    function emergencyCancel() {
+      if (!state.emergencyAvailable) return;
+      state.dbRows = [{ ...existingBooking }];
+      state.previewRows = [];
+      state.textExtracted = false;
+      state.emergencyAvailable = false;
+      state.score = Math.max(0, state.score - 5);
+      log("Emergency cancel called /api/cancel-insert and removed just-inserted IDs.", "warn");
+      setStage(3);
+    }
+
+    function runScheduler() {
+      runBusy(async () => {
+        log("RECHECK STARTED", "api");
+        await sleep(300);
+        log("Step 1/7 - scanning auto-managed bookings.", "api");
+        await sleep(380);
+        log("Skipping confirmed outsourced rows. Car rows stay outsourced.", "warn");
+        await sleep(380);
+        log("Step 2/7 - clearing automatic van assignments for new in-house rows.", "db");
+        state.dbRows.forEach((row) => {
+          if (row.id !== 90 && row.category !== "Car") {
+            row.vanId = null;
+            row.status = "I";
+          }
+        });
+        render();
+
+        await sleep(500);
+        log("Step 3/7 - runReassign starts by date and priority.", "api");
+        await sleep(500);
+
+        const dayTrip = findRow(101);
+        const oldRide = findRow(90);
+        oldRide.vanId = null;
+        oldRide.status = "I";
+        oldRide.reason = "Bumped by higher-priority day trip";
+        dayTrip.vanId = 1;
+        dayTrip.status = "I";
+        log("BUMP: KL Day Trip claims WXY1234 and displaces old one-way ride.", "warn");
+        render();
+        await sleep(650);
+
+        const sgTrip = findRow(102);
+        sgTrip.vanId = 2;
+        sgTrip.status = "I";
+        log("Assigned KL - Singapore to SG8888 because that van is Singapore enabled.", "ok");
+        render();
+        await sleep(550);
+
+        const paxTrip = findRow(103);
+        paxTrip.vanId = 4;
+        paxTrip.status = "I";
+        log("Assigned KL - Genting 15 pax to VAN15 because capacity is 15.", "ok");
+        render();
+        await sleep(550);
+
+        const alphardTrip = findRow(104);
+        alphardTrip.vanId = 3;
+        alphardTrip.status = "I";
+        log("Assigned KL - KLIA Alphard to ALP700. Regular vans are not allowed.", "ok");
+        render();
+        await sleep(550);
+
+        oldRide.vanId = null;
+        oldRide.status = "O";
+        oldRide.outsourceCompany = "";
+        oldRide.reason = "Bumped by higher-priority day trip; no suitable free van left";
+        log("Second pass for bumped one-way: no free regular van left, marked outsource needed.", "warn");
+        render();
+        await sleep(550);
+
+        const carTrip = findRow(105);
+        carTrip.vanId = null;
+        carTrip.status = "O";
+        carTrip.outsourceCompany = "";
+        carTrip.reason = "5-seater car jobs do not use the van fleet";
+        log("Car row remains outsourced and needs company name.", "warn");
+        render();
+        await sleep(450);
+
+        state.issues = [
+          { bookingId: 90, reason: oldRide.reason, resolved: false },
+          { bookingId: 105, reason: carTrip.reason, resolved: false }
+        ];
+        state.schedulerRan = true;
+        addScore(20);
+        log("Step 7/7 - schedule has 2 action item(s): outsource company needed.", "warn");
+        log("RECHECK COMPLETE", "ok");
+        setStage(7);
+      });
+    }
+
+    function findRow(id) {
+      return state.dbRows.find((row) => row.id === id);
+    }
+
+    function saveOutsource() {
+      const conflicts = document.querySelectorAll(".conflict");
+      let missing = 0;
+      conflicts.forEach((item) => {
+        const bookingId = Number(item.dataset.issue);
+        const value = item.querySelector("input").value.trim();
+        const row = findRow(bookingId);
+        const issue = state.issues.find((x) => x.bookingId === bookingId);
+        if (!value) {
+          missing += 1;
+          return;
+        }
+        row.outsourceCompany = value;
+        row.status = "O";
+        issue.resolved = true;
+      });
+      if (missing) {
+        log("Cannot finish yet: " + missing + " outsource company name(s) missing.", "err");
+        showToast("Fill every outsource company first.");
+        render();
+        return;
+      }
+      addScore(25);
+      log("PATCH /api/bookings/[id] saved outsource companies.", "db");
+      log("All conflict rows resolved. Schedule is now clean.", "ok");
+      setStage(8);
+    }
+
+    async function copySummary() {
+      const summary = buildSummary();
+      try {
+        await navigator.clipboard.writeText(summary);
+        log("Copied final WhatsApp-style summary to clipboard.", "ok");
+        showToast("Summary copied.");
+      } catch {
+        log("Clipboard not available. Summary shown in detail pane instead.", "warn");
+        els.detailPane.innerHTML = '<pre style="white-space:pre-wrap;margin:0">' + escapeHtml(summary) + '</pre>';
+      }
+    }
+
+    function buildSummary() {
+      const lines = [];
+      lines.push("30 April 2026 - Daily Jobs");
+      lines.push("");
+      state.dbRows.forEach((row) => {
+        const van = baseVans.find((v) => v.id === row.vanId);
+        if (row.status === "O") {
+          lines.push(row.route + " | OUTSOURCED: " + row.outsourceCompany);
+        } else {
+          lines.push(row.route + " | " + van.plate + " | " + van.driver);
+        }
+      });
+      return lines.join("\n");
+    }
+
+    function escapeHtml(text) {
+      return text.replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[ch]));
+    }
+
+    async function autoPlay() {
+      if (state.busy) return;
+      resetState();
+      state.autoPlaying = true;
+      await sleep(300);
+      choosePdf();
+      await sleep(650);
+      uploadPdf();
+      await waitIdle();
+      wakeService();
+      await waitIdle();
+      runPreview();
+      await waitIdle();
+      goInsert();
+      await sleep(300);
+      insertRows();
+      await waitIdle();
+      runScheduler();
+      await waitIdle();
+      document.querySelectorAll(".conflict").forEach((item, index) => {
+        item.querySelector("input").value = index === 0 ? "FastRide Partner" : "CityLink Transport";
+      });
+      saveOutsource();
+      state.autoPlaying = false;
+    }
+
+    async function waitIdle() {
+      while (state.busy) await sleep(120);
+      await sleep(300);
+    }
+
+    document.getElementById("resetBtn").addEventListener("click", resetState);
+    document.getElementById("autoBtn").addEventListener("click", autoPlay);
+    document.getElementById("clearLogBtn").addEventListener("click", () => { els.log.innerHTML = ""; });
+
+    resetState();
+  </script>
+</body>
+</html>

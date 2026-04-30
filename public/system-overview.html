@@ -1,0 +1,1506 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Van Booking System - Plain English Overview</title>
+  <style>
+    :root {
+      --ink: #18212f;
+      --muted: #64748b;
+      --soft: #f7f8fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --blue: #2563eb;
+      --teal: #0f766e;
+      --amber: #b45309;
+      --red: #b91c1c;
+      --green: #15803d;
+      --violet: #6d28d9;
+      --cyan: #0e7490;
+      --shadow: 0 16px 45px rgba(24, 33, 47, 0.10);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef3f8;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.6;
+    }
+
+    a { color: inherit; }
+    button, input { font: inherit; }
+    code {
+      background: #edf2f7;
+      border: 1px solid #dbe4ef;
+      border-radius: 5px;
+      padding: 0.08rem 0.35rem;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 0.92em;
+    }
+
+    .progress {
+      position: fixed;
+      inset: 0 auto auto 0;
+      height: 3px;
+      width: 0;
+      background: linear-gradient(90deg, var(--blue), var(--teal), var(--amber));
+      z-index: 30;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(255, 255, 255, 0.92);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+
+    .topbar-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 0.7rem 1.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: white;
+      background: #1f2937;
+      font-size: 0.8rem;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .nav a,
+    .nav button,
+    .chip-button {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 0.42rem 0.62rem;
+      font-size: 0.86rem;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .nav a:hover,
+    .nav button:hover,
+    .chip-button:hover {
+      color: var(--ink);
+      background: #eef3f8;
+      border-color: #d8e0ea;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 1.5rem 1.2rem 4rem;
+    }
+
+    section {
+      scroll-margin-top: 80px;
+      margin: 1rem 0 1.4rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .section-pad { padding: 1.5rem; }
+    .section-head {
+      padding: 1.2rem 1.5rem;
+      border-bottom: 1px solid var(--line);
+      background: #f9fbfd;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .eyebrow {
+      margin: 0 0 0.25rem;
+      color: var(--blue);
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { line-height: 1.15; margin: 0; letter-spacing: -0.03em; }
+    h1 { font-size: clamp(2rem, 5vw, 4.2rem); max-width: 760px; }
+    h2 { font-size: clamp(1.45rem, 2.6vw, 2.1rem); }
+    h3 { font-size: 1.05rem; }
+    p { margin: 0; color: var(--muted); }
+
+    .hero {
+      min-height: calc(100vh - 74px);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(310px, 0.8fr);
+      align-items: center;
+      gap: 2rem;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 2rem;
+      overflow: hidden;
+    }
+
+    .hero-copy { min-width: 0; }
+    .hero-sub {
+      margin-top: 1rem;
+      font-size: 1.08rem;
+      max-width: 700px;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+      margin-top: 1.4rem;
+    }
+
+    .button {
+      border: 1px solid #cbd5e1;
+      background: white;
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 0.65rem 0.95rem;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+
+    .button.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .button:hover { transform: translateY(-1px); }
+
+    .hero-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #f8fafc;
+    }
+
+    .hero-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      object-position: left top;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .hero-card .caption {
+      padding: 0.85rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.85rem;
+      background: #fbfdff;
+    }
+
+    .stat strong {
+      display: block;
+      color: var(--ink);
+      font-size: 1.3rem;
+      line-height: 1.1;
+    }
+
+    .stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-top: 0.2rem;
+    }
+
+    .grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .note,
+    .card,
+    .mini-card {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .note {
+      background: #f8fafc;
+      border-left: 5px solid var(--blue);
+    }
+
+    .note strong,
+    .card strong,
+    .mini-card strong {
+      color: var(--ink);
+    }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.7rem;
+      margin-bottom: 0.45rem;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      border-radius: 5px;
+      padding: 0.16rem 0.45rem;
+      font-size: 0.72rem;
+      font-weight: 800;
+      line-height: 1.2;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .tag.blue { color: #1d4ed8; background: #dbeafe; border-color: #bfdbfe; }
+    .tag.green { color: #166534; background: #dcfce7; border-color: #bbf7d0; }
+    .tag.amber { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+    .tag.red { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+    .tag.violet { color: #5b21b6; background: #ede9fe; border-color: #ddd6fe; }
+    .tag.cyan { color: #155e75; background: #cffafe; border-color: #a5f3fc; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .flow-card {
+      min-height: 128px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 0.95rem;
+      text-align: left;
+      cursor: pointer;
+      transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .flow-card:hover,
+    .flow-card.active {
+      transform: translateY(-2px);
+      border-color: var(--blue);
+      background: #eff6ff;
+    }
+
+    .flow-num {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: #1f2937;
+      border-radius: 7px;
+      font-weight: 800;
+      font-size: 0.78rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .flow-card h3 { font-size: 0.95rem; margin-bottom: 0.25rem; }
+    .flow-card p { font-size: 0.82rem; }
+
+    .detail-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 1rem;
+      min-height: 110px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 0.75rem;
+      counter-reset: step;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 0.9rem;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      position: relative;
+    }
+
+    .timeline-item::before {
+      counter-increment: step;
+      content: counter(step);
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: #1f2937;
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .timeline-item h3 { margin-bottom: 0.25rem; }
+    .timeline-item ul,
+    .plain-list {
+      margin: 0.55rem 0 0;
+      padding-left: 1.05rem;
+      color: var(--muted);
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .tab {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .tab.active {
+      color: #fff;
+      background: var(--teal);
+      border-color: var(--teal);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .mock-window {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .mock-titlebar {
+      padding: 0.7rem 0.9rem;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #cbd5e1;
+    }
+
+    .mock-body { padding: 1rem; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid #e5edf5;
+      padding: 0.65rem;
+      vertical-align: top;
+    }
+
+    th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+    .accordion {
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .acc-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .acc-button {
+      width: 100%;
+      border: 0;
+      background: #fff;
+      color: var(--ink);
+      padding: 0.95rem 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      text-align: left;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .acc-button:hover { background: #f8fafc; }
+    .acc-body {
+      display: none;
+      padding: 0 1rem 1rem;
+      color: var(--muted);
+    }
+
+    .acc-item.open .acc-body { display: block; }
+
+    .system-map {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0.75rem;
+      align-items: stretch;
+    }
+
+    .map-node {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 0.95rem;
+      min-height: 150px;
+    }
+
+    .map-node h3 { font-size: 0.94rem; margin-bottom: 0.35rem; }
+    .map-node p { font-size: 0.84rem; }
+
+    .scenario {
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+
+    .scenario-buttons {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .scenario-buttons button {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      border-radius: 6px;
+      padding: 0.62rem 0.75rem;
+      text-align: left;
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .scenario-buttons button.active {
+      color: var(--ink);
+      border-color: var(--blue);
+      background: #eff6ff;
+    }
+
+    .scenario-result {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 1rem;
+      min-height: 220px;
+    }
+
+    .result-line {
+      display: flex;
+      gap: 0.6rem;
+      align-items: flex-start;
+      padding: 0.55rem 0;
+      border-bottom: 1px solid #e5edf5;
+    }
+
+    .result-line:last-child { border-bottom: 0; }
+    .result-status {
+      flex: 0 0 auto;
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      background: #1f2937;
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 800;
+    }
+
+    .search-row {
+      display: flex;
+      gap: 0.7rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .search-row input {
+      flex: 1 1 260px;
+      min-width: 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 0.65rem 0.75rem;
+    }
+
+    .glossary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+
+    .term {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.85rem;
+      background: #fff;
+    }
+
+    .term h3 { font-size: 0.92rem; margin-bottom: 0.25rem; }
+    .term p { font-size: 0.84rem; }
+
+    .checklist {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .check {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.8rem;
+      background: #fff;
+    }
+
+    .check input {
+      margin-top: 0.24rem;
+      width: 18px;
+      height: 18px;
+    }
+
+    .footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.86rem;
+      padding: 1.4rem 0 0;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .grid.two,
+      .grid.three,
+      .grid.four,
+      .scenario {
+        grid-template-columns: 1fr;
+      }
+
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .system-map { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .glossary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .topbar-inner { align-items: flex-start; flex-direction: column; }
+      .nav { justify-content: flex-start; }
+    }
+
+    @media (max-width: 620px) {
+      main { padding: 0.8rem 0.75rem 2.5rem; }
+      .hero { padding: 1.2rem; min-height: auto; }
+      .section-pad, .section-head { padding: 1rem; }
+      .stats, .flow, .system-map, .glossary { grid-template-columns: 1fr; }
+      .timeline-item { grid-template-columns: 1fr; }
+      .topbar-inner { padding: 0.65rem 0.75rem; }
+      .nav a, .nav button { font-size: 0.8rem; padding: 0.36rem 0.5rem; }
+    }
+
+    @media print {
+      .topbar, .progress, .hero-actions, .tabs, .scenario-buttons, .search-row, .button.print-only-hide { display: none !important; }
+      body { background: #fff; }
+      main { max-width: none; padding: 0; }
+      section, .hero { box-shadow: none; break-inside: avoid; }
+      .tab-panel { display: block !important; margin-bottom: 1rem; }
+      .acc-body { display: block !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark">VB</div>
+        <span>Van Booking System Guide</span>
+      </div>
+      <nav class="nav" aria-label="Guide navigation">
+        <a href="#map">Map</a>
+        <a href="#journey">Start to End</a>
+        <a href="#pages">Screens</a>
+        <a href="#rules">Rules</a>
+        <a href="#behind">Behind the Scenes</a>
+        <a href="#trouble">Fix Problems</a>
+        <button type="button" onclick="window.print()">Print</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow">Plain English, full system view</p>
+        <h1>The whole van booking system, explained from first invoice to final schedule.</h1>
+        <p class="hero-sub">
+          This guide explains what the system does, what each screen is for, how bookings become rows,
+          how vans are assigned, when a job becomes outsourced, and where AI or external services fit in.
+          It is written for normal day-to-day users, not only developers.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#map">Start with the simple map</a>
+          <a class="button" href="system-flow-game.html">Play the flow game</a>
+          <a class="button" href="#journey">Follow one booking</a>
+          <a class="button" href="#checklist">Daily checklist</a>
+        </div>
+        <div class="stats">
+          <div class="stat"><strong>4</strong><span>Main work screens</span></div>
+          <div class="stat"><strong>4</strong><span>Main data tables</span></div>
+          <div class="stat"><strong>3</strong><span>External services</span></div>
+          <div class="stat"><strong>1</strong><span>Goal: no missed trips</span></div>
+        </div>
+      </div>
+
+      <div class="hero-card">
+        <img src="image.png" alt="Actual monthly van schedule screenshot">
+        <div class="caption">
+          Actual schedule view: dates across the top, vans down the side, bookings inside the calendar.
+        </div>
+      </div>
+    </div>
+
+    <section id="map">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Simple Map</p>
+          <h2>The system in one sentence</h2>
+        </div>
+      </div>
+      <div class="section-pad">
+        <div class="note">
+          <strong>It turns booking information into a working driver schedule.</strong>
+          In simple words: put in invoices or booking details, let the system read them, check the fleet,
+          assign suitable vans, show conflicts clearly, then help staff fix the remaining items.
+        </div>
+
+        <div class="flow" style="margin-top: 1rem;">
+          <button class="flow-card active" data-step="input" type="button">
+            <div class="flow-num">1</div>
+            <h3>Booking comes in</h3>
+            <p>PDF invoice, pasted text, manual row, or Telegram invoice bot.</p>
+          </button>
+          <button class="flow-card" data-step="read" type="button">
+            <div class="flow-num">2</div>
+            <h3>System reads it</h3>
+            <p>Dates, route, invoice number, trip type, vehicle needs, and amount are extracted.</p>
+          </button>
+          <button class="flow-card" data-step="save" type="button">
+            <div class="flow-num">3</div>
+            <h3>Rows are saved</h3>
+            <p>Each trip leg becomes a booking row in the database.</p>
+          </button>
+          <button class="flow-card" data-step="assign" type="button">
+            <div class="flow-num">4</div>
+            <h3>Vans are assigned</h3>
+            <p>The scheduler checks availability, route rules, vehicle type, and capacity.</p>
+          </button>
+          <button class="flow-card" data-step="review" type="button">
+            <div class="flow-num">5</div>
+            <h3>Staff reviews</h3>
+            <p>Daily Jobs, All Jobs, and Van Schedule show what is ready or needs attention.</p>
+          </button>
+          <button class="flow-card" data-step="finish" type="button">
+            <div class="flow-num">6</div>
+            <h3>Finish the day</h3>
+            <p>Confirm outsource companies, fix conflicts, print, share WhatsApp text, or export.</p>
+          </button>
+        </div>
+
+        <div class="detail-box" id="stepDetail">
+          <h3>Booking comes in</h3>
+          <p>A booking can arrive as an uploaded PDF, a row added by staff, pasted text in Invoice Creator,
+          or a PDF made by the separate n8n Telegram invoice bot. Everything is eventually converted into
+          booking rows with dates, routes, customer details, price, and vehicle needs.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="journey">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Start to End</p>
+          <h2>Follow one booking through the system</h2>
+        </div>
+      </div>
+      <div class="section-pad">
+        <div class="timeline">
+          <div class="timeline-item">
+            <div>
+              <h3>Set up the fleet first</h3>
+              <p>On the Dashboard, staff add each van plate, driver name, contact, base location, passenger capacity, and special abilities.</p>
+              <ul>
+                <li><strong>Singapore enabled</strong> means this van can take Singapore routes.</li>
+                <li><strong>Thailand enabled</strong> means this van can take Thailand routes.</li>
+                <li><strong>Vehicle type</strong> matters because Toyota Alphard bookings should only use Toyota Alphard vehicles.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div>
+              <h3>A booking is entered</h3>
+              <p>Most bookings enter by uploading an invoice PDF from Daily Jobs or All Jobs. Staff can also add rows manually or use Invoice Creator.</p>
+              <ul>
+                <li>PDF upload is best when the invoice already exists.</li>
+                <li>Invoice Creator is best when staff have messy booking text and need to create an invoice first.</li>
+                <li>The n8n Telegram bot is separate, but it also creates invoice PDFs that can be uploaded or shared.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div>
+              <h3>The PDF service extracts text</h3>
+              <p>The Next.js app sends the PDF to the Python PDF service. The service uses PyMuPDF to read the text and returns plain text to the app.</p>
+              <ul>
+                <li>The frontend checks <code>NEXT_PUBLIC_PDF_SERVICE_URL/health</code> and shows a cold-start status if the service is sleeping.</li>
+                <li>The backend calls <code>/parse</code> to get the text from the PDF.</li>
+                <li>If the service is down, upload preview cannot read PDFs yet.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div>
+              <h3>The parser turns text into booking rows</h3>
+              <p>The parser looks for invoice number, customer details, each numbered trip row, route, travel date, number of vehicles, amount, and special labels.</p>
+              <ul>
+                <li><code>KL - Penang</code> becomes from KL to Penang.</li>
+                <li><code>KL - Penang - KL</code> becomes a round trip.</li>
+                <li><code>Alphard</code>, <code>15 pax</code>, and <code>5-seater car</code> become special vehicle rules.</li>
+                <li>If one invoice needs 2 vans, the system creates 2 booking rows, one for each vehicle.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div>
+              <h3>Staff checks the preview</h3>
+              <p>The upload panel shows the rows before saving. This is the safety checkpoint: staff can cancel if the PDF was wrong or the rows look strange.</p>
+              <ul>
+                <li>Up to 20 PDFs can be selected at once.</li>
+                <li>The preview shows date, invoice number, client, route, type, vehicle count, and amount.</li>
+                <li>Confirming sends the preview rows to the database.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div>
+              <h3>Rows are inserted into the database</h3>
+              <p>The app stores rows in PostgreSQL through Drizzle ORM. While inserting, the upload panel streams progress back to the user.</p>
+              <ul>
+                <li>New rows start as automatic rows, meaning the scheduler is allowed to assign them.</li>
+                <li>Car bookings are immediately marked as outsourced because the fleet vans should not take car jobs.</li>
+                <li>Emergency Cancel can remove just-inserted rows if scheduling is still running.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div>
+              <h3>The rules engine assigns vans</h3>
+              <p>After insert, the current default flow runs the rules engine. It does not simply pick any van: it checks route ability, Alphard rules, 15-pax capacity, invoice continuity, double-booking, and outsource status.</p>
+              <ul>
+                <li>Manual locked bookings are not touched.</li>
+                <li>Confirmed outsourced bookings are not touched.</li>
+                <li>Unassigned rows are tried again before being marked as outsource needed.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div>
+              <h3>Staff reviews the results</h3>
+              <p>The system then refreshes the work screens. Daily Jobs shows one date. All Jobs shows all records. Van Schedule shows the monthly calendar.</p>
+              <ul>
+                <li>Conflict banners show missing vans, missing outsource companies, and double-bookings.</li>
+                <li>Staff can edit booking fields inline.</li>
+                <li>Staff can print, copy WhatsApp schedules, or export schedule JSON.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div>
+              <h3>Remaining issues are handled by staff</h3>
+              <p>If no suitable van exists, the booking is marked outsourced but still needs a company name. Once staff fill in the company, the booking is considered confirmed outsourced and protected.</p>
+              <ul>
+                <li>Outsource company filled in = confirmed external job.</li>
+                <li>Manual lock = staff decision that automatic rechecks should not override.</li>
+                <li>Recheck can be run again after changing vans, deleting bookings, or fixing details.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="pages">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Work Screens</p>
+          <h2>What each page is for</h2>
+        </div>
+      </div>
+      <div class="section-pad">
+        <div class="tabs" role="tablist" aria-label="Pages">
+          <button class="tab active" type="button" data-tab="dash">Dashboard</button>
+          <button class="tab" type="button" data-tab="daily">Daily Jobs</button>
+          <button class="tab" type="button" data-tab="all">All Jobs</button>
+          <button class="tab" type="button" data-tab="schedule">Van Schedule</button>
+          <button class="tab" type="button" data-tab="invoice">Invoice Creator</button>
+          <button class="tab" type="button" data-tab="chat">Schedule AI</button>
+        </div>
+
+        <div class="tab-panel active" id="tab-dash">
+          <div class="mock-window">
+            <div class="mock-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Dashboard</div>
+            <div class="mock-body grid two">
+              <div class="card">
+                <div class="card-title"><h3>Van and driver management</h3><span class="tag blue">fleet</span></div>
+                <p>Add van plate, driver name, contact, base location, vehicle type, passenger capacity, Singapore ability, and Thailand ability.</p>
+              </div>
+              <div class="card">
+                <div class="card-title"><h3>Bulk actions</h3><span class="tag amber">careful</span></div>
+                <p>Recheck all assignments, remove duplicate bookings, seed placeholder vans, or clear all bookings. Clear actions are permanent.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-daily">
+          <div class="mock-window">
+            <div class="mock-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Daily Jobs</div>
+            <div class="mock-body">
+              <table>
+                <thead><tr><th>Use this when</th><th>What it helps you do</th></tr></thead>
+                <tbody>
+                  <tr><td>You want one day only</td><td>Pick a date, review jobs for that date, edit cells, and print the daily record.</td></tr>
+                  <tr><td>You need to upload invoices</td><td>Open the floating PDF upload panel and preview parsed rows before saving.</td></tr>
+                  <tr><td>You need driver messages</td><td>Build WhatsApp text blocks grouped by invoice and outsource status.</td></tr>
+                  <tr><td>You need to clean mistakes</td><td>Delete a single row or delete all rows for one invoice number.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-all">
+          <div class="mock-window">
+            <div class="mock-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> All Jobs</div>
+            <div class="mock-body grid two">
+              <div class="card">
+                <div class="card-title"><h3>Big table view</h3><span class="tag green">search</span></div>
+                <p>Shows all bookings. Search by client, invoice, route, plate, driver, or details. Sort by date, invoice, and amount.</p>
+              </div>
+              <div class="card">
+                <div class="card-title"><h3>Best for cleanup</h3><span class="tag cyan">edit</span></div>
+                <p>Good when you do not know the date yet, or when you need to find and correct older records.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-schedule">
+          <div class="mock-window">
+            <div class="mock-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Van Schedule</div>
+            <div class="mock-body grid two">
+              <div class="card">
+                <div class="card-title"><h3>Monthly calendar</h3><span class="tag blue">overview</span></div>
+                <p>Rows are vans or outsource companies. Columns are dates. Each booking appears inside its van and date cell.</p>
+              </div>
+              <div class="card">
+                <div class="card-title"><h3>Conflict action table</h3><span class="tag red">action</span></div>
+                <p>Shows double-booked vans, bookings with no van, and vans with no driver. Staff can pick a free van or enter an outsource company.</p>
+              </div>
+              <div class="card">
+                <div class="card-title"><h3>Bottom edit panel</h3><span class="tag green">details</span></div>
+                <p>Click a booking to edit invoice number, route, date, driver, outsource status, overtime, notes, and manual lock.</p>
+              </div>
+              <div class="card">
+                <div class="card-title"><h3>Drag move</h3><span class="tag amber">same day</span></div>
+                <p>Move a booking to a different van on the same date. Use the lock checkbox when the decision must survive future rechecks.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-invoice">
+          <div class="mock-window">
+            <div class="mock-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Invoice Creator</div>
+            <div class="mock-body">
+              <div class="grid three">
+                <div class="card">
+                  <div class="card-title"><h3>1. Paste text</h3><span class="tag violet">AI</span></div>
+                  <p>Paste messy booking info. OpenRouter AI extracts customer, route, dates, vehicle count, prices, and special tags.</p>
+                </div>
+                <div class="card">
+                  <div class="card-title"><h3>2. Generate PDF</h3><span class="tag amber">invoice</span></div>
+                  <p>The app builds invoice HTML, gets the next invoice number, and sends it to html2pdf.app to create a PDF.</p>
+                </div>
+                <div class="card">
+                  <div class="card-title"><h3>3. Schedule it</h3><span class="tag green">confirm</span></div>
+                  <p>Confirm and Schedule sends that new PDF through the same preview and booking insert flow.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-chat">
+          <div class="mock-window">
+            <div class="mock-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Schedule AI</div>
+            <div class="mock-body grid two">
+              <div class="card">
+                <div class="card-title"><h3>Ask schedule questions</h3><span class="tag violet">AI</span></div>
+                <p>The floating assistant talks to OpenRouter. It can answer questions, save scheduling rules, and trigger an AI recheck route.</p>
+              </div>
+              <div class="card">
+                <div class="card-title"><h3>Tool actions</h3><span class="tag amber">locked</span></div>
+                <p>Its server route has tools to assign a van, mark outsource, save a rule, and run AI assignment. Direct tool changes set manual lock.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="rules">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Scheduling Rules</p>
+          <h2>How the system decides who gets which van</h2>
+        </div>
+      </div>
+      <div class="section-pad">
+        <div class="note" style="margin-bottom: 1rem;">
+          <strong>The current normal upload flow uses the rules engine.</strong>
+          AI exists in the project, but the default PDF insert and Recheck button currently call the rules engine.
+          The chat route can trigger the AI scheduler separately.
+        </div>
+
+        <div class="accordion">
+          <div class="acc-item open">
+            <button class="acc-button" type="button">1. The scheduler starts with what it is allowed to touch <span>+</span></button>
+            <div class="acc-body">
+              It only resets auto-managed bookings. It skips manual locked rows, confirmed outsourced rows,
+              and car jobs. This protects staff decisions from being overwritten.
+            </div>
+          </div>
+
+          <div class="acc-item">
+            <button class="acc-button" type="button">2. It clears old automatic assignments <span>+</span></button>
+            <div class="acc-body">
+              For eligible rows, it clears van ID, plate, driver, and contact. This gives the scheduler a clean board,
+              while leaving protected rows alone.
+            </div>
+          </div>
+
+          <div class="acc-item">
+            <button class="acc-button" type="button">3. It assigns suitable free vans first <span>+</span></button>
+            <div class="acc-body">
+              A van must be free on that date and must match the job. Singapore routes need Singapore-enabled vans.
+              Thailand routes need Thailand-enabled vans. Alphard jobs need Toyota Alphard vehicles. 15-pax jobs need enough capacity.
+            </div>
+          </div>
+
+          <div class="acc-item">
+            <button class="acc-button" type="button">4. It uses simple priority <span>+</span></button>
+            <div class="acc-body">
+              In the rules engine, normal trips are processed before one-way rides. If a normal trip has no free van,
+              it may bump a one-way ride. The bumped one-way ride gets a second chance later.
+            </div>
+          </div>
+
+          <div class="acc-item">
+            <button class="acc-button" type="button">5. It keeps invoice continuity where possible <span>+</span></button>
+            <div class="acc-body">
+              If the same invoice and same vehicle index appears across multiple dates, the system tries to keep the same van.
+              It will not force something impossible, such as two bookings needing the same van on the same date.
+            </div>
+          </div>
+
+          <div class="acc-item">
+            <button class="acc-button" type="button">6. It removes duplicates and double-bookings <span>+</span></button>
+            <div class="acc-body">
+              Re-uploads can accidentally create repeated rows. The recheck removes duplicate invoice/date/vehicle slots,
+              then scans for any van that has more than one booking on the same date.
+            </div>
+          </div>
+
+          <div class="acc-item">
+            <button class="acc-button" type="button">7. It marks remaining unassigned rows as outsource needed <span>+</span></button>
+            <div class="acc-body">
+              If the system still cannot find a suitable van, it marks the row as outsourced without a company name.
+              That is not finished yet. It appears as an action item until staff enter the outsource company.
+            </div>
+          </div>
+        </div>
+
+        <div class="grid four" style="margin-top: 1rem;">
+          <div class="mini-card"><strong>Manual lock</strong><p>Means <code>manualChange = 1</code>. Automation should not move it.</p></div>
+          <div class="mini-card"><strong>Confirmed outsource</strong><p><code>O</code> plus a company name. Treated as a staff decision.</p></div>
+          <div class="mini-card"><strong>Car job</strong><p>Always outsourced. It does not use the van pool.</p></div>
+          <div class="mini-card"><strong>Unconfirmed outsource</strong><p><code>O</code> without company. Still needs staff action.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="behind">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Behind the Scenes</p>
+          <h2>The technical pieces in layman terms</h2>
+        </div>
+      </div>
+      <div class="section-pad">
+        <div class="system-map">
+          <div class="map-node">
+            <h3>Browser</h3>
+            <p>What staff see: Dashboard, Daily Jobs, All Jobs, Van Schedule, Invoice Creator, upload panel, and AI chat.</p>
+          </div>
+          <div class="map-node">
+            <h3>Next.js app</h3>
+            <p>The main application. It handles pages, API routes, upload preview, insert, recheck, chat, invoice creation, and edits.</p>
+          </div>
+          <div class="map-node">
+            <h3>PostgreSQL database</h3>
+            <p>The memory of the system. Stores vans, bookings, invoice counters, and saved scheduling rules.</p>
+          </div>
+          <div class="map-node">
+            <h3>Python PDF service</h3>
+            <p>A small Flask service that reads PDF files and returns text. Needed because PDF text extraction works better in Python here.</p>
+          </div>
+          <div class="map-node">
+            <h3>AI and PDF tools</h3>
+            <p>OpenRouter helps extract invoice text and power the assistant. html2pdf.app turns invoice HTML into PDF.</p>
+          </div>
+        </div>
+
+        <div class="grid two" style="margin-top: 1rem;">
+          <div class="card">
+            <div class="card-title"><h3>Main database tables</h3><span class="tag blue">data</span></div>
+            <table>
+              <thead><tr><th>Table</th><th>Plain meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>vans</code></td><td>Fleet list: plate, driver, contact, capacity, location, type, SG/TH capability.</td></tr>
+                <tr><td><code>bookings</code></td><td>Every trip row: invoice, client, date, route, van, driver, amount, outsource status.</td></tr>
+                <tr><td><code>invoice_counters</code></td><td>Keeps the next invoice and booking number for Invoice Creator.</td></tr>
+                <tr><td><code>scheduling_rules</code></td><td>Saved natural-language rules used by the AI scheduler path.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <div class="card-title"><h3>Important API routes</h3><span class="tag cyan">routes</span></div>
+            <table>
+              <thead><tr><th>Route</th><th>Job</th></tr></thead>
+              <tbody>
+                <tr><td><code>/api/preview</code></td><td>Reads PDF and returns preview rows.</td></tr>
+                <tr><td><code>/api/insert</code></td><td>Saves preview rows and runs rules recheck.</td></tr>
+                <tr><td><code>/api/bookings</code></td><td>Lists, creates, or deletes booking records.</td></tr>
+                <tr><td><code>/api/vans</code></td><td>Manages vans and drivers.</td></tr>
+                <tr><td><code>/api/reassign</code></td><td>Runs full rules engine recheck.</td></tr>
+                <tr><td><code>/api/chat</code></td><td>Connects the Schedule AI assistant to OpenRouter and tools.</td></tr>
+                <tr><td><code>/api/invoice/extract</code></td><td>Uses AI to turn pasted booking text into invoice fields.</td></tr>
+                <tr><td><code>/api/invoice/generate</code></td><td>Creates invoice PDF through html2pdf.app.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid three" style="margin-top: 1rem;">
+          <div class="card">
+            <div class="card-title"><h3>Environment settings</h3><span class="tag amber">setup</span></div>
+            <p><code>DATABASE_URL</code>, <code>OPENROUTER_API_KEY</code>, <code>NEXT_PUBLIC_PDF_SERVICE_URL</code>,
+            <code>HTML2PDF_API_KEY</code>, company info, and <code>LOCATIONS</code> control where the app connects and what labels it shows.</p>
+          </div>
+          <div class="card">
+            <div class="card-title"><h3>Local app command</h3><span class="tag green">run</span></div>
+            <p>From <code>van-scheduler</code>, run <code>npm run dev</code> to start the Next.js app at <code>http://localhost:3000</code>.</p>
+          </div>
+          <div class="card">
+            <div class="card-title"><h3>PDF service command</h3><span class="tag violet">run</span></div>
+            <p>From <code>van-scheduler/pdf-service</code>, install requirements and run <code>python main.py</code>. It listens on port 8080 by default.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="demo">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Mini Simulator</p>
+          <h2>Try common situations</h2>
+        </div>
+      </div>
+      <div class="section-pad">
+        <div class="scenario">
+          <div class="scenario-buttons" id="scenarioButtons">
+            <button class="active" type="button" data-scenario="normal">Normal trip, free van</button>
+            <button type="button" data-scenario="oneway">One-way gets bumped</button>
+            <button type="button" data-scenario="sg">Singapore route</button>
+            <button type="button" data-scenario="alphard">Alphard booking</button>
+            <button type="button" data-scenario="car">5-seater car booking</button>
+            <button type="button" data-scenario="outsource">No suitable van left</button>
+          </div>
+          <div class="scenario-result" id="scenarioResult" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="n8n">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Separate Automation</p>
+          <h2>The n8n Telegram invoice bot</h2>
+        </div>
+      </div>
+      <div class="section-pad grid two">
+        <div class="card">
+          <div class="card-title"><h3>What it is</h3><span class="tag violet">Telegram</span></div>
+          <p>The <code>N8n flow stuf</code> folder contains a workflow that asks invoice questions in Telegram,
+          calculates totals, creates invoice HTML, converts it to PDF, sends the document back, and clears the chat session.</p>
+        </div>
+        <div class="card">
+          <div class="card-title"><h3>How it relates to the scheduler</h3><span class="tag blue">separate</span></div>
+          <p>It is not the main scheduling app. Think of it as another way to create invoice PDFs.
+          Once a PDF exists, it can follow the same upload and schedule path.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="trouble">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Troubleshooting</p>
+          <h2>What common problems usually mean</h2>
+        </div>
+      </div>
+      <div class="section-pad">
+        <div class="grid three">
+          <div class="card">
+            <div class="card-title"><h3>Upload says service is cold</h3><span class="tag amber">PDF</span></div>
+            <p>The Python PDF service is sleeping or not configured. Wait for it to wake up, click retry, or check <code>NEXT_PUBLIC_PDF_SERVICE_URL</code>.</p>
+          </div>
+          <div class="card">
+            <div class="card-title"><h3>No rows found in PDF</h3><span class="tag red">parse</span></div>
+            <p>The invoice layout may not match what the parser expects, or the PDF may not have extractable text.</p>
+          </div>
+          <div class="card">
+            <div class="card-title"><h3>Booking shows no van</h3><span class="tag red">conflict</span></div>
+            <p>No suitable van was found. Use the conflict table to assign a free van or outsource it.</p>
+          </div>
+          <div class="card">
+            <div class="card-title"><h3>Outsource company needed</h3><span class="tag amber">action</span></div>
+            <p>The system marked it outsourced, but staff still need to enter the external company name.</p>
+          </div>
+          <div class="card">
+            <div class="card-title"><h3>Van has no driver</h3><span class="tag amber">fleet</span></div>
+            <p>The van exists but driver info is blank. Go to Dashboard and fill in the driver name and contact.</p>
+          </div>
+          <div class="card">
+            <div class="card-title"><h3>AI or invoice generation fails</h3><span class="tag violet">external</span></div>
+            <p>Check <code>OPENROUTER_API_KEY</code> for AI routes and <code>HTML2PDF_API_KEY</code> for invoice PDF generation.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="glossary">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Glossary</p>
+          <h2>Words and fields in normal language</h2>
+        </div>
+      </div>
+      <div class="section-pad">
+        <div class="search-row">
+          <input id="termSearch" type="search" placeholder="Search terms like manual, outsource, recheck, Alphard...">
+          <button class="button print-only-hide" type="button" id="clearSearch">Clear</button>
+        </div>
+        <div class="glossary" id="glossaryList">
+          <div class="term" data-terms="manual lock manualChange">
+            <h3>manualChange</h3>
+            <p>A lock flag. If it is 1, automation should leave that booking alone.</p>
+          </div>
+          <div class="term" data-terms="in house I">
+            <h3>In-house</h3>
+            <p>The booking should be handled by your own fleet.</p>
+          </div>
+          <div class="term" data-terms="outsourced O outsource company">
+            <h3>Outsourced</h3>
+            <p>The booking is handled by an outside company. Company name should be filled in.</p>
+          </div>
+          <div class="term" data-terms="recheck reassignment scheduler">
+            <h3>Recheck</h3>
+            <p>Runs the scheduling logic again to fix assignments, conflicts, and outsource marks.</p>
+          </div>
+          <div class="term" data-terms="sse stream progress log">
+            <h3>SSE stream</h3>
+            <p>Real-time progress messages while upload, insert, or recheck is running.</p>
+          </div>
+          <div class="term" data-terms="Alphard Toyota vehicle type">
+            <h3>Alphard trip</h3>
+            <p>A booking that must use a Toyota Alphard vehicle, not a normal van.</p>
+          </div>
+          <div class="term" data-terms="15 pax capacity seater">
+            <h3>15-pax trip</h3>
+            <p>A booking that needs a van with capacity of at least 15 seats.</p>
+          </div>
+          <div class="term" data-terms="vehicle index multiple vans">
+            <h3>Vehicle index</h3>
+            <p>When one invoice needs multiple vans, each copy gets number 1, 2, 3, and so on.</p>
+          </div>
+          <div class="term" data-terms="invoice continuity same van">
+            <h3>Invoice continuity</h3>
+            <p>The system tries to keep the same invoice and vehicle index on the same van across dates.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="checklist">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Daily Checklist</p>
+          <h2>A simple operating rhythm</h2>
+        </div>
+        <button class="button print-only-hide" type="button" id="resetChecks">Reset</button>
+      </div>
+      <div class="section-pad">
+        <div class="checklist">
+          <label class="check"><input type="checkbox" data-check="fleet"><span><strong>Fleet is updated.</strong><br>New vans, driver contacts, SG/TH capability, capacity, and Alphard vehicle type are correct.</span></label>
+          <label class="check"><input type="checkbox" data-check="upload"><span><strong>Invoices are uploaded or created.</strong><br>PDF preview rows look correct before confirming insert.</span></label>
+          <label class="check"><input type="checkbox" data-check="recheck"><span><strong>Recheck has completed.</strong><br>The log finished and the pages refreshed.</span></label>
+          <label class="check"><input type="checkbox" data-check="conflicts"><span><strong>Conflicts are cleared.</strong><br>No missing van, double-booking, missing driver, or missing outsource company remains.</span></label>
+          <label class="check"><input type="checkbox" data-check="outsourced"><span><strong>Outsourced jobs are confirmed.</strong><br>Every outsourced booking has a company name.</span></label>
+          <label class="check"><input type="checkbox" data-check="share"><span><strong>Daily output is ready.</strong><br>Print PDF, WhatsApp schedule text, or monthly export is prepared as needed.</span></label>
+        </div>
+      </div>
+    </section>
+
+    <p class="footer">
+      File: <code>van-scheduler/public/system-overview.html</code>. Open directly in a browser, or visit
+      <code>/system-overview.html</code> when the Next.js dev server is running.
+    </p>
+  </main>
+
+  <script>
+    const stepDetails = {
+      input: {
+        title: "Booking comes in",
+        body: "A booking can arrive as an uploaded PDF, a row added by staff, pasted text in Invoice Creator, or a PDF made by the separate n8n Telegram invoice bot. Everything is eventually converted into booking rows with dates, routes, customer details, price, and vehicle needs."
+      },
+      read: {
+        title: "System reads it",
+        body: "PDFs go through the Python service first, then the TypeScript parser extracts invoice number, client details, route, date, vehicle count, amount, one-way labels, Alphard labels, 15-pax labels, and car labels."
+      },
+      save: {
+        title: "Rows are saved",
+        body: "Each trip leg becomes a row in the bookings table. If one invoice needs multiple vans, the row is expanded into several booking rows using vehicleIndex and numberOfVehicles."
+      },
+      assign: {
+        title: "Vans are assigned",
+        body: "The rules engine checks whether each van is free and suitable. It respects Singapore and Thailand capability, Alphard exclusivity, 15-pax capacity, manual locks, confirmed outsource rows, and invoice continuity."
+      },
+      review: {
+        title: "Staff reviews",
+        body: "The user-facing pages show the result in different ways: one date, all rows, or a monthly calendar. Conflicts are intentionally visible so staff know what still needs action."
+      },
+      finish: {
+        title: "Finish the day",
+        body: "Staff confirm outsource companies, lock manual decisions, recheck when needed, then print, copy WhatsApp messages, or export the monthly schedule."
+      }
+    };
+
+    document.querySelectorAll(".flow-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".flow-card").forEach((c) => c.classList.remove("active"));
+        card.classList.add("active");
+        const detail = stepDetails[card.dataset.step];
+        document.getElementById("stepDetail").innerHTML = "<h3>" + detail.title + "</h3><p>" + detail.body + "</p>";
+      });
+    });
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
+      });
+    });
+
+    document.querySelectorAll(".acc-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        button.closest(".acc-item").classList.toggle("open");
+      });
+    });
+
+    const scenarios = {
+      normal: [
+        ["1", "Booking is a normal van trip."],
+        ["2", "Scheduler finds a free regular van on that date."],
+        ["3", "Booking becomes in-house and the van plate, driver name, and contact are copied into the row."]
+      ],
+      oneway: [
+        ["1", "A normal trip arrives, but all vans are busy."],
+        ["2", "One busy van is currently holding a one-way ride."],
+        ["3", "The normal trip can bump the one-way ride. The one-way ride is retried in a second pass."],
+        ["4", "If no van remains for the one-way ride, it becomes outsource needed."]
+      ],
+      sg: [
+        ["1", "Route mentions Singapore."],
+        ["2", "Only vans with Singapore enabled are considered."],
+        ["3", "If no Singapore-capable van is available, the job is marked outsource needed."]
+      ],
+      alphard: [
+        ["1", "Booking says Alphard."],
+        ["2", "Only vans with vehicle type Toyota Alphard are considered."],
+        ["3", "Normal vans are skipped, even if they are free."]
+      ],
+      car: [
+        ["1", "Booking says 5-seater car or 7-seater car."],
+        ["2", "The parser marks vehicleCategory as Car."],
+        ["3", "The booking is automatically outsourced and does not use a fleet van."]
+      ],
+      outsource: [
+        ["1", "No free suitable van exists after all checks."],
+        ["2", "The system marks the booking as outsourced with no company name."],
+        ["3", "Staff must enter the outsource company. Once filled, it becomes protected."]
+      ]
+    };
+
+    function renderScenario(name) {
+      const rows = scenarios[name].map((row) => {
+        return '<div class="result-line"><span class="result-status">' + row[0] + '</span><p>' + row[1] + '</p></div>';
+      }).join("");
+      document.getElementById("scenarioResult").innerHTML = rows;
+    }
+
+    document.querySelectorAll("[data-scenario]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-scenario]").forEach((b) => b.classList.remove("active"));
+        button.classList.add("active");
+        renderScenario(button.dataset.scenario);
+      });
+    });
+    renderScenario("normal");
+
+    const search = document.getElementById("termSearch");
+    const clearSearch = document.getElementById("clearSearch");
+    function filterTerms() {
+      const q = search.value.trim().toLowerCase();
+      document.querySelectorAll(".term").forEach((term) => {
+        const haystack = (term.textContent + " " + term.dataset.terms).toLowerCase();
+        term.style.display = !q || haystack.includes(q) ? "" : "none";
+      });
+    }
+    search.addEventListener("input", filterTerms);
+    clearSearch.addEventListener("click", () => {
+      search.value = "";
+      filterTerms();
+      search.focus();
+    });
+
+    const checkboxes = document.querySelectorAll("[data-check]");
+    checkboxes.forEach((box) => {
+      const key = "system-overview-check-" + box.dataset.check;
+      box.checked = localStorage.getItem(key) === "yes";
+      box.addEventListener("change", () => {
+        localStorage.setItem(key, box.checked ? "yes" : "no");
+      });
+    });
+    document.getElementById("resetChecks").addEventListener("click", () => {
+      checkboxes.forEach((box) => {
+        box.checked = false;
+        localStorage.removeItem("system-overview-check-" + box.dataset.check);
+      });
+    });
+
+    window.addEventListener("scroll", () => {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const pct = max > 0 ? (window.scrollY / max) * 100 : 0;
+      document.getElementById("progress").style.width = pct + "%";
+    }, { passive: true });
+  </script>
+</body>
+</html>
