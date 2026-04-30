@@ -590,21 +590,34 @@ export default function VanSchedulePage() {
       inHouseOrOutsourced: "I",
     };
 
+    // Any booking already on this van+day must also be marked manualChange=1
+    // so the pair doesn't trigger a double-booked conflict.
+    const existingOnCell = bookingMap.get(targetPlate)?.get(targetDay) ?? [];
+    const cohabitants = existingOnCell.filter((b) => b.id !== booking.id && b.manualChange !== 1);
+
     // Clear drag state before the request so UI snaps back immediately
     setDragBookingId(null);
     setDragSourcePlate(null);
     setDragSourceDay(null);
     setDragOverCell(null);
 
-    const res = await fetch(`/api/bookings/${booking.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updates),
+    await Promise.all([
+      fetch(`/api/bookings/${booking.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      }),
+      ...cohabitants.map((b) =>
+        fetch(`/api/bookings/${b.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ manualChange: 1 }),
+        })
+      ),
+    ]).then((results) => {
+      const failed = results.find((r) => !r.ok);
+      if (failed) alert("Move failed");
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert(data.error ?? "Move failed");
-    }
     await fetchData();
   }
 
