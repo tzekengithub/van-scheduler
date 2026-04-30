@@ -114,7 +114,7 @@ function cellBg(bks: BookingRow[], isNoVan: boolean): string {
   if (isNoVan) return "bg-red-100 border-red-300 text-red-900";
   const outsourced = bks[0] ? isOutsourced(bks[0]) : false;
   if (outsourced) return "bg-purple-100 border-purple-300 text-purple-900";
-  if (bks.length > 1) return "bg-red-100 border-red-300 text-red-900";
+  if (bks.length > 1 && !bks.every((b) => b.manualChange === 1)) return "bg-red-100 border-red-300 text-red-900";
   if (!bks[0]?.driverName?.trim()) return "bg-amber-100 border-amber-300 text-amber-900";
   return "bg-blue-100 border-blue-300 text-blue-900";
 }
@@ -466,7 +466,7 @@ export default function VanSchedulePage() {
       if (outsourcedCompanyNames.has(plate)) continue; // outsource rows never conflict
 
       for (const [dayNum, bks] of dayMap) {
-        if (bks.length > 1) {
+        if (bks.length > 1 && !bks.every((b) => b.manualChange === 1)) {
           conflicts.push({
             type: "double-booked",
             label: `${MONTH_SHORT[viewMonth]} ${dayNum} — ${plate} has ${bks.length} bookings`,
