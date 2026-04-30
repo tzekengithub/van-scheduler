@@ -163,6 +163,112 @@ export default function VanSchedulePage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
 
+  function printSchedule() {
+    const monthName = MONTH_NAMES[viewMonth];
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+    // Build rows: registered vans + extra plates (skip outsourced company rows for print)
+    const printRows = vanRows.filter((r) => !r.isOutsourced);
+
+    const getDayLabel = (d: number) => {
+      const date = new Date(viewYear, viewMonth, d);
+      const dow = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][date.getDay()];
+      return `${d}\n${dow}`;
+    };
+
+    const cellsHtml = printRows.map((row) => {
+      const dayMap = bookingMap.get(row.plate);
+      const rowCells = days.map((d) => {
+        const bks = dayMap?.get(d) ?? [];
+        if (!bks.length) return `<td></td>`;
+        const content = bks.map((b) => {
+          const route = [b.fromLocation, b.toLocation].filter(Boolean).join(" → ");
+          const client = clientFirstLine(b);
+          const outsourced = isOutsourced(b);
+          const lines = [
+            b.invoiceNo ? `<span class="inv">${b.invoiceNo}</span>` : "",
+            route ? `<span class="route">${route}</span>` : "",
+            client ? `<span class="client">${client}</span>` : "",
+            outsourced ? `<span class="tag-out">OUT</span>` : "",
+          ].filter(Boolean).join("");
+          return `<div class="booking ${outsourced ? "out" : ""}">${lines}</div>`;
+        }).join("");
+        const isDouble = bks.length > 1;
+        return `<td class="${isDouble ? "conflict" : ""}">${content}</td>`;
+      }).join("");
+      const flags = [
+        row.sgEnabled ? "🇸🇬" : "",
+        row.thEnabled ? "🇹🇭" : "",
+        row.isAlphard ? "★" : "",
+      ].filter(Boolean).join(" ");
+      return `<tr>
+        <td class="van-cell"><strong>${row.plate}</strong><br><span class="driver">${row.label}</span>${flags ? `<br><span class="flags">${flags}</span>` : ""}</td>
+        ${rowCells}
+      </tr>`;
+    }).join("");
+
+    const dayHeaders = days.map((d) => {
+      const date = new Date(viewYear, viewMonth, d);
+      const dow = ["Su","Mo","Tu","We","Th","Fr","Sa"][date.getDay()];
+      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+      return `<th class="${isWeekend ? "weekend" : ""}">${d}<br><span class="dow">${dow}</span></th>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Van Schedule — ${monthName} ${viewYear}</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 7pt; color: #111; }
+  h1 { font-size: 11pt; font-weight: 700; margin-bottom: 4mm; text-align: center; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 0.4pt solid #bbb; padding: 1.5pt 2pt; vertical-align: top; overflow: hidden; }
+  th { background: #f0f0f0; text-align: center; font-size: 6.5pt; font-weight: 600; white-space: nowrap; }
+  th.weekend { background: #e8e0f0; }
+  th .dow { font-size: 5.5pt; font-weight: 400; color: #555; display: block; }
+  td.van-cell { width: 18mm; background: #f7f7f7; font-size: 6.5pt; white-space: nowrap; }
+  td.van-cell .driver { color: #555; font-size: 5.5pt; }
+  td.van-cell .flags { font-size: 5.5pt; }
+  td.conflict { background: #fee2e2; }
+  .booking { padding: 0.5pt 0; border-bottom: 0.3pt solid #ddd; line-height: 1.3; }
+  .booking:last-child { border-bottom: none; }
+  .booking.out { color: #6b21a8; }
+  .inv { font-weight: 700; font-size: 6pt; display: block; }
+  .route { font-size: 6pt; display: block; color: #1d4ed8; }
+  .client { font-size: 5.5pt; display: block; color: #374151; }
+  .tag-out { font-size: 5pt; background: #e9d5ff; color: #6b21a8; padding: 0 1pt; border-radius: 1pt; }
+  .footer { margin-top: 3mm; font-size: 6pt; color: #888; text-align: right; }
+</style>
+</head>
+<body>
+<h1>Van Schedule — ${monthName} ${viewYear}</h1>
+<table>
+  <thead>
+    <tr>
+      <th style="width:18mm">Van / Driver</th>
+      ${dayHeaders}
+    </tr>
+  </thead>
+  <tbody>
+    ${cellsHtml}
+  </tbody>
+</table>
+<div class="footer">Printed ${new Date().toLocaleString()}</div>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
+  }
+
   function exportJson() {
     const payload = {
       month: MONTH_NAMES[viewMonth],
@@ -870,6 +976,18 @@ export default function VanSchedulePage() {
                 ✓ All clear
               </span>
             )
+          )}
+          {!loading && (
+            <button
+              onClick={printSchedule}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-medium transition-colors"
+              title="Print A4 timetable"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6v-8z" />
+              </svg>
+              Print
+            </button>
           )}
           {!loading && (
             <button
