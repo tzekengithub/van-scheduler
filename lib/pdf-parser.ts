@@ -402,10 +402,11 @@ export function parseRawText(text: string): ParsedBooking[] {
     if (!toLocation && !/day\s*trip/i.test(bookingDetails)) continue;
 
     // ── Determine vehicle category (Van / Alphard / Car) ──
-    const vehicleCategory = detectVehicleCategory(bookingDetails, annotationLine);
+    const vehicleCategory = detectVehicleCategory(rawRoute, annotationLine);
 
     // ── Determine if 15-pax trip ──
-    const is15PaxTrip = detect15PaxTrip(bookingDetails, annotationLine);
+    // Use rawRoute (pre-slash-clip) so "KL / 15 pax" isn't stripped before detection
+    const is15PaxTrip = detect15PaxTrip(rawRoute, annotationLine);
 
     // ── Expand: one row per vehicle ──
     const baseRow = {
