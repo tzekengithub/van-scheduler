@@ -307,6 +307,22 @@ export default function AllJobsPage() {
     }
   }
 
+  // After editing a location field, re-run reassign if the new location needs
+  // SG/TH capability that the currently-assigned van may not have.
+  async function patchLocation(row: BookingRow, field: "fromLocation" | "toLocation", newValue: string) {
+    await patchRow(row.id, field, newValue);
+    if (!row.vanId) return;
+    const from = field === "fromLocation" ? newValue : (row.fromLocation ?? "");
+    const to   = field === "toLocation"   ? newValue : (row.toLocation ?? "");
+    const combined = `${from} ${to}`.toLowerCase();
+    const needsSG = combined.includes("singapore");
+    const needsTH = combined.includes("thailand");
+    if (needsSG || needsTH) {
+      await fetch(`/api/bookings/${row.id}/reassign`, { method: "POST" });
+      await fetchRows();
+    }
+  }
+
   function startEdit(id: number, field: string, currentValue: string) {
     setEditingCell({ id, field });
     setEditValue(currentValue);
@@ -508,9 +524,21 @@ export default function AllJobsPage() {
                 {/* Location */}
                 <td className="px-3 py-2 min-w-[220px]">
                   <div className="flex flex-col gap-0.5">
-                    <EditableText id={row.id} field="fromLocation" value={row.fromLocation} placeholder="From" />
-                    {(row.fromLocation || row.toLocation) && <span className="text-zinc-300 text-[10px] px-1">↓</span>}
-                    <EditableText id={row.id} field="toLocation" value={row.toLocation} placeholder="To" />
+                    <input
+                      key={`from-${row.id}`}
+                      className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${cellStates[`${row.id}-fromLocation`] === "saved" ? "border-green-400" : cellStates[`${row.id}-fromLocation`] === "error" ? "border-red-400" : "border-zinc-200"}`}
+                      defaultValue={row.fromLocation ?? ""}
+                      placeholder="From"
+                      onBlur={(e) => { const v = e.target.value.trim(); if (v !== (row.fromLocation ?? "")) patchLocation(row, "fromLocation", v); }}
+                    />
+                    <span className="text-zinc-300 text-[10px] px-1">↓</span>
+                    <input
+                      key={`to-${row.id}`}
+                      className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${cellStates[`${row.id}-toLocation`] === "saved" ? "border-green-400" : cellStates[`${row.id}-toLocation`] === "error" ? "border-red-400" : "border-zinc-200"}`}
+                      defaultValue={row.toLocation ?? ""}
+                      placeholder="To"
+                      onBlur={(e) => { const v = e.target.value.trim(); if (v !== (row.toLocation ?? "")) patchLocation(row, "toLocation", v); }}
+                    />
                   </div>
                 </td>
                 {/* Trip Type — button group selector */}
