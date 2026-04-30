@@ -187,7 +187,6 @@ export default function VanSchedulePage() {
           const client = clientFirstLine(b);
           const outsourced = isOutsourced(b);
           const lines = [
-            b.invoiceNo ? `<span class="inv">${b.invoiceNo}</span>` : "",
             route ? `<span class="route">${route}</span>` : "",
             client ? `<span class="client">${client}</span>` : "",
             outsourced ? `<span class="tag-out">OUT</span>` : "",
@@ -237,8 +236,7 @@ export default function VanSchedulePage() {
   .booking { padding: 0.5pt 0; border-bottom: 0.3pt solid #ddd; line-height: 1.3; }
   .booking:last-child { border-bottom: none; }
   .booking.out { color: #6b21a8; }
-  .inv { font-weight: 700; font-size: 6pt; display: block; }
-  .route { font-size: 6pt; display: block; color: #1d4ed8; }
+.route { font-size: 6pt; display: block; color: #1d4ed8; }
   .client { font-size: 5.5pt; display: block; color: #374151; }
   .tag-out { font-size: 5pt; background: #e9d5ff; color: #6b21a8; padding: 0 1pt; border-radius: 1pt; }
   .footer { margin-top: 3mm; font-size: 6pt; color: #888; text-align: right; }
