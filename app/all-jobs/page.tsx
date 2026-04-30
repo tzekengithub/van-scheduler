@@ -50,6 +50,71 @@ interface BookingRow {
   vehicleCategory: string | null;
 }
 
+type PendingEdits = Record<number, Record<string, unknown>>;
+
+function PendingInput({
+  id,
+  field,
+  value,
+  pendingEdits,
+  onPendingChange,
+  placeholder,
+  type = "text",
+  list,
+}: {
+  id: number;
+  field: string;
+  value: string | null;
+  pendingEdits: PendingEdits;
+  onPendingChange: (id: number, field: string, value: unknown) => void;
+  placeholder?: string;
+  type?: string;
+  list?: string;
+}) {
+  const pending = pendingEdits[id];
+  const displayValue = pending && field in pending ? String(pending[field] ?? "") : (value ?? "");
+  const isDirty = pending && field in pending && String(pending[field] ?? "") !== (value ?? "");
+  return (
+    <input
+      type={type}
+      className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${isDirty ? "border-amber-400 bg-amber-50" : "border-zinc-200"}`}
+      value={displayValue}
+      placeholder={placeholder ?? "—"}
+      list={list}
+      onChange={(e) => onPendingChange(id, field, e.target.value)}
+    />
+  );
+}
+
+function PendingSelect({
+  id,
+  field,
+  value,
+  options,
+  pendingEdits,
+  onPendingChange,
+}: {
+  id: number;
+  field: string;
+  value: string | null;
+  options: string[];
+  pendingEdits: PendingEdits;
+  onPendingChange: (id: number, field: string, value: unknown) => void;
+}) {
+  const pending = pendingEdits[id];
+  const displayValue = pending && field in pending ? String(pending[field] ?? options[0]) : (value ?? options[0]);
+  const isDirty = pending && field in pending && String(pending[field] ?? "") !== (value ?? "");
+  return (
+    <select
+      className={`text-xs border ${isDirty ? "border-amber-400 bg-amber-50" : "border-zinc-300 bg-white"} rounded px-1 py-0.5 w-full text-zinc-900`}
+      value={displayValue}
+      onChange={(e) => onPendingChange(id, field, e.target.value)}
+    >
+      {options.map((o) => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+
 type SortField = "travelDate" | "invoiceNo" | "amount";
 type SortDir = "asc" | "desc";
 
@@ -328,7 +393,18 @@ export default function AllJobsPage() {
       updates.passengerCount = passengerCount === "" || Number.isNaN(parsedPassengerCount) ? null : parsedPassengerCount;
     }
     if ("toLocation" in edits && (edits.toLocation as string) === "" && (row.toLocation ?? "") !== "") {
-      updates.tripType = "trip";
+      updates.tripType = "day_trip";
+    }
+    if ("clientDetails" in updates) {
+      const newName = String(updates.clientDetails ?? "").trim();
+      const existingLines = (row.clientDetails ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+      if (existingLines.length <= 1) {
+        updates.clientDetails = newName || null;
+      } else {
+        updates.clientDetails = newName
+          ? `${newName}\n${existingLines.slice(1).join("\n")}`
+          : existingLines.slice(1).join("\n") || null;
+      }
     }
 
     const key = `${row.id}-confirm`;
@@ -427,47 +503,11 @@ export default function AllJobsPage() {
   const paidCount = rows.filter((r) => r.paidStatus === "P").length;
   const unpaidCount = rows.filter((r) => r.paidStatus !== "P").length;
 
-  // ── Editable cell components ──────────────────────────────────────────────
-  function PendingInput({ id, field, value, placeholder, type = "text", list }: {
-    id: number; field: string; value: string | null; placeholder?: string; type?: string; list?: string;
-  }) {
-    const pending = pendingEdits[id];
-    const displayValue = pending && field in pending ? String(pending[field] ?? "") : (value ?? "");
-    const isDirty = pending && field in pending && String(pending[field] ?? "") !== (value ?? "");
-    return (
-      <input
-        type={type}
-        className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${isDirty ? "border-amber-400 bg-amber-50" : "border-zinc-200"}`}
-        value={displayValue}
-        placeholder={placeholder ?? "—"}
-        list={list}
-        onChange={(e) => setPending(id, field, e.target.value)}
-      />
-    );
-  }
-
-  function PendingSelect({ id, field, value, options }: {
-    id: number; field: string; value: string | null; options: string[];
-  }) {
-    const pending = pendingEdits[id];
-    const displayValue = pending && field in pending ? String(pending[field] ?? options[0]) : (value ?? options[0]);
-    const isDirty = pending && field in pending && String(pending[field] ?? "") !== (value ?? "");
-    return (
-      <select
-        className={`text-xs border ${isDirty ? "border-amber-400 bg-amber-50" : "border-zinc-300 bg-white"} rounded px-1 py-0.5 w-full text-zinc-900`}
-        value={displayValue}
-        onChange={(e) => setPending(id, field, e.target.value)}
-      >
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
-      </select>
-    );
-  }
-
   // ── Trip-type table ───────────────────────────────────────────────────────
   const thSort = "px-3 py-2.5 text-left font-semibold text-zinc-700 whitespace-nowrap cursor-pointer select-none hover:bg-zinc-100 text-xs";
   const thPlain = "px-3 py-2.5 text-left font-semibold text-zinc-700 whitespace-nowrap text-xs";
 
-  function TripTable({ groupRows }: { groupRows: BookingRow[] }) {
+  function renderTripTable(groupRows: BookingRow[]) {
     if (groupRows.length === 0) return null;
     return (
       <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "auto" }}>
@@ -519,6 +559,8 @@ export default function AllJobsPage() {
                     value={row.invoiceNo}
                     list={`inv-list-${row.id}`}
                     placeholder="Invoice #"
+                    pendingEdits={pendingEdits}
+                    onPendingChange={setPending}
                   />
                   {(row.numberOfVehicles ?? 1) > 1 && (
                     <span className="text-[10px] text-zinc-400">v{row.vehicleIndex}/{row.numberOfVehicles}</span>
@@ -526,7 +568,7 @@ export default function AllJobsPage() {
                 </td>
                 {/* Client Name */}
                 <td className="px-3 py-2 min-w-[140px]">
-                  <PendingInput id={row.id} field="clientDetails" value={clientName(row)} placeholder="Client name" />
+                  <PendingInput id={row.id} field="clientDetails" value={clientName(row)} placeholder="Client name" pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* Client Phone */}
                 <td className="px-3 py-2 min-w-[130px] text-zinc-600 whitespace-nowrap">
@@ -535,9 +577,9 @@ export default function AllJobsPage() {
                 {/* Location */}
                 <td className="px-3 py-2 min-w-[220px]">
                   <div className="flex flex-col gap-0.5">
-                    <PendingInput id={row.id} field="fromLocation" value={row.fromLocation} placeholder="From" />
+                    <PendingInput id={row.id} field="fromLocation" value={row.fromLocation} placeholder="From" pendingEdits={pendingEdits} onPendingChange={setPending} />
                     <span className="text-zinc-300 text-[10px] px-1">↓</span>
-                    <PendingInput id={row.id} field="toLocation" value={row.toLocation} placeholder="To (blank = day trip)" />
+                    <PendingInput id={row.id} field="toLocation" value={row.toLocation} placeholder="To (blank = day trip)" pendingEdits={pendingEdits} onPendingChange={setPending} />
                   </div>
                 </td>
                 {/* Trip Type — button group selector */}
@@ -585,27 +627,27 @@ export default function AllJobsPage() {
                 </td>
                 {/* Van Plate */}
                 <td className="px-3 py-2 min-w-[110px]">
-                  <PendingInput id={row.id} field="vehiclePlate" value={row.vehiclePlate} placeholder="—" />
+                  <PendingInput id={row.id} field="vehiclePlate" value={row.vehiclePlate} placeholder="—" pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* Driver Name */}
                 <td className="px-3 py-2 min-w-[140px]">
-                  <PendingInput id={row.id} field="driverName" value={row.driverName} placeholder="—" />
+                  <PendingInput id={row.id} field="driverName" value={row.driverName} placeholder="—" pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* Driver Contact */}
                 <td className="px-3 py-2 min-w-[130px]">
-                  <PendingInput id={row.id} field="driverContact" value={row.driverContact} placeholder="—" />
+                  <PendingInput id={row.id} field="driverContact" value={row.driverContact} placeholder="—" pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* Tour Guide */}
                 <td className="px-3 py-2 min-w-[120px]">
-                  <PendingInput id={row.id} field="tourGuide" value={row.tourGuide} placeholder="—" />
+                  <PendingInput id={row.id} field="tourGuide" value={row.tourGuide} placeholder="—" pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* Pax */}
                 <td className="px-3 py-2 min-w-[72px]">
-                  <PendingInput id={row.id} field="passengerCount" value={row.passengerCount != null ? String(row.passengerCount) : ""} placeholder="0" type="number" />
+                  <PendingInput id={row.id} field="passengerCount" value={row.passengerCount != null ? String(row.passengerCount) : ""} placeholder="0" type="number" pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* Overtime */}
                 <td className="px-3 py-2 min-w-[96px]">
-                  <PendingSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} />
+                  <PendingSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* I/O */}
                 <td className="px-3 py-2 min-w-[80px]">
@@ -660,6 +702,8 @@ export default function AllJobsPage() {
                         field="outsourcedCompany"
                         value={row.outsourcedCompany}
                         placeholder="Company name"
+                        pendingEdits={pendingEdits}
+                        onPendingChange={setPending}
                       />
                       {row.outsourceReason && (
                         <span className="text-[10px] text-orange-500 leading-tight">{row.outsourceReason}</span>
@@ -671,11 +715,11 @@ export default function AllJobsPage() {
                 </td>
                 {/* Amount */}
                 <td className="px-3 py-2 min-w-[110px]">
-                  <PendingInput id={row.id} field="amount" value={row.amount} placeholder="0" />
+                  <PendingInput id={row.id} field="amount" value={row.amount} placeholder="0" pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* Paid Status */}
                 <td className="px-3 py-2 min-w-[68px]">
-                  <PendingSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["U", "P"]} />
+                  <PendingSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["U", "P"]} pendingEdits={pendingEdits} onPendingChange={setPending} />
                 </td>
                 {/* Confirm Edit */}
                 <td className="px-3 py-2 no-print">
@@ -880,7 +924,7 @@ export default function AllJobsPage() {
             No rows match your search.
           </div>
         ) : (
-          <TripTable groupRows={displayRows} />
+          renderTripTable(displayRows)
         )}
       </main>
     </div>

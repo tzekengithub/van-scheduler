@@ -24,6 +24,7 @@ export async function PATCH(
       "myrPerVehicle", "vanId", "manualChange",
       "tripType", "tourGuide", "vehicleIndex", "numberOfVehicles",
       "travelDate", "month", "year",
+      "fromLocation", "toLocation",
     ] as const;
 
     const updates: Record<string, unknown> = {};
