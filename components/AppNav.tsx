@@ -5,10 +5,11 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 const NAV_LINKS = [
-  { href: "/",             label: "Fleet",    icon: "◈" },
-  { href: "/daily-jobs",   label: "Daily",    icon: "◷" },
-  { href: "/all-jobs",     label: "All Jobs", icon: "≡" },
-  { href: "/van-schedule", label: "Schedule", icon: "⊞" },
+  { href: "/",                label: "Fleet",    icon: "◈" },
+  { href: "/daily-jobs",      label: "Daily",    icon: "◷" },
+  { href: "/all-jobs",        label: "All Jobs", icon: "≡" },
+  { href: "/van-schedule",    label: "Schedule", icon: "⊞" },
+  { href: "/invoice-creator", label: "Invoice",  icon: "◻" },
 ];
 
 export default function AppNav() {
