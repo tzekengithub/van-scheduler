@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
 import { useUploadContext } from "@/app/upload-context";
 
@@ -61,10 +61,32 @@ function AnnotationTag({
   );
 }
 
+const BOOKING_TEMPLATE = `Customer: [Company / Person Name]
+Contact: [Contact Person Name]  [Phone / WeChat / Email]
+
+Trip 1:
+  Route: [From] - [To]          (e.g. KLIA - KL, or KL - Penang - KL, or KL Day Trip)
+  Date: [DD Month YYYY]
+  Vehicles: [number]
+  Price: RM [amount] per vehicle
+  Type: [Standard / One-Way Ride / Alphard / 15 Pax / Car]
+
+Trip 2:
+  Route: [From] - [To]
+  Date: [DD Month YYYY]
+  Vehicles: [number]
+  Price: RM [amount] per vehicle
+  Type: [Standard / One-Way Ride / Alphard / 15 Pax / Car]
+
+Notes: [any special requests or remarks]`;
+
 export default function InvoiceCreatorPage() {
   const { setPreviewRows, setUploadOpen } = useUploadContext();
 
   const [rawText, setRawText] = useState("");
+  const [showTemplate, setShowTemplate] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [scheduling, setScheduling] = useState(false);
@@ -75,6 +97,13 @@ export default function InvoiceCreatorPage() {
   const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [invoiceNo, setInvoiceNo] = useState<string | null>(null);
+
+  function handleCopyTemplate() {
+    navigator.clipboard.writeText(BOOKING_TEMPLATE);
+    setCopied(true);
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+  }
 
   async function handleExtract() {
     setExtractError(null);
@@ -200,7 +229,33 @@ export default function InvoiceCreatorPage() {
 
         {/* Step 1 */}
         <section className="bg-white rounded-xl border border-zinc-200 p-6 space-y-3">
-          <h2 className="text-sm font-semibold text-zinc-700 uppercase tracking-wide">Step 1 — Paste booking info</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-700 uppercase tracking-wide">Step 1 — Paste booking info</h2>
+            <button
+              type="button"
+              onClick={() => setShowTemplate((v) => !v)}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              {showTemplate ? "Hide template" : "Show template"}
+            </button>
+          </div>
+
+          {showTemplate && (
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-zinc-500">Copy this template, fill it in, then paste below</span>
+                <button
+                  type="button"
+                  onClick={handleCopyTemplate}
+                  className="text-xs px-2.5 py-1 rounded border border-zinc-300 bg-white hover:bg-zinc-100 text-zinc-700 font-medium transition-colors"
+                >
+                  {copied ? "Copied ✓" : "Copy template"}
+                </button>
+              </div>
+              <pre className="text-xs font-mono text-zinc-600 whitespace-pre leading-relaxed select-all">{BOOKING_TEMPLATE}</pre>
+            </div>
+          )}
+
           <textarea
             className="w-full h-44 border border-zinc-300 rounded-lg p-3 text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder={
