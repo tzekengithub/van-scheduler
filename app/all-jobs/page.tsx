@@ -308,7 +308,8 @@ export default function AllJobsPage() {
     [rows]
   );
 
-  // Double-booked conflicts: same van assigned to multiple bookings on the same date
+  // Double-booked conflicts: same van assigned to multiple bookings on the same date.
+  // Groups where any booking has manualChange=1 are excluded — user explicitly approved.
   const doubleBookedRows = useMemo(() => {
     const groups = new Map<string, BookingRow[]>();
     for (const r of rows) {
@@ -318,7 +319,9 @@ export default function AllJobsPage() {
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(r);
     }
-    return [...groups.values()].filter((g) => g.length > 1).flat();
+    return [...groups.values()]
+      .filter((g) => g.length > 1 && g.every((r) => r.manualChange !== 1))
+      .flat();
   }, [rows]);
 
 

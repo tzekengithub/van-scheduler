@@ -950,7 +950,8 @@ export default function DailyJobsPage() {
     r.invoiceNo
   );
 
-  // Double-booked conflicts: same van assigned to multiple bookings on this day
+  // Double-booked conflicts: same van assigned to multiple bookings on this day.
+  // Groups where any booking has manualChange=1 are excluded — user explicitly approved.
   const doubleBookedRows = (() => {
     const groups = new Map<number, BookingRow[]>();
     for (const r of rows) {
@@ -959,7 +960,9 @@ export default function DailyJobsPage() {
       if (!groups.has(r.vanId)) groups.set(r.vanId, []);
       groups.get(r.vanId)!.push(r);
     }
-    return [...groups.values()].filter((g) => g.length > 1).flat();
+    return [...groups.values()]
+      .filter((g) => g.length > 1 && g.every((r) => r.manualChange !== 1))
+      .flat();
   })();
 
   // ── Table for a single trip-type group ─────────────────────────────────────
