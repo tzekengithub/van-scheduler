@@ -19,6 +19,8 @@ export interface PreviewBooking {
   myrPerVehicle: number;
   amount: number;
   tripType: string;
+  vehicleCategory: string;
+  isAlphardTrip: number;
   paidStatus: string;
   overtime: string;
   introducer: string;
@@ -42,13 +44,24 @@ export function useUploadContext() {
   return ctx;
 }
 
-function tripTypeBadge(t: string | null) {
-  switch (t) {
-    case "one_way_ride": return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 whitespace-nowrap">🔵 One Way</span>;
-    case "round_trip":   return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 whitespace-nowrap">🟢 Round Trip</span>;
-    case "day_trip":     return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-800 whitespace-nowrap">🟡 Day Trip</span>;
-    default:             return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 whitespace-nowrap">🟠 Trip</span>;
-  }
+function tripTypeBadge(t: string | null, vehicleCategory?: string, isAlphardTrip?: number) {
+  const isAlphard = isAlphardTrip === 1 || vehicleCategory === "Alphard";
+  const isCar = vehicleCategory === "Car";
+  const tripBadge = (() => {
+    switch (t) {
+      case "one_way_ride": return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 whitespace-nowrap">🔵 One Way</span>;
+      case "round_trip":   return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 whitespace-nowrap">🟢 Round Trip</span>;
+      case "day_trip":     return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-800 whitespace-nowrap">🟡 Day Trip</span>;
+      default:             return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 whitespace-nowrap">🟠 Trip</span>;
+    }
+  })();
+  return (
+    <span className="flex flex-wrap gap-1">
+      {tripBadge}
+      {isAlphard && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 whitespace-nowrap">🚐 Alphard</span>}
+      {isCar && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-200 text-zinc-700 whitespace-nowrap">🚗 Car</span>}
+    </span>
+  );
 }
 
 export function UploadProvider({ children }: { children: ReactNode }) {
@@ -764,7 +777,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
                           <td className="px-3 py-1.5 text-zinc-500 font-mono whitespace-nowrap">{r.invoiceNo}</td>
                           <td className="px-3 py-1.5 text-zinc-900">{(r.clientDetails ?? "").split("\n")[0]}</td>
                           <td className="px-3 py-1.5 text-zinc-900 whitespace-nowrap">{r.fromLocation} → {r.toLocation}</td>
-                          <td className="px-3 py-1.5">{tripTypeBadge(r.tripType)}</td>
+                          <td className="px-3 py-1.5">{tripTypeBadge(r.tripType, r.vehicleCategory, r.isAlphardTrip)}</td>
                           <td className="px-3 py-1.5 text-zinc-500 text-center">
                             {(r.numberOfVehicles ?? 1) > 1 ? `v${r.vehicleIndex}/${r.numberOfVehicles}` : "1"}
                           </td>
