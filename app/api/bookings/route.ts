@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
         day: day ? String(day) : "",
         month: month ?? "",
         year: year ?? "",
-        passengerCount: 0,
+        passengerCount: null,
         paidStatus: "U",
         inHouseOrOutsourced: "I",
         tripType: "trip",

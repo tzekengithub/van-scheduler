@@ -818,6 +818,10 @@ export default function DailyJobsPage() {
     const to   = (edits.toLocation   as string | undefined) ?? row.toLocation ?? "";
 
     const updates: Record<string, unknown> = { ...edits };
+    if ("invoiceNo" in updates) {
+      const invoiceNo = String(updates.invoiceNo ?? "").trim();
+      updates.invoiceNo = invoiceNo || null;
+    }
     if ("passengerCount" in updates) {
       const passengerCount = String(updates.passengerCount ?? "").trim();
       const parsedPassengerCount = parseInt(passengerCount, 10);
@@ -825,6 +829,9 @@ export default function DailyJobsPage() {
     }
     if ("toLocation" in edits && (edits.toLocation as string) === "" && (row.toLocation ?? "") !== "") {
       updates.tripType = "day_trip";
+    }
+    if ("toLocation" in edits && (edits.toLocation as string) !== "" && (row.toLocation ?? "") === "" && row.tripType === "day_trip") {
+      updates.tripType = "trip";
     }
     if ("clientDetails" in updates) {
       const newName = String(updates.clientDetails ?? "").trim();

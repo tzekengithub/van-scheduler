@@ -315,12 +315,21 @@ export default function VanSchedulePage() {
     if (!editPanel || !editForm) return;
     setEditSaving(true);
     try {
+      const travelDateParts: { day?: string; month?: string; year?: string } = {};
+      if (editForm.travelDate) {
+        const [tdYear, tdMonth, tdDay] = editForm.travelDate.split("-");
+        travelDateParts.day   = String(parseInt(tdDay, 10));
+        travelDateParts.month = MONTH_NAMES[parseInt(tdMonth, 10) - 1];
+        travelDateParts.year  = tdYear;
+      }
+
       const res = await fetch(`/api/bookings/${editPanel.booking.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           invoiceNo: editForm.invoiceNo,
           travelDate: editForm.travelDate,
+          ...travelDateParts,
           fromLocation: editForm.fromLocation,
           toLocation: editForm.toLocation,
           tripType: editForm.tripType,
