@@ -87,8 +87,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState(false);
-  const [showClearDuplicatesModal, setShowClearDuplicatesModal] = useState(false);
-  const [actionMessage, setActionMessage] = useState("");
+const [actionMessage, setActionMessage] = useState("");
   const [rechecking, setRechecking] = useState(false);
   const [recheckLogs, setRecheckLogs] = useState<string[]>([]);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
@@ -171,17 +170,15 @@ export default function DashboardPage() {
 
   const handleClearAll = async () => {
     setShowClearAllModal(false);
-    const res = await fetch("/api/clear", { method: "POST" });
+    const res = await fetch("/api/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: "CLEAR BOOKINGS" }),
+    });
     setActionMessage(res.ok ? "All bookings deleted" : "Failed to delete bookings");
   };
 
-  const handleClearDuplicates = async () => {
-    setShowClearDuplicatesModal(false);
-    const res = await fetch("/api/bookings/duplicates", { method: "DELETE" });
-    setActionMessage(res.ok ? "Duplicate bookings removed" : "Failed to remove duplicates");
-  };
-
-  const handleRecheck = async () => {
+const handleRecheck = async () => {
     setRechecking(true);
     setActionMessage("");
     setRecheckLogs([]);
@@ -578,13 +575,6 @@ export default function DashboardPage() {
           >
             🗑 Clear All Bookings
           </button>
-          <button
-            className="btn btn-secondary"
-            style={{ borderColor: "rgba(251,146,60,0.4)", color: "var(--orange)" }}
-            onClick={() => setShowClearDuplicatesModal(true)}
-          >
-            ⊘ Remove Duplicates
-          </button>
         </div>
       </section>
 
@@ -597,15 +587,6 @@ export default function DashboardPage() {
           confirm={handleClearAll}
           onClose={() => setShowClearAllModal(false)}
           danger
-        />
-      )}
-      {showClearDuplicatesModal && (
-        <Modal
-          title="Remove duplicate bookings?"
-          body="Deletes rows where the same invoice number, date, and amount appear more than once. First entry of each duplicate is kept."
-          confirmLabel="Remove duplicates"
-          confirm={handleClearDuplicates}
-          onClose={() => setShowClearDuplicatesModal(false)}
         />
       )}
     </div>

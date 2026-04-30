@@ -73,8 +73,8 @@ export async function POST(request: NextRequest) {
             const parsed = parseRawText(text);
             console.log(`[upload] ${fileName}: parsed ${parsed.length} bookings`);
             allParsed.push(...parsed);
-          } catch (fileErr: any) {
-            const msg = `Error processing ${fileName}: ${fileErr.message}`;
+          } catch (fileErr: unknown) {
+            const msg = `Error processing ${fileName}: ${fileErr instanceof Error ? fileErr.message : String(fileErr)}`;
             console.error(`[upload] ${msg}`);
             fileErrors.push(msg);
           }
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
             year: booking.year,
             passengerCount: 0,
             myrPerVehicle: String(booking.myrPerVehicle),
-            amount: String(booking.myrPerVehicle),
+            amount: String(booking.amount),
             vehiclePlate: null,
             driverName: null,
             driverContact: null,
@@ -137,10 +137,11 @@ export async function POST(request: NextRequest) {
 
         send({ type: "done", inserted: allParsed.length });
         controller.close();
-      } catch (error: any) {
-        console.error("Upload error:", error);
-        console.error("Error stack:", error.stack);
-        send({ type: "error", error: error.message });
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        console.error("Upload error:", err);
+        console.error("Error stack:", err.stack);
+        send({ type: "error", error: err.message });
         controller.close();
       }
     },

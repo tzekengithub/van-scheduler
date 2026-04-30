@@ -1353,7 +1353,7 @@ export default function VanSchedulePage() {
                                     </div>
                                     {outsourcingInput[b.id]?.trim() && (
                                       <p className="text-[10px] text-purple-600 pl-8">
-                                        A row for "{outsourcingInput[b.id].trim()}" will appear in the calendar.
+                                        A row for &quot;{outsourcingInput[b.id].trim()}&quot; will appear in the calendar.
                                       </p>
                                     )}
                                   </div>

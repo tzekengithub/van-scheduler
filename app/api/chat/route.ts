@@ -225,9 +225,9 @@ YOUR CAPABILITIES:
         }
 
         controller.close();
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("[/api/chat]", err);
-        const msg = `Error: ${err.message}`;
+        const msg = `Error: ${err instanceof Error ? err.message : String(err)}`;
         send({ choices: [{ delta: { content: msg } }] });
         send("[DONE]");
         controller.close();

@@ -1,9 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings } from "@/drizzle/schema";
 
-export async function POST() {
+const REQUIRED_CONFIRM = "CLEAR BOOKINGS";
+
+export async function POST(request: NextRequest) {
   try {
+    const body = await request.json().catch(() => ({})) as { confirm?: string };
+    if (body.confirm !== REQUIRED_CONFIRM) {
+      return NextResponse.json({ error: "Missing confirmation" }, { status: 400 });
+    }
     await db.delete(bookings);
     return NextResponse.json({ message: "All bookings cleared" });
   } catch (error) {

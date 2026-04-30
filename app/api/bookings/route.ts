@@ -124,6 +124,11 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "invoiceNo query param is required" }, { status: 400 });
     }
 
+    const body = await request.json().catch(() => ({})) as { confirmInvoiceNo?: string };
+    if (body.confirmInvoiceNo !== invoiceNo) {
+      return NextResponse.json({ error: "Confirmation invoice number does not match" }, { status: 400 });
+    }
+
     const deleted = await db
       .delete(bookings)
       .where(eq(bookings.invoiceNo, invoiceNo))

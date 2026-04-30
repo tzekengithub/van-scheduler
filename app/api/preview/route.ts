@@ -21,8 +21,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ bookings: allParsed });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("POST /api/preview error:", error);
-    return NextResponse.json({ error: error.message }, { status: 422 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 422 });
   }
 }

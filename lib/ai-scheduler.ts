@@ -535,9 +535,9 @@ export async function aiRecheckAllVans(
               ],
             }),
           });
-        } catch (fetchErr: any) {
+        } catch (fetchErr: unknown) {
           clearTimeout(timeoutId);
-          if (fetchErr?.name === "AbortError")
+          if (fetchErr instanceof Error && fetchErr.name === "AbortError")
             throw new Error(`Batch ${ci + 1} timed out after 90 seconds`);
           throw fetchErr;
         }
@@ -585,8 +585,8 @@ export async function aiRecheckAllVans(
           );
           try {
             await runReassign(omittedIds, (msg) => { log.push(msg); logger?.(msg); });
-          } catch (reassignErr: any) {
-            emit(`⚠ Rules-engine fallback for omitted bookings also failed (${reassignErr.message})`);
+          } catch (reassignErr: unknown) {
+            emit(`⚠ Rules-engine fallback for omitted bookings also failed (${reassignErr instanceof Error ? reassignErr.message : String(reassignErr)})`);
           }
           // Refresh committed context so the AI's valid assignments don't
           // double-book a slot the rules engine just claimed.
@@ -866,10 +866,10 @@ export async function aiRecheckAllVans(
         emit(
           `⏳ Batch ${ci + 1} — writing ${chunkResult.assignments.length} assignment(s), ${chunkResult.outsourced.length} outsourced…`,
         );
-      } catch (chunkErr: any) {
+      } catch (chunkErr: unknown) {
         // Per-chunk fallback: rules engine handles only this batch's IDs
         emit(
-          `⚠ Batch ${ci + 1} failed (${chunkErr.message}) — rules engine handling this batch…`,
+          `⚠ Batch ${ci + 1} failed (${chunkErr instanceof Error ? chunkErr.message : String(chunkErr)}) — rules engine handling this batch…`,
         );
         try {
           await runReassign(
@@ -879,11 +879,11 @@ export async function aiRecheckAllVans(
               logger?.(msg);
             },
           );
-        } catch (reassignErr: any) {
+        } catch (reassignErr: unknown) {
           // runReassign calls smartAssignVan which makes its own AI call — that can
           // also fail (e.g. empty response, network error). Don't let it abort the
           // whole scheduler session; just log and move on to the next batch.
-          emit(`⚠ Rules-engine fallback also failed (${reassignErr.message}) — skipping batch ${ci + 1}`);
+          emit(`⚠ Rules-engine fallback also failed (${reassignErr instanceof Error ? reassignErr.message : String(reassignErr)}) — skipping batch ${ci + 1}`);
         }
 
         // Refresh committed context from DB so subsequent batches stay accurate

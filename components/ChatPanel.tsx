@@ -107,8 +107,8 @@ export default function ChatPanel() {
             } catch {}
           }
         }
-      } catch (err: any) {
-        if (err?.name !== "AbortError") {
+      } catch (err: unknown) {
+        if (!(err instanceof Error) || err.name !== "AbortError") {
           setMessages(prev => [...prev.slice(0, -1), { role: "assistant", content: "Connection interrupted." }]);
         }
       } finally {
@@ -132,7 +132,7 @@ export default function ChatPanel() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e as any); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e as unknown as React.FormEvent); }
   };
 
   const showQuickPrompts = messages.length === 0 || (messages.length === 1 && messages[0].role === "assistant");

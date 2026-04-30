@@ -333,7 +333,11 @@ export default function AllJobsPage() {
     if (deleteInvoiceState === "idle") { setDeleteInvoiceState("confirm"); return; }
     setDeleteInvoiceState("deleting");
     try {
-      const res = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(inv)}`, { method: "DELETE" });
+      const res = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(inv)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmInvoiceNo: inv }),
+      });
       if (res.ok) {
         setDeleteInvoiceInput("");
         setDeleteInvoiceState("idle");

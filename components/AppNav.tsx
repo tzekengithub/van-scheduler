@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 const NAV_LINKS = [
   { href: "/",             label: "Fleet",    icon: "◈" },
@@ -13,16 +13,10 @@ const NAV_LINKS = [
 
 export default function AppNav() {
   const pathname = usePathname();
-  const [light, setLight] = useState(false);
-
-  // Read saved preference on mount (before paint to avoid flash)
-  useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    if (saved === "light") {
-      setLight(true);
-      document.documentElement.classList.add("light");
-    }
-  }, []);
+  const [light, setLight] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("theme") === "light";
+  });
 
   function toggleTheme() {
     const next = !light;

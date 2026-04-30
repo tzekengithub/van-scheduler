@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
             year: booking.year,
             passengerCount: 0,
             myrPerVehicle: String(booking.myrPerVehicle),
-            amount: String(booking.myrPerVehicle),
+            amount: String(booking.amount),
             vehiclePlate: null,
             driverName: null,
             driverContact: null,
@@ -71,12 +71,13 @@ export async function POST(request: NextRequest) {
 
         send({ type: "done", inserted: rows.length });
         controller.close();
-      } catch (error: any) {
-        console.error("Insert error:", error);
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        console.error("Insert error:", err);
         const send2 = (data: object) => {
           try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch {}
         };
-        send2({ type: "error", error: error.message });
+        send2({ type: "error", error: err.message });
         controller.close();
       }
     },

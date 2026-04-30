@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings } from "@/drizzle/schema";
-import { inArray } from "drizzle-orm";
+import { inArray, and, eq, or, isNull } from "drizzle-orm";
 
 export const runtime = "nodejs";
 
@@ -21,15 +21,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ deleted: 0 });
     }
 
-    // Safety guard: only delete auto-managed bookings (manualChange = 0).
-    // This prevents a stale or replayed cancel request from touching locked rows.
+    // Safety guard: only delete auto-managed bookings (manualChange = 0) with no
+    // confirmed outsource company, preventing stale/replayed requests from touching
+    // user-locked or confirmed-outsourced rows.
     const { rowCount } = await db
       .delete(bookings)
-      .where(inArray(bookings.id, ids)) as unknown as { rowCount: number };
+      .where(
+        and(
+          inArray(bookings.id, ids),
+          eq(bookings.manualChange, 0),
+          or(
+            isNull(bookings.outsourcedCompany),
+            eq(bookings.outsourcedCompany, "")
+          )
+        )
+      ) as unknown as { rowCount: number };
 
     return NextResponse.json({ deleted: rowCount ?? ids.length });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[cancel-insert]", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
