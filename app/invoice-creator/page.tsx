@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef } from "react";
-import Link from "next/link";
 import { useUploadContext } from "@/app/upload-context";
 
 interface ExtractedItem {
@@ -220,15 +219,7 @@ export default function InvoiceCreatorPage() {
     : 0;
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <header className="bg-white border-b border-zinc-200 px-6 py-3 flex items-center gap-6 text-sm">
-        <Link href="/" className="font-semibold text-zinc-900 hover:text-blue-600">Home</Link>
-        <Link href="/daily-jobs" className="text-zinc-600 hover:text-blue-600">Daily Jobs</Link>
-        <Link href="/all-jobs" className="text-zinc-600 hover:text-blue-600">All Jobs</Link>
-        <Link href="/van-schedule" className="text-zinc-600 hover:text-blue-600">Van Schedule</Link>
-        <span className="text-blue-600 font-semibold">Invoice Creator</span>
-      </header>
-
+    <div style={{ minHeight: "100vh", background: "var(--bg-base)" }}>
       <main className="max-w-5xl mx-auto px-6 py-8 space-y-6">
         <h1 className="text-2xl font-bold text-zinc-900">Create Invoice</h1>
 

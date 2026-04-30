@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
 
 const NAV_LINKS = [
   { href: "/",                label: "Fleet",    icon: "◈" },
@@ -14,22 +13,6 @@ const NAV_LINKS = [
 
 export default function AppNav() {
   const pathname = usePathname();
-  const [light, setLight] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("theme") === "light";
-  });
-
-  function toggleTheme() {
-    const next = !light;
-    setLight(next);
-    if (next) {
-      document.documentElement.classList.add("light");
-      localStorage.setItem("theme", "light");
-    } else {
-      document.documentElement.classList.remove("light");
-      localStorage.setItem("theme", "dark");
-    }
-  }
 
   return (
     <header
@@ -144,36 +127,6 @@ export default function AppNav() {
             <span className="dot dot-green pulse-dot" />
             <span>live</span>
           </div>
-
-          {/* Theme toggle */}
-          <button
-            onClick={toggleTheme}
-            title={light ? "Switch to dark mode" : "Switch to light mode"}
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              border: "1px solid var(--border)",
-              background: "var(--bg-muted)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 15,
-              transition: "all 0.15s",
-              flexShrink: 0,
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)";
-              (e.currentTarget as HTMLElement).style.borderColor = "var(--amber-border)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.background = "var(--bg-muted)";
-              (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
-            }}
-          >
-            {light ? "🌙" : "☀️"}
-          </button>
         </div>
       </div>
     </header>

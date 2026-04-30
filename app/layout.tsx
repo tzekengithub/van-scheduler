@@ -17,8 +17,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      {/* Apply saved theme before paint to avoid flash */}
-      <script dangerouslySetInnerHTML={{ __html: `(function(){try{if(localStorage.getItem('theme')==='light')document.documentElement.classList.add('light')}catch(e){}})()` }} />
       <body
         className="antialiased"
       >
