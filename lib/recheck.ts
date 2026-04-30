@@ -845,6 +845,7 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
       fromLocation: bookings.fromLocation,
       toLocation: bookings.toLocation,
       isAlphardTrip: bookings.isAlphardTrip,
+      is15PaxTrip: bookings.is15PaxTrip,
     })
     .from(bookings)
     .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
@@ -940,12 +941,19 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
         if (reqs.needsThailand) needsThailand = true;
       }
       const isAlphardBooking = subRows.some((r) => (r.isAlphardTrip ?? 0) === 1);
+      const needs15Pax = subRows.some((r) => (r.is15PaxTrip ?? 0) === 1);
+
+      if (needs15Pax) {
+        log(`[enforceInvoice] ${label}: 15-pax required — only considering vans with maxPaxCapacity >= 15`);
+      }
+
       const capableVans = allVans.filter((v) => {
         if (needsSingapore && v.singaporeEnabled !== 1) return false;
         if (needsThailand && v.thailandEnabled !== 1) return false;
         const isVanAlphard = (v.vehicleType ?? "").toLowerCase() === "toyota alphard";
         if (isAlphardBooking && !isVanAlphard) return false;
         if (!isAlphardBooking && isVanAlphard) return false;
+        if (needs15Pax && (v.maxPaxCapacity ?? 0) < 15) return false;
         return true;
       });
 
