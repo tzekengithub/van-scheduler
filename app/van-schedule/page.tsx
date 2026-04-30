@@ -456,18 +456,16 @@ export default function VanSchedulePage() {
     return map;
   }, [bookings]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Detect conflicts and warnings — skip outsource company rows and past dates
+  // Detect conflicts and warnings — skip outsource company rows
   const { conflicts, warnings } = useMemo(() => {
     const conflicts: ConflictItem[] = [];
     const warnings: ConflictItem[] = [];
-    const todayDay = isCurrentMonth ? today.getDate() : 0;
 
     for (const [plate, dayMap] of bookingMap) {
       if (!plate) continue;
       if (outsourcedCompanyNames.has(plate)) continue; // outsource rows never conflict
 
       for (const [dayNum, bks] of dayMap) {
-        if (dayNum < todayDay) continue; // skip past dates in current month
         if (bks.length > 1 && !bks.every((b) => b.manualChange === 1)) {
           conflicts.push({
             type: "double-booked",
@@ -494,7 +492,6 @@ export default function VanSchedulePage() {
     // No-van: skip only confirmed-outsourced bookings (they have their own company row)
     // Unconfirmed outsourced ("OUTSOURCE COMPANY NEEDED") still need action → show as conflict
     for (const [dayNum, bks] of noVanMap) {
-      if (dayNum < todayDay) continue; // skip past dates in current month
       for (const b of bks) {
         if (isConfirmedOutsourced(b)) continue;
         conflicts.push({
@@ -508,7 +505,7 @@ export default function VanSchedulePage() {
     }
 
     return { conflicts, warnings };
-  }, [bookingMap, noVanMap, outsourcedCompanyNames, viewMonth, isCurrentMonth]);
+  }, [bookingMap, noVanMap, outsourcedCompanyNames, viewMonth]);
 
   const totalIssues = conflicts.length + warnings.length;
 
