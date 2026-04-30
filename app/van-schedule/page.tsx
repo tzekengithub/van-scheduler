@@ -110,12 +110,12 @@ function clientFirstLine(b: BookingRow): string {
   return (b.clientDetails ?? "").split("\n")[0].trim();
 }
 
-function cellBg(bks: BookingRow[], isNoVan: boolean): string {
-  if (isNoVan) return "bg-red-100 border-red-300 text-red-900";
+function cellBg(bks: BookingRow[], isNoVan: boolean, isPast = false): string {
+  if (isNoVan) return isPast ? "bg-zinc-100 border-zinc-200 text-zinc-400" : "bg-red-100 border-red-300 text-red-900";
   const outsourced = bks[0] ? isOutsourced(bks[0]) : false;
   if (outsourced) return "bg-purple-100 border-purple-300 text-purple-900";
-  if (bks.length > 1 && !bks.every((b) => b.manualChange === 1)) return "bg-red-100 border-red-300 text-red-900";
-  if (!bks[0]?.driverName?.trim()) return "bg-amber-100 border-amber-300 text-amber-900";
+  if (bks.length > 1 && !bks.every((b) => b.manualChange === 1)) return isPast ? "bg-zinc-100 border-zinc-200 text-zinc-400" : "bg-red-100 border-red-300 text-red-900";
+  if (!bks[0]?.driverName?.trim() && !isPast) return "bg-amber-100 border-amber-300 text-amber-900";
   return "bg-blue-100 border-blue-300 text-blue-900";
 }
 
@@ -1135,7 +1135,8 @@ export default function VanSchedulePage() {
                               />
                             );
                           }
-                          const color = cellBg(bks, false);
+                          const isPastDay = isCurrentMonth && d < today.getDate();
+                          const color = cellBg(bks, false, isPastDay);
                           const isDropTarget = !isOutsourced && dragOverCell?.plate === plate && dragOverCell?.day === d;
                           return (
                             <td
@@ -1579,11 +1580,6 @@ export default function VanSchedulePage() {
                 </div>
               )}
 
-              {totalIssues === 0 && (
-                <div className="px-4 py-4">
-                  <p className="text-sm text-green-700 font-medium">✓ All clear — no conflicts this month</p>
-                </div>
-              )}
             </div>
           </>
         )}
