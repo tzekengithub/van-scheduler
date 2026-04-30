@@ -573,9 +573,8 @@ export default function DailyJobsPage() {
 
   const [rows, setRows] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
-  const [editValue, setEditValue] = useState("");
   const [cellStates, setCellStates] = useState<Record<string, "saving" | "saved" | "error">>({});
+  const [pendingEdits, setPendingEdits] = useState<Record<number, Record<string, unknown>>>({});
   const [patchError, setPatchError] = useState<string | null>(null);
   const [deleteInvoiceInput, setDeleteInvoiceInput] = useState("");
   const [deleteInvoiceState, setDeleteInvoiceState] = useState<"idle" | "confirm" | "deleting">("idle");
@@ -745,48 +744,71 @@ export default function DailyJobsPage() {
     }
   }
 
-  // After editing a location field:
-  // - blank toLocation → auto-set tripType to "trip" (day trip convention)
-  // - SG/TH destination → reassign whole invoice group to a capable van
-  async function patchLocation(row: BookingRow, field: "fromLocation" | "toLocation", newValue: string) {
-    const from = field === "fromLocation" ? newValue : (row.fromLocation ?? "");
-    const to   = field === "toLocation"   ? newValue : (row.toLocation ?? "");
+  function setPending(id: number, field: string, value: unknown) {
+    setPendingEdits((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), [field]: value } }));
+  }
 
-    if (field === "toLocation" && newValue === "" && (row.toLocation ?? "") !== "") {
-      await patchFields(row.id, { toLocation: "", tripType: "trip" }, "toLocation");
-    } else {
-      await patchRow(row.id, field, newValue);
+  async function confirmEdit(row: BookingRow) {
+    const edits = pendingEdits[row.id];
+    if (!edits || Object.keys(edits).length === 0) return;
+
+    const from = (edits.fromLocation as string | undefined) ?? row.fromLocation ?? "";
+    const to   = (edits.toLocation   as string | undefined) ?? row.toLocation ?? "";
+
+    // Blank toLocation = day trip — merge tripType into the patch
+    const updates: Record<string, unknown> = { ...edits };
+    if ("passengerCount" in updates) {
+      const passengerCount = String(updates.passengerCount ?? "").trim();
+      const parsedPassengerCount = parseInt(passengerCount, 10);
+      updates.passengerCount = passengerCount === "" || Number.isNaN(parsedPassengerCount) ? null : parsedPassengerCount;
+    }
+    if ("toLocation" in edits && (edits.toLocation as string) === "" && (row.toLocation ?? "") !== "") {
+      updates.tripType = "trip";
     }
 
-    const combined = `${from} ${to}`.toLowerCase();
-    if (!combined.includes("singapore") && !combined.includes("thailand")) return;
-    if (!row.vanId) return;
-    let siblingIds: number[] = [];
-    if (row.invoiceNo) {
-      const res = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(row.invoiceNo)}`);
+    const key = `${row.id}-confirm`;
+    setCellStates((prev) => ({ ...prev, [key]: "saving" }));
+    try {
+      const res = await fetch(`/api/bookings/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
       if (res.ok) {
-        const siblings: BookingRow[] = await res.json();
-        siblingIds = siblings.map((s) => s.id).filter((sid) => sid !== row.id);
+        setCellStates((prev) => ({ ...prev, [key]: "saved" }));
+        setTimeout(() => setCellStates((prev) => { const n = { ...prev }; delete n[key]; return n; }), 1500);
+        setPendingEdits((prev) => { const n = { ...prev }; delete n[row.id]; return n; });
+        await fetchRows();
+        // SG/TH capability check after location edits
+        if (("fromLocation" in edits || "toLocation" in edits) && row.vanId) {
+          const combined = `${from} ${to}`.toLowerCase();
+          if (combined.includes("singapore") || combined.includes("thailand")) {
+            let siblingIds: number[] = [];
+            if (row.invoiceNo) {
+              const sibRes = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(row.invoiceNo)}`);
+              if (sibRes.ok) {
+                const siblings: BookingRow[] = await sibRes.json();
+                siblingIds = siblings.map((s) => s.id).filter((sid) => sid !== row.id);
+              }
+            }
+            await fetch(`/api/bookings/${row.id}/reassign`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ siblingIds }),
+            });
+            await fetchRows();
+          }
+        }
+      } else if (res.status === 409) {
+        const data = await res.json();
+        setPatchError(data.error ?? "Double booking conflict.");
+        setCellStates((prev) => ({ ...prev, [key]: "error" }));
+      } else {
+        setCellStates((prev) => ({ ...prev, [key]: "error" }));
       }
+    } catch {
+      setCellStates((prev) => ({ ...prev, [key]: "error" }));
     }
-    await fetch(`/api/bookings/${row.id}/reassign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siblingIds }),
-    });
-    await fetchRows();
-  }
-
-  function startEdit(id: number, field: string, currentValue: string) {
-    setEditingCell({ id, field });
-    setEditValue(currentValue);
-  }
-
-  async function commitEdit() {
-    if (!editingCell) return;
-    const { id, field } = editingCell;
-    setEditingCell(null);
-    await patchRow(id, field, editValue);
   }
 
   async function handleDelete(id: number) {
@@ -869,54 +891,35 @@ export default function DailyJobsPage() {
   })();
 
 
-  // ── Editable cell components ───────────────────────────────────────────────
-  function EditableText({ id, field, value, placeholder }: {
-    id: number; field: string; value: string | null; placeholder?: string;
+  // ── Buffered text input — writes to pendingEdits, saved only on Confirm Edit ──
+  function PendingInput({ id, field, value, placeholder, type = "text" }: {
+    id: number; field: string; value: string | null; placeholder?: string; type?: string;
   }) {
-    const isEditing = editingCell?.id === id && editingCell?.field === field;
-    const saveState = cellStates[`${id}-${field}`];
-    const ringClass =
-      saveState === "saving" ? "ring-1 ring-zinc-300 animate-pulse" :
-      saveState === "saved"  ? "ring-1 ring-green-400" :
-      saveState === "error"  ? "ring-1 ring-red-400" : "";
-    if (isEditing) {
-      return (
-        <input
-          autoFocus
-          className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${saveState === "error" ? "border-red-400" : "border-blue-400"}`}
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={commitEdit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitEdit();
-            if (e.key === "Escape") setEditingCell(null);
-          }}
-        />
-      );
-    }
+    const pending = pendingEdits[id];
+    const displayValue = pending && field in pending ? String(pending[field] ?? "") : (value ?? "");
+    const isDirty = pending && field in pending && String(pending[field] ?? "") !== (value ?? "");
     return (
-      <span
-        className={`cursor-pointer hover:bg-blue-50 rounded px-1 min-w-[40px] inline-block text-xs text-zinc-900 ${ringClass}`}
-        onClick={() => startEdit(id, field, value ?? "")}
-      >
-        {value || <span className="text-zinc-300">{placeholder ?? "—"}</span>}
-      </span>
+      <input
+        type={type}
+        className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${isDirty ? "border-amber-400 bg-amber-50" : "border-zinc-200"}`}
+        value={displayValue}
+        placeholder={placeholder ?? "—"}
+        onChange={(e) => setPending(id, field, e.target.value)}
+      />
     );
   }
 
-  function EditableSelect({ id, field, value, options }: {
+  function PendingSelect({ id, field, value, options }: {
     id: number; field: string; value: string | null; options: string[];
   }) {
-    const saveState = cellStates[`${id}-${field}`];
-    const borderClass =
-      saveState === "saving" ? "border-zinc-300 animate-pulse" :
-      saveState === "saved"  ? "border-green-400" :
-      saveState === "error"  ? "border-red-400" : "border-zinc-300";
+    const pending = pendingEdits[id];
+    const displayValue = pending && field in pending ? String(pending[field] ?? options[0]) : (value ?? options[0]);
+    const isDirty = pending && field in pending && String(pending[field] ?? "") !== (value ?? "");
     return (
       <select
-        className={`text-xs border ${borderClass} rounded px-1 py-0.5 w-full bg-white text-zinc-900`}
-        value={value ?? options[0]}
-        onChange={async (e) => { await patchRow(id, field, e.target.value); }}
+        className={`text-xs border ${isDirty ? "border-amber-400 bg-amber-50" : "border-zinc-300 bg-white"} rounded px-1 py-0.5 w-full text-zinc-900`}
+        value={displayValue}
+        onChange={(e) => setPending(id, field, e.target.value)}
       >
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
@@ -927,7 +930,7 @@ export default function DailyJobsPage() {
   const COL_HEADERS = [
     "Invoice #", "Client Name", "Client Phone", "Location (From → To)",
     "Type", "Requirements", "Van Plate", "Driver Name", "Driver Contact",
-    "Tour Guide", "Remarks", "Pax", "Overtime", "I/O", "Outsourced Co.", "Amount (MYR)", "P/U", "",
+    "Tour Guide", "Remarks", "Pax", "Overtime", "I/O", "Outsourced Co.", "Amount (MYR)", "P/U", "Confirm", "",
   ];
 
   function TripTable({ groupRows }: { groupRows: BookingRow[] }) {
@@ -959,7 +962,7 @@ export default function DailyJobsPage() {
                 </td>
                 {/* Client Name */}
                 <td className="px-3 py-2 min-w-[140px]">
-                  <EditableText id={row.id} field="clientDetails" value={clientName(row)} placeholder="Client name" />
+                  <PendingInput id={row.id} field="clientDetails" value={clientName(row)} placeholder="Client name" />
                 </td>
                 {/* Client Phone */}
                 <td className="px-3 py-2 min-w-[130px] text-zinc-600 whitespace-nowrap">
@@ -968,21 +971,9 @@ export default function DailyJobsPage() {
                 {/* Location */}
                 <td className="px-3 py-2 min-w-[220px]">
                   <div className="flex flex-col gap-0.5">
-                    <input
-                      key={`from-${row.id}`}
-                      className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${cellStates[`${row.id}-fromLocation`] === "saved" ? "border-green-400" : cellStates[`${row.id}-fromLocation`] === "error" ? "border-red-400" : "border-zinc-200"}`}
-                      defaultValue={row.fromLocation ?? ""}
-                      placeholder="From"
-                      onBlur={(e) => { const v = e.target.value.trim(); if (v !== (row.fromLocation ?? "")) patchLocation(row, "fromLocation", v); }}
-                    />
+                    <PendingInput id={row.id} field="fromLocation" value={row.fromLocation} placeholder="From" />
                     <span className="text-zinc-300 text-[10px] px-1">↓</span>
-                    <input
-                      key={`to-${row.id}`}
-                      className={`w-full border rounded px-1 py-0.5 text-xs bg-white text-zinc-900 ${cellStates[`${row.id}-toLocation`] === "saved" ? "border-green-400" : cellStates[`${row.id}-toLocation`] === "error" ? "border-red-400" : "border-zinc-200"}`}
-                      defaultValue={row.toLocation ?? ""}
-                      placeholder="To (blank = day trip)"
-                      onBlur={(e) => { const v = e.target.value.trim(); if (v !== (row.toLocation ?? "")) patchLocation(row, "toLocation", v); }}
-                    />
+                    <PendingInput id={row.id} field="toLocation" value={row.toLocation} placeholder="To (blank = day trip)" />
                   </div>
                 </td>
                 {/* Trip Type — button group selector */}
@@ -1030,42 +1021,31 @@ export default function DailyJobsPage() {
                 </td>
                 {/* Van Plate */}
                 <td className="px-3 py-2 min-w-[110px]">
-                  <EditableText id={row.id} field="vehiclePlate" value={row.vehiclePlate} placeholder="—" />
+                  <PendingInput id={row.id} field="vehiclePlate" value={row.vehiclePlate} placeholder="—" />
                 </td>
                 {/* Driver Name */}
                 <td className="px-3 py-2 min-w-[140px]">
-                  <EditableText id={row.id} field="driverName" value={row.driverName} placeholder="—" />
+                  <PendingInput id={row.id} field="driverName" value={row.driverName} placeholder="—" />
                 </td>
                 {/* Driver Contact */}
                 <td className="px-3 py-2 min-w-[130px]">
-                  <EditableText id={row.id} field="driverContact" value={row.driverContact} placeholder="—" />
+                  <PendingInput id={row.id} field="driverContact" value={row.driverContact} placeholder="—" />
                 </td>
                 {/* Tour Guide */}
                 <td className="px-3 py-2 min-w-[120px]">
-                  <EditableText id={row.id} field="tourGuide" value={row.tourGuide} placeholder="—" />
+                  <PendingInput id={row.id} field="tourGuide" value={row.tourGuide} placeholder="—" />
                 </td>
                 {/* Remarks */}
                 <td className="px-3 py-2 min-w-[160px]">
-                  <EditableText id={row.id} field="details" value={row.details} placeholder="Add remarks…" />
+                  <PendingInput id={row.id} field="details" value={row.details} placeholder="Add remarks…" />
                 </td>
                 {/* Pax */}
                 <td className="px-3 py-2 min-w-[72px]">
-                  <input
-                    type="number"
-                    min="0"
-                    className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
-                      cellStates[`${row.id}-passengerCount`] === "saving" ? "border-zinc-300 animate-pulse" :
-                      cellStates[`${row.id}-passengerCount`] === "saved"  ? "border-green-400" :
-                      cellStates[`${row.id}-passengerCount`] === "error"  ? "border-red-400" : "border-zinc-300"
-                    }`}
-                    key={`pax-${row.id}`}
-                    defaultValue={row.passengerCount ?? ""}
-                    onBlur={(e) => patchRow(row.id, "passengerCount", e.target.value !== "" ? parseInt(e.target.value) : null)}
-                  />
+                  <PendingInput id={row.id} field="passengerCount" value={row.passengerCount != null ? String(row.passengerCount) : ""} placeholder="0" type="number" />
                 </td>
                 {/* Overtime */}
                 <td className="px-3 py-2 min-w-[96px]">
-                  <EditableSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} />
+                  <PendingSelect id={row.id} field="overtime" value={row.overtime ?? "0"} options={OVERTIME_OPTIONS} />
                 </td>
                 {/* I/O */}
                 <td className="px-3 py-2 min-w-[80px]">
@@ -1115,15 +1095,11 @@ export default function DailyJobsPage() {
                 <td className="px-3 py-2 min-w-[150px]">
                   {(row.inHouseOrOutsourced === "O" || row.inHouseOrOutsourced === "outsourced") ? (
                     <div className="flex flex-col gap-1">
-                      <input
-                        className={`w-full border rounded px-1 py-0.5 text-xs text-zinc-900 bg-white ${
-                          cellStates[`${row.id}-outsourcedCompany`] === "saving" ? "border-zinc-300 animate-pulse" :
-                          cellStates[`${row.id}-outsourcedCompany`] === "saved"  ? "border-green-400" : "border-zinc-300"
-                        }`}
-                        defaultValue={row.outsourcedCompany ?? ""}
+                      <PendingInput
+                        id={row.id}
+                        field="outsourcedCompany"
+                        value={row.outsourcedCompany}
                         placeholder={row.vehicleCategory === "Alphard" ? "Alphard company" : row.vehicleCategory === "Car" ? "Car company" : "Company name"}
-                        key={`oc-${row.id}`}
-                        onBlur={(e) => patchRow(row.id, "outsourcedCompany", e.target.value)}
                       />
                       {row.outsourceReason && (
                         <span className="text-[10px] text-orange-500 leading-tight">{row.outsourceReason}</span>
@@ -1135,11 +1111,33 @@ export default function DailyJobsPage() {
                 </td>
                 {/* Amount */}
                 <td className="px-3 py-2 min-w-[110px]">
-                  <EditableText id={row.id} field="amount" value={row.amount} />
+                  <PendingInput id={row.id} field="amount" value={row.amount} placeholder="0" />
                 </td>
                 {/* Paid Status */}
                 <td className="px-3 py-2 min-w-[68px]">
-                  <EditableSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["U", "P"]} />
+                  <PendingSelect id={row.id} field="paidStatus" value={row.paidStatus} options={["U", "P"]} />
+                </td>
+                {/* Confirm Edit */}
+                <td className="px-3 py-2 no-print">
+                  {(() => {
+                    const hasPending = Object.keys(pendingEdits[row.id] ?? {}).length > 0;
+                    const state = cellStates[`${row.id}-confirm`];
+                    return (
+                      <button
+                        onClick={() => confirmEdit(row)}
+                        disabled={!hasPending || state === "saving"}
+                        className={`px-2 py-1 rounded text-[11px] font-semibold border transition-colors whitespace-nowrap ${
+                          state === "saving" ? "bg-zinc-100 text-zinc-400 border-zinc-200 cursor-wait" :
+                          state === "saved"  ? "bg-green-100 text-green-700 border-green-300" :
+                          state === "error"  ? "bg-red-100 text-red-600 border-red-300" :
+                          hasPending        ? "bg-amber-500 text-white border-amber-500 hover:bg-amber-600 cursor-pointer" :
+                                              "bg-white text-zinc-300 border-zinc-200 cursor-not-allowed"
+                        }`}
+                      >
+                        {state === "saving" ? "Saving…" : state === "saved" ? "✓ Saved" : state === "error" ? "Error" : "Confirm Edit"}
+                      </button>
+                    );
+                  })()}
                 </td>
                 {/* Delete */}
                 <td className="px-3 py-2 no-print">
