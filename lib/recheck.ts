@@ -92,10 +92,6 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
   const { assigned, conflicts } = await runReassign(undefined, log);
   log(`  reassignment done — assigned=${assigned} conflicts=${conflicts}`);
 
-  // ── Step 3b: Remove duplicate (invoiceNo, vehicleIndex, travelDate) rows ─────
-  log("Step 3b/7 — removing duplicate invoice-slot rows from re-uploads…");
-  await deduplicateSameDaySlots(log);
-
   // ── Step 4: Enforce same-invoice-same-van ────────────────────────────────────
   log("Step 4/7 — enforcing same invoice = same van per (invoiceNo, vehicleIndex)…");
   await enforceInvoiceVanConsistency(log);
@@ -191,10 +187,7 @@ export async function runConstraintChecks(logger?: (msg: string) => void): Promi
 
   log("━━━ CONSTRAINT CHECK STARTED ━━━");
 
-  log("Check 0/5 — removing duplicate invoice-slot rows from re-uploads…");
-  await deduplicateSameDaySlots(log);
-
-  log("Check 1/5 — enforcing same invoice = same van…");
+  log("Check 0/5 — enforcing same invoice = same van…");
   await enforceInvoiceVanConsistency(log);
 
   log("Check 2/5 — assigning free vans to same-day same-invoice conflicts…");

@@ -10,10 +10,18 @@ export async function DELETE() {
         SELECT id FROM (
           SELECT id,
             ROW_NUMBER() OVER (
-              PARTITION BY invoice_no, travel_date, amount
+              PARTITION BY
+                invoice_no,
+                vehicle_index,
+                travel_date,
+                from_location,
+                to_location,
+                amount,
+                client_details
               ORDER BY id ASC
             ) AS rn
           FROM bookings
+          WHERE invoice_no IS NOT NULL
         ) ranked
         WHERE rn > 1
       )
