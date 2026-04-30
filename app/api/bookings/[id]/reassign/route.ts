@@ -16,7 +16,7 @@ export const runtime = "nodejs";
  * Returns the updated booking row (same shape as GET /api/bookings).
  */
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -26,7 +26,19 @@ export async function POST(
       return NextResponse.json({ error: "Invalid id" }, { status: 400 });
     }
 
-    await runReassign([id]);
+    // Optional: caller can pass siblingIds to reassign an entire invoice group together.
+    let ids = [id];
+    try {
+      const body = await req.json();
+      if (Array.isArray(body?.siblingIds) && body.siblingIds.length > 0) {
+        const extras = (body.siblingIds as unknown[])
+          .map((x) => parseInt(String(x), 10))
+          .filter((x) => !isNaN(x) && x !== id);
+        ids = [id, ...extras];
+      }
+    } catch { /* no body or not JSON — fine */ }
+
+    await runReassign(ids);
 
     // Return the updated row with the same JOIN shape as GET /api/bookings
     const [updated] = await db

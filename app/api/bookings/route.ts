@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
     const dayParam = searchParams.get("day");
     const monthParam = searchParams.get("month");
     const yearParam = searchParams.get("year");
+    const invoiceNoParam = searchParams.get("invoiceNo");
     const latestFirst = searchParams.get("latestFirst") === "1";
     const recentCountParam = searchParams.get("recentCount");
 
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest) {
     if (dayParam) conditions.push(eq(bookings.day, dayParam));
     if (monthParam) conditions.push(eq(bookings.month, monthParam));
     if (yearParam) conditions.push(eq(bookings.year, yearParam));
+    if (invoiceNoParam) conditions.push(eq(bookings.invoiceNo, invoiceNoParam));
 
     const base = db
       .select({

@@ -745,20 +745,30 @@ export default function DailyJobsPage() {
     }
   }
 
-  // After editing a location field, re-run reassign if the new location needs
-  // SG/TH capability that the currently-assigned van may not have.
+  // After editing a location field, re-run reassign for the whole invoice group
+  // if the new location needs SG/TH capability (so all legs stay on the same capable van).
   async function patchLocation(row: BookingRow, field: "fromLocation" | "toLocation", newValue: string) {
     await patchRow(row.id, field, newValue);
     if (!row.vanId) return;
     const from = field === "fromLocation" ? newValue : (row.fromLocation ?? "");
     const to   = field === "toLocation"   ? newValue : (row.toLocation ?? "");
     const combined = `${from} ${to}`.toLowerCase();
-    const needsSG = combined.includes("singapore");
-    const needsTH = combined.includes("thailand");
-    if (needsSG || needsTH) {
-      await fetch(`/api/bookings/${row.id}/reassign`, { method: "POST" });
-      await fetchRows();
+    if (!combined.includes("singapore") && !combined.includes("thailand")) return;
+    // Collect all sibling booking IDs for the same invoice so reassign respects continuity.
+    let siblingIds: number[] = [];
+    if (row.invoiceNo) {
+      const res = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(row.invoiceNo)}`);
+      if (res.ok) {
+        const siblings: BookingRow[] = await res.json();
+        siblingIds = siblings.map((s) => s.id).filter((sid) => sid !== row.id);
+      }
     }
+    await fetch(`/api/bookings/${row.id}/reassign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ siblingIds }),
+    });
+    await fetchRows();
   }
 
   function startEdit(id: number, field: string, currentValue: string) {
