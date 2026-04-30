@@ -516,6 +516,26 @@ export default function VanSchedulePage() {
     });
   }
 
+  async function handleAllowDoubleBook(conflictBookings: BookingRow[]) {
+    const ids = conflictBookings.map((b) => b.id);
+    ids.forEach((id) => setActionLoading((prev) => ({ ...prev, [id]: true })));
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/bookings/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ manualChange: 1 }),
+          })
+        )
+      );
+      ids.forEach((id) => setActionDone((prev) => ({ ...prev, [id]: true })));
+      await fetchData();
+    } finally {
+      ids.forEach((id) => setActionLoading((prev) => ({ ...prev, [id]: false })));
+    }
+  }
+
   async function handleAssignVan(bookingId: number) {
     const vanIdStr = selectedVan[bookingId];
     if (!vanIdStr) return;
@@ -1382,6 +1402,20 @@ export default function VanSchedulePage() {
                                           {isLoading ? "Saving…" : "Outsource →"}
                                         </button>
                                       </div>
+                                      {/* Allow all on this van+day as intentional */}
+                                      {idx === 0 && (
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] text-zinc-400 w-6 text-center">or</span>
+                                          <button
+                                            onClick={() => handleAllowDoubleBook(c.bookings)}
+                                            disabled={isLoading}
+                                            className="px-3 py-1.5 rounded-md bg-zinc-600 text-white text-[11px] font-semibold hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                                          >
+                                            {isLoading ? "Saving…" : "✓ Allow (keep both)"}
+                                          </button>
+                                          <span className="text-[10px] text-zinc-400">mark all as manual</span>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </td>
