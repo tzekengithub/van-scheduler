@@ -440,6 +440,88 @@ async function main() {
         else fail(`S6: Multi-day invoice — legs split across ${vanSet.size} vans`);
         await clean(INV);
       }
+
+      // S7: SG override — SG trip bumps regular trip off the only SG-capable van
+      {
+        const sgVans = allVansForTest.filter((v) => v.singaporeEnabled === 1 && (v.vehicleType ?? "").toLowerCase() !== "toyota alphard");
+        if (sgVans.length === 0) {
+          console.log("  SKIP  S7: SG override — no SG-capable regular vans in DB");
+        } else {
+          const INV_REG = "TEST-S7-REG";
+          const INV_SG = "TEST-S7-SG";
+          await clean(INV_REG); await clean(INV_SG);
+          // Occupy ALL SG-capable vans with regular Malaysia trips
+          await db.insert(schema.bookings).values(
+            sgVans.map((v) => ({
+              travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+              manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip",
+              invoiceNo: INV_REG, vehicleCategory: "Van",
+              vanId: v.id, vehiclePlate: v.vanNumber, driverName: v.driverName ?? "",
+            }))
+          );
+          // Insert unassigned SG trip
+          const [sgIns] = await db.insert(schema.bookings).values({
+            travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Singapore",
+            manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip",
+            invoiceNo: INV_SG, vehicleCategory: "Van",
+          }).returning({ id: schema.bookings.id });
+          await recheckAllVans();
+          const [sgAfter] = await db.select({ vanId: schema.bookings.vanId }).from(schema.bookings).where(eq(schema.bookings.id, sgIns.id));
+          const assignedSgVan = sgAfter?.vanId ? allVansForTest.find((v) => v.id === sgAfter.vanId) : null;
+          if (assignedSgVan && assignedSgVan.singaporeEnabled === 1)
+            pass(`S7: SG override — SG trip got SG-capable van ${assignedSgVan.vanNumber}`);
+          else
+            fail(`S7: SG override failed — SG trip got van ${sgAfter?.vanId ?? "none"} (not SG-capable)`);
+          // No double-bookings on test date
+          const dayB = await db.select({ vanId: schema.bookings.vanId }).from(schema.bookings).where(and(eq(schema.bookings.travelDate, "2099-12-31"), isNotNull(schema.bookings.vanId)));
+          const slotCnt = new Map<number, number>();
+          for (const b of dayB) slotCnt.set(b.vanId!, (slotCnt.get(b.vanId!) ?? 0) + 1);
+          if ([...slotCnt.values()].every((n) => n <= 1)) pass("S7: No double-bookings after SG override");
+          else fail("S7: Double-booking detected after SG override");
+          await clean(INV_REG); await clean(INV_SG);
+        }
+      }
+
+      // S8: 15-pax override — 15-pax trip bumps regular trip off the only 15-seater van
+      {
+        const seaterVans = allVansForTest.filter((v) => (v.maxPaxCapacity ?? 0) >= 15 && (v.vehicleType ?? "").toLowerCase() !== "toyota alphard");
+        if (seaterVans.length === 0) {
+          console.log("  SKIP  S8: 15-pax override — no 15-seater regular vans in DB");
+        } else {
+          const INV_REG = "TEST-S8-REG";
+          const INV_15P = "TEST-S8-15P";
+          await clean(INV_REG); await clean(INV_15P);
+          // Occupy ALL 15-seater vans with regular trips
+          await db.insert(schema.bookings).values(
+            seaterVans.map((v) => ({
+              travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+              manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip",
+              invoiceNo: INV_REG, vehicleCategory: "Van",
+              vanId: v.id, vehiclePlate: v.vanNumber, driverName: v.driverName ?? "",
+            }))
+          );
+          // Insert unassigned 15-pax trip
+          const [p15Ins] = await db.insert(schema.bookings).values({
+            travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+            manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip", is15PaxTrip: 1,
+            invoiceNo: INV_15P, vehicleCategory: "Van",
+          }).returning({ id: schema.bookings.id });
+          await recheckAllVans();
+          const [p15After] = await db.select({ vanId: schema.bookings.vanId }).from(schema.bookings).where(eq(schema.bookings.id, p15Ins.id));
+          const assigned15Van = p15After?.vanId ? allVansForTest.find((v) => v.id === p15After.vanId) : null;
+          if (assigned15Van && (assigned15Van.maxPaxCapacity ?? 0) >= 15)
+            pass(`S8: 15-pax override — 15-pax trip got 15-seater van ${assigned15Van.vanNumber}`);
+          else
+            fail(`S8: 15-pax override failed — 15-pax trip got van ${p15After?.vanId ?? "none"} (not 15-seater)`);
+          // No double-bookings on test date
+          const dayB = await db.select({ vanId: schema.bookings.vanId }).from(schema.bookings).where(and(eq(schema.bookings.travelDate, "2099-12-31"), isNotNull(schema.bookings.vanId)));
+          const slotCnt = new Map<number, number>();
+          for (const b of dayB) slotCnt.set(b.vanId!, (slotCnt.get(b.vanId!) ?? 0) + 1);
+          if ([...slotCnt.values()].every((n) => n <= 1)) pass("S8: No double-bookings after 15-pax override");
+          else fail("S8: Double-booking detected after 15-pax override");
+          await clean(INV_REG); await clean(INV_15P);
+        }
+      }
     }
   }
 
