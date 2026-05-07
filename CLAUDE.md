@@ -94,7 +94,6 @@ Three tables:
 | `/api/bookings` | GET, POST | List (filter by day/month/year) or create blank booking |
 | `/api/bookings/[id]` | PATCH, DELETE | Update or delete single booking; DELETE triggers full recheck |
 | `/api/bookings/[id]/reassign` | POST | Re-run `runReassign([id])` for a single booking |
-| `/api/bookings/duplicates` | DELETE | SQL window-function dedup on (invoiceNo, travelDate, amount) |
 | `/api/vans` | GET, POST, PATCH, DELETE | Van CRUD; POST/DELETE trigger reassign |
 | `/api/upload` | POST | Parse PDFs → insert → rules engine recheck (SSE) |
 | `/api/insert` | POST | Accept pre-parsed JSON → insert → AI recheck (SSE) |
