@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, isNull, isNotNull, inArray, asc } from "drizzle-orm";
 import { runReassign } from "@/lib/reassign";
-import { detectTripRequirements } from "@/lib/van-assignment";
+import { detectTripRequirements, isVanCapable } from "@/lib/van-assignment";
 
 /**
  * Full van schedule recheck.
@@ -304,12 +304,7 @@ async function assignFreeVanToSameDayConflicts(log: (msg: string) => void): Prom
     // van assignments on every run for the same input data.
     let freeVan: typeof allVans[number] | null = null;
     for (const van of allVans) {
-      if (needsSingapore && van.singaporeEnabled !== 1) continue;
-      if (needsThailand && van.thailandEnabled !== 1) continue;
-      const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-      if (isAlphardBooking && !isVanAlphard) continue;
-      if (!isAlphardBooking && isVanAlphard) continue;
-      if (b15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
+      if (!isVanCapable(van, { needsSingapore, needsThailand, isAlphardTrip: isAlphardBooking, is15PaxTrip: b15Pax })) continue;
       if (!occupiedSlots.has(`${van.id}::${b.travelDate}`)) {
         freeVan = van;
         break;
@@ -589,12 +584,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
     // ── 1. Free van search ──────────────────────────────────────────────────
     let freeVan: (typeof allVans)[number] | null = null;
     for (const van of allVans) {
-      if (needsSingapore && van.singaporeEnabled !== 1) continue;
-      if (needsThailand && van.thailandEnabled !== 1) continue;
-      const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-      if (isAlphardBooking && !isVanAlphard) continue;
-      if (!isAlphardBooking && isVanAlphard) continue;
-      if (needs15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
+      if (!isVanCapable(van, { needsSingapore, needsThailand, isAlphardTrip: isAlphardBooking, is15PaxTrip: needs15Pax })) continue;
       if (!occupants.has(`${van.id}::${b.travelDate}`)) {
         freeVan = van;
         break;
@@ -648,12 +638,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
         if (date !== b.travelDate) continue;
         const van = vanMap.get(Number(vanIdStr));
         if (!van) continue;
-        if (needsSingapore && van.singaporeEnabled !== 1) continue;
-        if (needsThailand && van.thailandEnabled !== 1) continue;
-        const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-        if (isAlphardBooking && !isVanAlphard) continue;
-        if (!isAlphardBooking && isVanAlphard) continue;
-        if (needs15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
+        if (!isVanCapable(van, { needsSingapore, needsThailand, isAlphardTrip: isAlphardBooking, is15PaxTrip: needs15Pax })) continue;
         victimKey = key;
         victimInfo = occ;
         bumpLabel = "priority bump";
@@ -770,12 +755,7 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
 
     let freeVan: (typeof allVans)[number] | null = null;
     for (const van of allVans) {
-      if (needsSingapore && van.singaporeEnabled !== 1) continue;
-      if (needsThailand && van.thailandEnabled !== 1) continue;
-      const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-      if (isAlphardBooking && !isVanAlphard) continue;
-      if (!isAlphardBooking && isVanAlphard) continue;
-      if (v15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
+      if (!isVanCapable(van, { needsSingapore, needsThailand, isAlphardTrip: isAlphardBooking, is15PaxTrip: v15Pax })) continue;
       if (!occupants.has(`${van.id}::${v.travelDate}`)) {
         freeVan = van;
         break;
@@ -964,15 +944,9 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
         log(`[enforceInvoice] ${label}: 15-pax required — only considering vans with maxPaxCapacity >= 15`);
       }
 
-      const capableVans = allVans.filter((v) => {
-        if (needsSingapore && v.singaporeEnabled !== 1) return false;
-        if (needsThailand && v.thailandEnabled !== 1) return false;
-        const isVanAlphard = (v.vehicleType ?? "").toLowerCase() === "toyota alphard";
-        if (isAlphardBooking && !isVanAlphard) return false;
-        if (!isAlphardBooking && isVanAlphard) return false;
-        if (needs15Pax && (v.maxPaxCapacity ?? 0) < 15) return false;
-        return true;
-      });
+      const capableVans = allVans.filter((v) =>
+        isVanCapable(v, { needsSingapore, needsThailand, isAlphardTrip: isAlphardBooking, is15PaxTrip: needs15Pax })
+      );
 
       // Prefer vans already used by this sub-group (fewer moves), then all others
       const vanPriority = [
@@ -1112,12 +1086,7 @@ async function eliminateDoubleBookings(log: (msg: string) => void): Promise<void
       let freeVan: (typeof allVans)[number] | null = null;
       for (const van of allVans) {
         if (van.id === victim.vanId) continue;
-        if (needsSingapore && van.singaporeEnabled !== 1) continue;
-        if (needsThailand && van.thailandEnabled !== 1) continue;
-        const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-        if (isAlphardBooking && !isVanAlphard) continue;
-        if (!isAlphardBooking && isVanAlphard) continue;
-        if (victim15Pax && (van.maxPaxCapacity ?? 0) < 15) continue;
+        if (!isVanCapable(van, { needsSingapore, needsThailand, isAlphardTrip: isAlphardBooking, is15PaxTrip: victim15Pax })) continue;
         if (!occupiedSlots.has(`${van.id}::${date}`)) { freeVan = van; break; }
       }
 
@@ -1222,15 +1191,10 @@ export async function validateFinalSchedule(log: (msg: string) => void): Promise
     const isAlphardBooking = (b.isAlphardTrip ?? 0) === 1;
     const val15Pax = (b.is15PaxTrip ?? 0) === 1;
 
-    const freeVanExists = allV.some((v) => {
-      if (needsSingapore && v.singaporeEnabled !== 1) return false;
-      if (needsThailand && v.thailandEnabled !== 1) return false;
-      const isVanAlphard = (v.vehicleType ?? "").toLowerCase() === "toyota alphard";
-      if (isAlphardBooking && !isVanAlphard) return false;
-      if (!isAlphardBooking && isVanAlphard) return false;
-      if (val15Pax && (v.maxPaxCapacity ?? 0) < 15) return false;
-      return !occupiedSlots.has(`${v.id}::${b.travelDate}`);
-    });
+    const freeVanExists = allV.some((v) =>
+      isVanCapable(v, { needsSingapore, needsThailand, isAlphardTrip: isAlphardBooking, is15PaxTrip: val15Pax }) &&
+      !occupiedSlots.has(`${v.id}::${b.travelDate}`)
+    );
 
     if (freeVanExists) {
       log(`[VALIDATION WARN] #${b.id} (${b.travelDate} ${b.fromLocation}→${b.toLocation}) outsourced unnecessarily — a free capable van exists`);

@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, isNull, isNotNull, inArray, asc, ne, or } from "drizzle-orm";
-import { detectTripRequirements } from "@/lib/van-assignment";
+import { detectTripRequirements, isVanCapable } from "@/lib/van-assignment";
 
 /**
  * Two priority tiers — the only trip types the system uses:
@@ -166,15 +166,9 @@ export async function runReassign(
     );
 
     // allVans already sorted by id — lowest id wins ties
-    const eligible = allVans.filter((van) => {
-      if (needsSingapore && van.singaporeEnabled !== 1) return false;
-      if (needsThailand && van.thailandEnabled !== 1) return false;
-      const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-      if (isAlphardTrip && !isVanAlphard) return false;
-      if (!isAlphardTrip && isVanAlphard) return false;
-      if (is15PaxTrip && (van.maxPaxCapacity ?? 0) < 15) return false;
-      return true;
-    });
+    const eligible = allVans.filter((van) =>
+      isVanCapable(van, { needsSingapore, needsThailand, isAlphardTrip, is15PaxTrip })
+    );
 
     const free = eligible.filter((v) => !occupiedSlots.has(`${v.id}::${travelDate}`));
     if (free.length === 0) return null;
@@ -265,13 +259,7 @@ export async function runReassign(
         const victim = candidates.find((c) => {
           const van = vanMap.get(c.vanId!);
           if (!van) return false;
-          if (needsSingapore && van.singaporeEnabled !== 1) return false;
-          if (needsThailand && van.thailandEnabled !== 1) return false;
-          const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
-          if (isAlphard && !isVanAlphard) return false;
-          if (!isAlphard && isVanAlphard) return false;
-          if (needs15Pax && (van.maxPaxCapacity ?? 0) < 15) return false;
-          return true;
+          return isVanCapable(van, { needsSingapore, needsThailand, isAlphardTrip: isAlphard, is15PaxTrip: needs15Pax });
         }) ?? null;
 
         if (victim && victim.vanId != null) {

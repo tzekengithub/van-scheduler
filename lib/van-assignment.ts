@@ -13,6 +13,32 @@ export function detectTripRequirements(fromLocation: string, toLocation: string)
   };
 }
 
+/** Requirements a van must satisfy to be eligible for a booking. */
+export interface VanRequirements {
+  needsSingapore: boolean;
+  needsThailand: boolean;
+  isAlphardTrip: boolean;
+  is15PaxTrip: boolean;
+}
+
+/**
+ * Single source of truth for van capability checks.
+ * Returns true if `van` is capable of handling a booking with `req` requirements.
+ * Replaces 9 identical inline blocks across reassign.ts and recheck.ts.
+ */
+export function isVanCapable(
+  van: { singaporeEnabled: number | null; thailandEnabled: number | null; vehicleType: string | null; maxPaxCapacity: number | null },
+  req: VanRequirements,
+): boolean {
+  if (req.needsSingapore && van.singaporeEnabled !== 1) return false;
+  if (req.needsThailand && van.thailandEnabled !== 1) return false;
+  const isVanAlphard = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+  if (req.isAlphardTrip && !isVanAlphard) return false;
+  if (!req.isAlphardTrip && isVanAlphard) return false;
+  if (req.is15PaxTrip && (van.maxPaxCapacity ?? 0) < 15) return false;
+  return true;
+}
+
 export async function smartAssignVan(
   travelDate: string,
   fromLocation: string,
