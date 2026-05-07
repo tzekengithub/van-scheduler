@@ -3,6 +3,27 @@ import { db } from "@/lib/db";
 import { vans, bookings } from "@/drizzle/schema";
 import { eq, isNull, and } from "drizzle-orm";
 import { runReassign } from "@/lib/reassign";
+import { z } from "zod";
+
+const VanPostSchema = z.object({
+  vanNumber: z.string().min(1).max(20),
+  driverName: z.string().max(100).optional(),
+  driverContact: z.string().max(50).optional(),
+  singaporeEnabled: z.boolean().optional(),
+  thailandEnabled: z.boolean().optional(),
+  maxPaxCapacity: z.number().int().min(1).max(50).optional(),
+  location: z.string().max(100).optional(),
+  vehicleType: z.string().max(50).optional(),
+});
+
+const VanPatchSchema = z.object({
+  id: z.number().int().positive(),
+  singaporeEnabled: z.union([z.literal(0), z.literal(1)]).optional(),
+  thailandEnabled: z.union([z.literal(0), z.literal(1)]).optional(),
+  maxPaxCapacity: z.number().int().min(1).max(50).optional(),
+  location: z.string().max(100).optional(),
+  vehicleType: z.string().max(50).optional(),
+});
 
 export const runtime = "nodejs";
 
@@ -17,15 +38,17 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { id, singaporeEnabled, thailandEnabled, maxPaxCapacity, location, vehicleType } = await request.json();
-    if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+    const body = await request.json();
+    const parsed = VanPatchSchema.safeParse(body);
+    if (!parsed.success) return NextResponse.json({ error: "Validation failed", details: parsed.error.flatten().fieldErrors }, { status: 400 });
+    const { id, singaporeEnabled, thailandEnabled, maxPaxCapacity, location, vehicleType } = parsed.data;
 
     const updates: Record<string, unknown> = {};
-    if (typeof singaporeEnabled === "number") updates.singaporeEnabled = singaporeEnabled;
-    if (typeof thailandEnabled === "number") updates.thailandEnabled = thailandEnabled;
-    if (typeof maxPaxCapacity === "number") updates.maxPaxCapacity = maxPaxCapacity;
-    if (typeof location === "string") updates.location = location;
-    if (typeof vehicleType === "string") updates.vehicleType = vehicleType;
+    if (singaporeEnabled !== undefined) updates.singaporeEnabled = singaporeEnabled;
+    if (thailandEnabled !== undefined) updates.thailandEnabled = thailandEnabled;
+    if (maxPaxCapacity !== undefined) updates.maxPaxCapacity = maxPaxCapacity;
+    if (location !== undefined) updates.location = location;
+    if (vehicleType !== undefined) updates.vehicleType = vehicleType;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No fields to update" }, { status: 400 });
@@ -45,10 +68,10 @@ export async function PATCH(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { vanNumber, driverName, driverContact, singaporeEnabled, thailandEnabled, maxPaxCapacity, location, vehicleType } = await request.json();
-    if (!vanNumber || !vanNumber.trim()) {
-      return NextResponse.json({ error: "Plate number is required" }, { status: 400 });
-    }
+    const body = await request.json();
+    const parsed = VanPostSchema.safeParse(body);
+    if (!parsed.success) return NextResponse.json({ error: "Validation failed", details: parsed.error.flatten().fieldErrors }, { status: 400 });
+    const { vanNumber, driverName, driverContact, singaporeEnabled, thailandEnabled, maxPaxCapacity, location, vehicleType } = parsed.data;
 
     const plate = vanNumber.trim().toUpperCase();
 

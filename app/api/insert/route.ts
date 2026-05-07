@@ -2,7 +2,39 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { bookings } from "@/drizzle/schema";
 import { recheckAllVans } from "@/lib/recheck";
-import type { ParsedBooking } from "@/lib/pdf-parser";
+import { z } from "zod";
+
+const InsertRowSchema = z.object({
+  travelDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD"),
+  fromLocation: z.string().min(1).max(200),
+  toLocation: z.string().max(200).default(""),
+  invoiceNo: z.string().max(100).default(""),
+  tripType: z.enum(["one_way_ride", "round_trip", "day_trip", "trip"]),
+  vehicleCategory: z.enum(["Van", "Alphard", "Car"]),
+  isAlphardTrip: z.union([z.literal(0), z.literal(1)]),
+  is15PaxTrip: z.union([z.literal(0), z.literal(1)]),
+  vehicleIndex: z.number().int().min(1),
+  numberOfVehicles: z.number().int().min(1),
+  isRoundTrip: z.union([z.literal(0), z.literal(1)]).default(0),
+  details: z.string().max(500).default(""),
+  clientDetails: z.string().max(1000).default(""),
+  day: z.string().max(2).default(""),
+  month: z.string().max(20).default(""),
+  year: z.string().max(4).default(""),
+  myrPerVehicle: z.number().default(0),
+  amount: z.number().default(0),
+  vehiclePlate: z.string().max(20).default(""),
+  driverName: z.string().max(100).default(""),
+  paidStatus: z.string().max(1).default("U"),
+  inHouseOrOutsourced: z.enum(["I", "O"]).default("I"),
+  outsourcedCompany: z.string().max(200).default(""),
+  overtime: z.string().max(100).default(""),
+  introducer: z.string().max(100).default(""),
+});
+
+const InsertSchema = z.object({
+  bookings: z.array(InsertRowSchema).min(1),
+});
 
 export const runtime = "nodejs";
 
@@ -16,13 +48,13 @@ export async function POST(request: NextRequest) {
       };
 
       try {
-        const { bookings: rows }: { bookings: ParsedBooking[] } = await request.json();
-
-        if (!rows || rows.length === 0) {
-          send({ type: "done", inserted: 0 });
+        const parsed = InsertSchema.safeParse(await request.json());
+        if (!parsed.success) {
+          send({ type: "error", error: "Validation failed", details: parsed.error.flatten().fieldErrors });
           controller.close();
           return;
         }
+        const rows = parsed.data.bookings;
 
         send({ type: "parsed", total: rows.length });
 

@@ -7,6 +7,15 @@ import { saveRule, getActiveRules } from "@/lib/scheduling-rules";
 import { aiRecheckAllVans } from "@/lib/ai-scheduler";
 import { recheckAllVans } from "@/lib/recheck";
 import { config } from "@/lib/config";
+import { z } from "zod";
+
+const ChatSchema = z.object({
+  messages: z.array(z.object({
+    role: z.string().max(20),
+    content: z.string().max(10000).nullable(),
+  })).min(1).max(50),
+  includeContext: z.boolean().optional(),
+});
 
 export const runtime = "nodejs";
 
@@ -416,7 +425,14 @@ export async function POST(request: NextRequest) {
       };
 
       try {
-        const { messages, includeContext } = await request.json();
+        const chatParsed = ChatSchema.safeParse(await request.json());
+        if (!chatParsed.success) {
+          send({ choices: [{ delta: { content: `Error: ${JSON.stringify(chatParsed.error.flatten().fieldErrors)}` } }] });
+          send("[DONE]");
+          controller.close();
+          return;
+        }
+        const { messages, includeContext } = chatParsed.data;
 
         const apiKey = process.env.OPENROUTER_API_KEY;
         if (!apiKey) throw new Error("OPENROUTER_API_KEY not configured");

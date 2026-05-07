@@ -2,6 +2,37 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq, and, ne } from "drizzle-orm";
+import { z } from "zod";
+
+const BookingPatchSchema = z.object({
+  day: z.string().max(2).optional(),
+  vehiclePlate: z.string().max(20).nullable().optional(),
+  driverName: z.string().max(100).nullable().optional(),
+  driverContact: z.string().max(50).nullable().optional(),
+  paidStatus: z.string().max(1).optional(),
+  inHouseOrOutsourced: z.enum(["I", "O"]).optional(),
+  outsourcedCompany: z.string().max(200).optional(),
+  outsourceReason: z.string().max(500).optional(),
+  overtime: z.string().max(100).optional(),
+  introducer: z.string().max(100).optional(),
+  amount: z.union([z.string().max(50), z.number()]).optional(),
+  clientDetails: z.string().max(1000).optional(),
+  invoiceNo: z.string().max(100).optional(),
+  details: z.string().max(500).optional(),
+  passengerCount: z.number().int().min(0).optional(),
+  myrPerVehicle: z.union([z.string().max(50), z.number()]).optional(),
+  vanId: z.number().int().positive().nullable().optional(),
+  manualChange: z.union([z.literal(0), z.literal(1)]).optional(),
+  tripType: z.enum(["one_way_ride", "round_trip", "day_trip", "trip", "tpri"]).optional(),
+  tourGuide: z.string().max(100).optional(),
+  vehicleIndex: z.number().int().min(1).optional(),
+  numberOfVehicles: z.number().int().min(1).optional(),
+  travelDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").optional(),
+  month: z.string().max(20).optional(),
+  year: z.string().max(4).optional(),
+  fromLocation: z.string().max(200).optional(),
+  toLocation: z.string().max(200).optional(),
+});
 
 export async function PATCH(
   request: NextRequest,
@@ -14,27 +45,19 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid id" }, { status: 400 });
     }
 
-    const body = await request.json();
-    console.log("PATCH bookings/", id, body);
+    const rawBody = await request.json();
+    console.log("PATCH bookings/", id, rawBody);
 
-    const allowed = [
-      "day", "vehiclePlate", "driverName", "driverContact", "paidStatus",
-      "inHouseOrOutsourced", "outsourcedCompany", "outsourceReason", "overtime", "introducer",
-      "amount", "clientDetails", "invoiceNo", "details", "passengerCount",
-      "myrPerVehicle", "vanId", "manualChange",
-      "tripType", "tourGuide", "vehicleIndex", "numberOfVehicles",
-      "travelDate", "month", "year",
-      "fromLocation", "toLocation",
-    ] as const;
+    const validation = BookingPatchSchema.safeParse(rawBody);
+    if (!validation.success) return NextResponse.json({ error: "Validation failed", details: validation.error.flatten().fieldErrors }, { status: 400 });
+    const body = validation.data;
 
     const updates: Record<string, unknown> = {};
-    for (const key of allowed) {
-      if (key in body) {
-        if (key === "amount" || key === "myrPerVehicle") {
-          updates[key] = body[key] != null ? String(body[key]) : null;
-        } else {
-          updates[key] = body[key];
-        }
+    for (const [key, value] of Object.entries(body)) {
+      if (key === "amount" || key === "myrPerVehicle") {
+        updates[key] = value != null ? String(value) : null;
+      } else {
+        updates[key] = value;
       }
     }
 
