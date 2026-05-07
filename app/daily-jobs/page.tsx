@@ -858,25 +858,22 @@ export default function DailyJobsPage() {
         setTimeout(() => setCellStates((prev) => { const n = { ...prev }; delete n[key]; return n; }), 1500);
         setPendingEdits((prev) => { const n = { ...prev }; delete n[row.id]; return n; });
         await fetchRows();
-        // SG/TH capability check after location edits
-        if (("fromLocation" in edits || "toLocation" in edits) && row.vanId) {
-          const combined = `${from} ${to}`.toLowerCase();
-          if (combined.includes("singapore") || combined.includes("thailand")) {
-            let siblingIds: number[] = [];
-            if (row.invoiceNo) {
-              const sibRes = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(row.invoiceNo)}`);
-              if (sibRes.ok) {
-                const siblings: BookingRow[] = await sibRes.json();
-                siblingIds = siblings.map((s) => s.id).filter((sid) => sid !== row.id);
-              }
+        // Trigger reassign after any location or tripType change
+        if ("fromLocation" in edits || "toLocation" in edits || "tripType" in edits) {
+          let siblingIds: number[] = [];
+          if (row.invoiceNo) {
+            const sibRes = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(row.invoiceNo)}`);
+            if (sibRes.ok) {
+              const siblings: BookingRow[] = await sibRes.json();
+              siblingIds = siblings.map((s) => s.id).filter((sid) => sid !== row.id);
             }
-            await fetch(`/api/bookings/${row.id}/reassign`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ siblingIds }),
-            });
-            await fetchRows();
           }
+          await fetch(`/api/bookings/${row.id}/reassign`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ siblingIds }),
+          });
+          await fetchRows();
         }
       } else if (res.status === 409) {
         const data = await res.json();
@@ -1051,17 +1048,50 @@ export default function DailyJobsPage() {
                   })()}
                 </td>
                 {/* Description — special requirements */}
-                <td className="px-3 py-2 min-w-[120px]">
-                  <div className="flex flex-col gap-0.5">
-                    {row.isAlphardTrip === 1 && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-300 whitespace-nowrap">★ Alphard</span>
-                    )}
-                    {row.vehicleCategory === "Car" && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-300 whitespace-nowrap">🚗 Car</span>
-                    )}
-                    {row.vehicleCategory === "Alphard" && row.isAlphardTrip !== 1 && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap">Alphard</span>
-                    )}
+                <td className="px-3 py-2 min-w-[140px]">
+                  <div className="flex flex-col gap-1">
+                    {(() => {
+                      const vehicleTypes = ["Van", "Alphard", "Car"] as const;
+                      type VehicleType = typeof vehicleTypes[number];
+                      const currentType: VehicleType =
+                        row.isAlphardTrip === 1 || row.vehicleCategory === "Alphard" ? "Alphard" :
+                        row.vehicleCategory === "Car" ? "Car" : "Van";
+                      const saving = cellStates[`${row.id}-vehicleCategory`] === "saving";
+                      const saved = cellStates[`${row.id}-vehicleCategory`] === "saved";
+                      return (
+                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold ${saving ? "opacity-50 pointer-events-none" : ""} ${saved ? "border-green-400" : "border-zinc-200"}`}>
+                          {vehicleTypes.map((vt) => (
+                            <button
+                              key={vt}
+                              type="button"
+                              onClick={async () => {
+                                if (currentType === vt) return;
+                                const key = `${row.id}-vehicleCategory`;
+                                setCellStates((prev) => ({ ...prev, [key]: "saving" }));
+                                const res = await fetch(`/api/bookings/${row.id}`, {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ vehicleCategory: vt, isAlphardTrip: vt === "Alphard" ? 1 : 0 }),
+                                });
+                                if (res.ok) {
+                                  setCellStates((prev) => ({ ...prev, [key]: "saved" }));
+                                  setTimeout(() => setCellStates((prev) => { const n = { ...prev }; delete n[key]; return n; }), 1000);
+                                  await fetch(`/api/bookings/${row.id}/reassign`, { method: "POST" });
+                                  await fetchRows();
+                                } else {
+                                  setCellStates((prev) => ({ ...prev, [key]: "error" }));
+                                }
+                              }}
+                              className={`px-2 py-1 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
+                                currentType === vt
+                                  ? vt === "Alphard" ? "bg-purple-600 text-white" : vt === "Car" ? "bg-zinc-600 text-white" : "bg-blue-600 text-white"
+                                  : "bg-white text-zinc-400 hover:text-zinc-700"
+                              }`}
+                            >{vt}</button>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     <span className="text-zinc-500 text-[10px]">{tripTypeLabel(row.tripType)}</span>
                   </div>
                 </td>

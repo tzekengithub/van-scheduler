@@ -1044,7 +1044,81 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
     }
   }
 
-  if (inconsistent === 0) {
+  // ── Third pass: pull unassigned legs onto their invoice's consistent van ──────
+  // After consolidation, some legs may still be unassigned (e.g. outsourced earlier
+  // because the van was busy). Re-fetch state and assign them if the consistent van
+  // is now free on those dates.
+  const freshAssigned = await db
+    .select({
+      invoiceNo: bookings.invoiceNo,
+      vehicleIndex: bookings.vehicleIndex,
+      vanId: bookings.vanId,
+      travelDate: bookings.travelDate,
+    })
+    .from(bookings)
+    .where(isNotNull(bookings.vanId));
+
+  const freshOccupied = new Set<string>(freshAssigned.map((b) => `${b.vanId}::${b.travelDate}`));
+
+  const consistentSlotVan = new Map<string, number>();
+  const freshGroups = new Map<string, typeof freshAssigned>();
+  for (const b of freshAssigned) {
+    if (!b.invoiceNo) continue;
+    const key = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
+    if (!freshGroups.has(key)) freshGroups.set(key, []);
+    freshGroups.get(key)!.push(b);
+  }
+  for (const [key, rows] of freshGroups) {
+    const vanSet = new Set(rows.map((r) => r.vanId!));
+    if (vanSet.size === 1) consistentSlotVan.set(key, [...vanSet][0]);
+  }
+
+  const unassignedLegs = await db
+    .select({
+      id: bookings.id,
+      invoiceNo: bookings.invoiceNo,
+      vehicleIndex: bookings.vehicleIndex,
+      travelDate: bookings.travelDate,
+      isAlphardTrip: bookings.isAlphardTrip,
+    })
+    .from(bookings)
+    .where(and(isNull(bookings.vanId), eq(bookings.manualChange, 0), isNotNull(bookings.invoiceNo)));
+
+  let continuityFixed = 0;
+  for (const leg of unassignedLegs) {
+    if (!leg.invoiceNo) continue;
+    const key = `${leg.invoiceNo}::${leg.vehicleIndex ?? 1}`;
+    const targetVanId = consistentSlotVan.get(key);
+    if (targetVanId == null) continue;
+    if (freshOccupied.has(`${targetVanId}::${leg.travelDate}`)) continue;
+
+    const van = allVans.find((v) => v.id === targetVanId);
+    if (!van) continue;
+
+    const isAlphardBooking = (leg.isAlphardTrip ?? 0) === 1;
+    const isVanAlphard_ = (van.vehicleType ?? "").toLowerCase() === "toyota alphard";
+    if (isAlphardBooking !== isVanAlphard_) continue;
+
+    await db.update(bookings).set({
+      vanId: targetVanId,
+      vehiclePlate: van.vanNumber ?? "",
+      driverName: van.driverName ?? "",
+      driverContact: van.driverContact ?? "",
+      inHouseOrOutsourced: "I",
+      outsourcedCompany: "",
+      outsourceReason: "",
+    }).where(eq(bookings.id, leg.id));
+
+    freshOccupied.add(`${targetVanId}::${leg.travelDate}`);
+    log(`[enforceInvoice] continuity: unassigned id=${leg.id} date=${leg.travelDate} → van ${targetVanId} (${van.vanNumber ?? "?"}) (${leg.invoiceNo})`);
+    continuityFixed++;
+  }
+  if (continuityFixed > 0) {
+    log(`  assigned ${continuityFixed} unassigned leg(s) to invoice's consistent van`);
+    fixed += continuityFixed;
+  }
+
+  if (inconsistent === 0 && continuityFixed === 0) {
     log("  all invoice slots consistent ✓");
   } else {
     log(`  checked ${inconsistent} inconsistent slot(s), moved ${fixed} booking(s) to consolidate`);

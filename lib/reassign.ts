@@ -82,6 +82,8 @@ export async function runReassign(
     return (a.vehicleIndex ?? 1) - (b.vehicleIndex ?? 1);
   });
 
+  const targetById = new Map(targetBookings.map((b) => [b.id, b]));
+
   // Pre-load all currently assigned bookings — used for both bump candidates and
   // in-memory scheduling. Fetched once; never re-queried per booking.
   const existingAssigned = await db
@@ -124,10 +126,20 @@ export async function runReassign(
 
   // "invoiceNo::vehicleIndex" → preferred vanId (for multi-day continuity)
   const invoiceVanPreference = new Map<string, number>();
+  // tracks the travelDate when each invoice preference was first established
+  const invoiceVanPreferenceDate = new Map<string, string>();
+  // "vanId::travelDate" → { id, invKey } — who occupies each van slot
+  const slotOccupant = new Map<string, { id: number; invKey: string }>();
   for (const b of existingAssigned) {
     if (b.invoiceNo) {
       const key = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
-      if (!invoiceVanPreference.has(key)) invoiceVanPreference.set(key, b.vanId!);
+      if (!invoiceVanPreference.has(key)) {
+        invoiceVanPreference.set(key, b.vanId!);
+        invoiceVanPreferenceDate.set(key, b.travelDate);
+      }
+    }
+    if (b.vanId != null) {
+      slotOccupant.set(`${b.vanId}::${b.travelDate}`, { id: b.id, invKey: `${b.invoiceNo ?? ""}::${b.vehicleIndex ?? 1}` });
     }
   }
 
@@ -225,9 +237,13 @@ export async function runReassign(
 
       // Update in-memory state
       occupiedSlots.add(`${vanId}::${b.travelDate}`);
+      slotOccupant.set(`${vanId}::${b.travelDate}`, { id: b.id, invKey: `${b.invoiceNo ?? ""}::${b.vehicleIndex ?? 1}` });
       if (b.invoiceNo) {
         const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
-        if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, vanId);
+        if (!invoiceVanPreference.has(invKey)) {
+          invoiceVanPreference.set(invKey, vanId);
+          invoiceVanPreferenceDate.set(invKey, b.travelDate);
+        }
       }
       vanLastDropOff.set(vanId, b.toLocation ?? null);
 
@@ -281,10 +297,14 @@ export async function runReassign(
             })
             .where(eq(bookings.id, b.id));
 
-          // Slot stays occupied (now by b). Update invoice preference for b.
+          // Slot stays occupied (now by b). Update occupant map and invoice preference.
+          slotOccupant.set(`${bumpedVanId}::${b.travelDate}`, { id: b.id, invKey: `${b.invoiceNo ?? ""}::${b.vehicleIndex ?? 1}` });
           if (b.invoiceNo) {
             const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
-            if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, bumpedVanId);
+            if (!invoiceVanPreference.has(invKey)) {
+              invoiceVanPreference.set(invKey, bumpedVanId);
+              invoiceVanPreferenceDate.set(invKey, b.travelDate);
+            }
           }
 
           const victimKey = `${b.travelDate}::${bumpType}`;
@@ -356,9 +376,13 @@ export async function runReassign(
             })
             .where(eq(bookings.id, b.id));
 
+          slotOccupant.set(`${bumpedVanId}::${b.travelDate}`, { id: b.id, invKey: `${b.invoiceNo ?? ""}::${b.vehicleIndex ?? 1}` });
           if (b.invoiceNo) {
             const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
-            if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, bumpedVanId);
+            if (!invoiceVanPreference.has(invKey)) {
+              invoiceVanPreference.set(invKey, bumpedVanId);
+              invoiceVanPreferenceDate.set(invKey, b.travelDate);
+            }
           }
 
           const victimKey = `${b.travelDate}::${victim.tripType}`;
@@ -431,9 +455,13 @@ export async function runReassign(
             })
             .where(eq(bookings.id, b.id));
 
+          slotOccupant.set(`${bumpedVanId}::${b.travelDate}`, { id: b.id, invKey: `${b.invoiceNo ?? ""}::${b.vehicleIndex ?? 1}` });
           if (b.invoiceNo) {
             const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
-            if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, bumpedVanId);
+            if (!invoiceVanPreference.has(invKey)) {
+              invoiceVanPreference.set(invKey, bumpedVanId);
+              invoiceVanPreferenceDate.set(invKey, b.travelDate);
+            }
           }
 
           const victimKey = `${b.travelDate}::${victim.tripType}`;
@@ -459,6 +487,73 @@ export async function runReassign(
         }
       }
 
+      // ── Invoice continuity bump ──────────────────────────────────────────────
+      // An invoice that used a specific van on an EARLIER date can reclaim that
+      // van from a competing booking whose preference was established TODAY
+      // (no prior-date claim). Ensures multi-day invoices keep the same van.
+      if (!bumped && b.invoiceNo) {
+        const bumperInvKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
+        const bumperPrefVanId = invoiceVanPreference.get(bumperInvKey);
+        const bumperPrefDate = invoiceVanPreferenceDate.get(bumperInvKey);
+
+        if (bumperPrefVanId != null && bumperPrefDate != null && bumperPrefDate < b.travelDate) {
+          const slotKey = `${bumperPrefVanId}::${b.travelDate}`;
+          const occupant = slotOccupant.get(slotKey);
+
+          if (occupant && occupant.invKey !== bumperInvKey) {
+            const occupantPrefDate = invoiceVanPreferenceDate.get(occupant.invKey);
+            const occupantHasStrongClaim = occupantPrefDate != null && occupantPrefDate < b.travelDate;
+
+            if (!occupantHasStrongClaim) {
+              const contVanId = bumperPrefVanId;
+              const contVan = vanMap.get(contVanId);
+              const isAlphard = (b.isAlphardTrip ?? 0) === 1;
+              const isVanAlphard_ = (contVan?.vehicleType ?? "").toLowerCase() === "toyota alphard";
+
+              if (contVan && isAlphard === isVanAlphard_) {
+                await db.update(bookings)
+                  .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "", inHouseOrOutsourced: "I", outsourcedCompany: "" })
+                  .where(eq(bookings.id, occupant.id));
+
+                await db.update(bookings)
+                  .set({
+                    vanId: contVanId,
+                    vehiclePlate: contVan.vanNumber ?? "",
+                    driverName: contVan.driverName ?? "",
+                    driverContact: contVan.driverContact ?? "",
+                    inHouseOrOutsourced: "I",
+                    outsourcedCompany: "",
+                  })
+                  .where(eq(bookings.id, b.id));
+
+                slotOccupant.set(slotKey, { id: b.id, invKey: bumperInvKey });
+
+                for (const [key, entries] of bumpIndex) {
+                  const filtered = entries.filter((e) => e.id !== occupant.id);
+                  if (filtered.length !== entries.length) bumpIndex.set(key, filtered);
+                }
+                const winnerKey = `${b.travelDate}::${b.tripType ?? "trip"}`;
+                if (!bumpIndex.has(winnerKey)) bumpIndex.set(winnerKey, []);
+                bumpIndex.get(winnerKey)!.push({
+                  id: b.id,
+                  vanId: contVanId,
+                  fromLocation: b.fromLocation ?? "",
+                  toLocation: b.toLocation ?? "",
+                  is15PaxTrip: b.is15PaxTrip ?? 0,
+                });
+
+                log(`[runReassign] CONTINUITY BUMP id=${b.id} (${b.invoiceNo} pref since ${bumperPrefDate}) reclaimed van ${contVanId} (${contVan.vanNumber ?? "?"}) from id=${occupant.id}`);
+
+                bumpedIds.push(occupant.id);
+                bumpedAndUnassigned.add(occupant.id);
+                assigned++;
+                bumped = true;
+              }
+            }
+          }
+        }
+      }
+
       if (!bumped) {
         await db.update(bookings)
           .set({ vanId: null, vehiclePlate: "", driverName: "", driverContact: "" })
@@ -479,7 +574,7 @@ export async function runReassign(
     for (const bumpedId of bumpedIds) {
       if (!bumpedAndUnassigned.has(bumpedId)) continue; // already re-assigned
 
-      const b = existingById.get(bumpedId);
+      const b = existingById.get(bumpedId) ?? targetById.get(bumpedId);
       if (!b) continue;
 
       const vanId = findBestVan(
@@ -507,9 +602,13 @@ export async function runReassign(
           .where(eq(bookings.id, b.id));
 
         occupiedSlots.add(`${vanId}::${b.travelDate}`);
+        slotOccupant.set(`${vanId}::${b.travelDate}`, { id: b.id, invKey: `${b.invoiceNo ?? ""}::${b.vehicleIndex ?? 1}` });
         if (b.invoiceNo) {
           const invKey = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
-          if (!invoiceVanPreference.has(invKey)) invoiceVanPreference.set(invKey, vanId);
+          if (!invoiceVanPreference.has(invKey)) {
+            invoiceVanPreference.set(invKey, vanId);
+            invoiceVanPreferenceDate.set(invKey, b.travelDate);
+          }
         }
         bumpedAndUnassigned.delete(bumpedId);
 
