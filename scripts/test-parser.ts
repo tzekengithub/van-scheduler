@@ -134,7 +134,7 @@ async function runTests() {
     const buffer = fs.readFileSync(filePath);
 
     try {
-      const bookings = await extractTravelBookings(buffer);
+      const { bookings } = await extractTravelBookings(buffer);
       const b0 = bookings[0];
       const bLast = bookings[bookings.length - 1];
       const fileErrors: string[] = [];

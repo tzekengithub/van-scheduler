@@ -55,7 +55,7 @@ async function parsePDF(filePath: string, attempt = 1): Promise<schema.NewBookin
     if (!res.ok) throw new Error(`PDF service ${res.status} for ${path.basename(filePath)}`);
     const { text } = await res.json() as { text: string };
     if (!text || text.trim().length < 10) throw new Error(`Empty text for ${path.basename(filePath)}`);
-    return parseRawText(text) as unknown as schema.NewBooking[];
+    return parseRawText(text).bookings as unknown as schema.NewBooking[];
   } catch (err) {
     if (attempt < 3) {
       await new Promise((r) => setTimeout(r, 2000 * attempt));

@@ -11,16 +11,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
-    const allParsed = [];
+    const allParsed: import("@/lib/pdf-parser").ParsedBooking[] = [];
+    const allSkipped: import("@/lib/pdf-parser").SkippedRow[] = [];
     for (const entry of files) {
       if (typeof entry === "string") continue;
       const arrayBuffer = await entry.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
-      const parsed = await extractTravelBookings(buffer);
+      const { bookings: parsed, skipped } = await extractTravelBookings(buffer);
       allParsed.push(...parsed);
+      allSkipped.push(...skipped);
     }
 
-    return NextResponse.json({ bookings: allParsed });
+    return NextResponse.json({ bookings: allParsed, skipped: allSkipped });
   } catch (error: unknown) {
     console.error("POST /api/preview error:", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 422 });

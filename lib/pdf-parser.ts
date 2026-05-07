@@ -162,15 +162,27 @@ function detectTripType(
   return "trip";
 }
 
+export interface SkippedRow {
+  rowNum: string;
+  rawText: string;
+  reason: string;
+}
+
+export interface ParseResult {
+  bookings: ParsedBooking[];
+  skipped: SkippedRow[];
+}
+
 /**
  * Parse raw text extracted from an invoice PDF.
  * Designed for PyMuPDF block output where each table cell is its own line.
  * Pure function — no PDF dependency, fully testable.
  */
-export function parseRawText(text: string): ParsedBooking[] {
+export function parseRawText(text: string): ParseResult {
   // Drop blank lines — PyMuPDF gives one block per non-empty cell
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const results: ParsedBooking[] = [];
+  const skipped: SkippedRow[] = [];
 
   // ── Invoice Number ──────────────────────────────────────────────────────────
   let invoiceNo = "";
@@ -296,7 +308,10 @@ export function parseRawText(text: string): ParsedBooking[] {
       j++;
     }
 
-    if (!travelDate || !dateParts || routeLines.length === 0) continue;
+    if (!travelDate || !dateParts || routeLines.length === 0) {
+      skipped.push({ rowNum: line, rawText: routeLines.join(" ") || "(no route)", reason: !travelDate ? "No date found" : "No route lines found" });
+      continue;
+    }
 
     // ── Collect up to 3 numeric tokens; capture annotation "(…)" lines ──
     const numTokens: string[] = [];
@@ -374,13 +389,9 @@ export function parseRawText(text: string): ParsedBooking[] {
       .replace(/Maximum \d+\s*hrs.*/i, "")
       .trim();
 
-    if (!bookingDetails) continue;
-
-    // Skip overtime-only rows — not a trip booking
-    if (/^overtime$/i.test(bookingDetails.trim())) continue;
-
-    // Skip Tour Guide rows — not a van trip
-    if (/tour\s*guide/i.test(bookingDetails)) continue;
+    if (!bookingDetails) { skipped.push({ rowNum: line, rawText: rawRoute, reason: "Empty booking details after cleaning" }); continue; }
+    if (/^overtime$/i.test(bookingDetails.trim())) { skipped.push({ rowNum: line, rawText: bookingDetails, reason: "Overtime row (not a trip)" }); continue; }
+    if (/tour\s*guide/i.test(bookingDetails)) { skipped.push({ rowNum: line, rawText: bookingDetails, reason: "Tour guide row (not a trip)" }); continue; }
 
     // ── Determine trip type ──
     const locationResult = parseLocations(bookingDetails);
@@ -394,12 +405,12 @@ export function parseRawText(text: string): ParsedBooking[] {
     const toLocation = locationResult.toLocation;
     const isRoundTrip = locationResult.isRoundTrip;
 
-    if (!fromLocation) continue;
+    if (!fromLocation) { skipped.push({ rowNum: line, rawText: bookingDetails, reason: "No from-location parsed" }); continue; }
 
     // Skip rows with no destination unless they are an explicit day trip.
     // This filters out fee/service lines like "Parking Fees", "Gift",
     // "Paging", "Food", "Help to check in at the hotel", etc.
-    if (!toLocation && !/day\s*trip/i.test(bookingDetails)) continue;
+    if (!toLocation && !/day\s*trip/i.test(bookingDetails)) { skipped.push({ rowNum: line, rawText: bookingDetails, reason: "No destination (service fee or non-trip row)" }); continue; }
 
     // ── Determine vehicle category (Van / Alphard / Car) ──
     const vehicleCategory = detectVehicleCategory(rawRoute, annotationLine);
@@ -442,7 +453,7 @@ export function parseRawText(text: string): ParsedBooking[] {
     }
   }
 
-  return results;
+  return { bookings: results, skipped };
 }
 
 /**
@@ -452,7 +463,7 @@ export function parseRawText(text: string): ParsedBooking[] {
  */
 export async function extractTravelBookings(
   buffer: Buffer
-): Promise<ParsedBooking[]> {
+): Promise<ParseResult> {
   const pythonServiceUrl = process.env.PDF_SERVICE_URL ?? process.env.NEXT_PUBLIC_PDF_SERVICE_URL;
   if (!pythonServiceUrl) {
     throw new Error("PDF_SERVICE_URL (or NEXT_PUBLIC_PDF_SERVICE_URL) environment variable is not set");

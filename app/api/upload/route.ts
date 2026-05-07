@@ -34,7 +34,8 @@ export async function POST(request: NextRequest) {
         }
 
         // Parse all files, collect all bookings — with per-file diagnostics
-        const allParsed: Awaited<ReturnType<typeof extractTravelBookings>> = [];
+        const allParsed: import("@/lib/pdf-parser").ParsedBooking[] = [];
+        const allSkipped: import("@/lib/pdf-parser").SkippedRow[] = [];
         const fileErrors: string[] = [];
 
         for (const entry of files) {
@@ -70,9 +71,10 @@ export async function POST(request: NextRequest) {
               continue;
             }
 
-            const parsed = parseRawText(text);
-            console.log(`[upload] ${fileName}: parsed ${parsed.length} bookings`);
+            const { bookings: parsed, skipped } = parseRawText(text);
+            console.log(`[upload] ${fileName}: parsed ${parsed.length} bookings, skipped ${skipped.length}`);
             allParsed.push(...parsed);
+            allSkipped.push(...skipped);
           } catch (fileErr: unknown) {
             const msg = `Error processing ${fileName}: ${fileErr instanceof Error ? fileErr.message : String(fileErr)}`;
             console.error(`[upload] ${msg}`);
@@ -93,7 +95,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Signal how many rows are about to be inserted
-        send({ type: "parsed", total: allParsed.length });
+        send({ type: "parsed", total: allParsed.length, skipped: allSkipped.length, skippedRows: allSkipped });
 
         // Batch-insert all bookings in a single DB round trip
         await db.insert(bookings).values(
