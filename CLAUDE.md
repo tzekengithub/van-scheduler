@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Van booking management system built with Next.js 16, React 19, Drizzle ORM, PostgreSQL (Neon), and a separate Flask/PyMuPDF microservice for PDF text extraction. The AI scheduling layer uses OpenRouter (Gemini 2.5 Pro).
+Van booking management system built with Next.js 16, React 19, Drizzle ORM, PostgreSQL (Neon), and a separate Flask/PyMuPDF microservice for PDF text extraction. The AI scheduling layer uses OpenRouter (Gemini 2.5 Flash).
 
 ## Common Commands
 
@@ -78,6 +78,7 @@ Both routes stream SSE events (`parsed`, `progress`, `recheck`, `recheck_log`, `
 - `inHouseOrOutsourced = 'O'` with non-empty `outsourcedCompany` — confirmed outsource; never reassigned.
 - `vehicleCategory = 'Car'` — always outsourced; never assigned a fleet van.
 - `isAlphardTrip = 1` — only Toyota Alphard vans; never regular vans (and vice versa).
+- `is15PaxTrip = 1` — only vans with `maxPaxCapacity >= 15`; has override priority to displace any non-15-pax trip from a 15-seater van.
 
 ### Database Schema (`drizzle/schema.ts`)
 
@@ -98,11 +99,14 @@ Three tables:
 | `/api/upload` | POST | Parse PDFs → insert → rules engine recheck (SSE) |
 | `/api/insert` | POST | Accept pre-parsed JSON → insert → AI recheck (SSE) |
 | `/api/preview` | POST | Parse PDFs without inserting (preview UI) |
-| `/api/reassign` | POST | Manual "Recheck" button — runs full `recheckAllVans` rules engine (SSE) |
+| `/api/reassign` | POST | Manual "Recheck" button — runs rules engine `recheckAllVans` (SSE); does NOT call the AI scheduler |
 | `/api/chat` | POST | Agentic AI chat with 4 tools: `assign_van`, `set_outsource`, `save_scheduling_rule`, `trigger_recheck` (SSE) |
 | `/api/scheduling-rules` | GET, POST, DELETE | CRUD for persistent scheduling rules |
+| `/api/cancel-insert` | POST | Delete rows inserted by a previous `/api/insert` call (by `insertedIds`) |
 | `/api/clear` | POST | Truncate all bookings |
 | `/api/seed` | POST | Insert 3 placeholder vans (VAN-001..003) if not present |
+| `/api/invoice/extract` | POST | Extract invoice data from PDF via PDF microservice |
+| `/api/invoice/generate` | POST | Generate formatted invoice PDF from extracted data |
 
 ### Library (`lib/`)
 
@@ -112,7 +116,7 @@ Three tables:
 - **`recheck.ts`** — 7-step full schedule orchestrator (rules engine).
 - **`reassign.ts`** — Priority-based two-pass bump algorithm called by recheck.
 - **`config.ts`** — Single source of truth for company identity and location list, read from env vars (`COMPANY_NAME`, `COMPANY_PHONE`, `LOCATIONS`). Consumed by `pdf-parser.ts` (line-skip filter), `ai-scheduler.ts` (system prompt), `layout.tsx` (page title), and `page.tsx` (location dropdown). Change company branding here, not in individual files.
-- **`ai-scheduler.ts`** — Batched AI scheduler for full or targeted recheck. CHUNK_SIZE is 50.
+- **`ai-scheduler.ts`** — `aiRecheckAllVans()` runs in 3 layers (multi-day invoices → standard trips → one-way rides), each split into batches of 50 (CHUNK_SIZE). Mid-layer rescans run between layers. NOT called by the `/api/reassign` route — only triggered explicitly (e.g., future AI recheck button).
 - **`chat-context.ts`** — `buildScheduleContext()` formats fleet + booking data for the chat LLM (capped at 60 days / 150 bookings).
 - **`scheduling-rules.ts`** — CRUD helpers for the `schedulingRules` table.
 

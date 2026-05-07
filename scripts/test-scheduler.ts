@@ -209,21 +209,39 @@ async function main() {
   }
 
   // ── Rule 2: Invoice consistency ──────────────────────────────────────────
+  // Groups by (invoiceNo, vehicleIndex, isAlphardTrip) — Alphard and non-Alphard
+  // legs of the same invoice slot use different van types by design (not a split).
+  // Same-day duplicates (same invoice+vi+date) legitimately need separate vans
+  // and are excluded from this check.
   {
-    const bySlot = new Map<string, Set<number>>();
+    type SlotRow = { vanId: number; travelDate: string };
+    const bySlot = new Map<string, SlotRow[]>();
     for (const b of finalBookings) {
       if (!b.vanId || !b.invoiceNo) continue;
-      const key = `${b.invoiceNo}::${b.vehicleIndex ?? 1}`;
-      if (!bySlot.has(key)) bySlot.set(key, new Set());
-      bySlot.get(key)!.add(b.vanId);
+      const key = `${b.invoiceNo}::${b.vehicleIndex ?? 1}::${b.isAlphardTrip ?? 0}`;
+      if (!bySlot.has(key)) bySlot.set(key, []);
+      bySlot.get(key)!.push({ vanId: b.vanId, travelDate: b.travelDate });
     }
-    const splits = [...bySlot.entries()].filter(([, vanSet]) => vanSet.size > 1);
+    const splits: string[] = [];
+    for (const [slotKey, rows] of bySlot) {
+      const dateCounts = new Map<string, number>();
+      for (const { travelDate } of rows) {
+        dateCounts.set(travelDate, (dateCounts.get(travelDate) ?? 0) + 1);
+      }
+      // Only unique-date bookings must share a van — same-day duplicates need separate vans
+      const uniqueVans = new Set(
+        rows.filter(({ travelDate }) => dateCounts.get(travelDate) === 1).map(({ vanId }) => vanId)
+      );
+      if (uniqueVans.size > 1) {
+        const vanNames = [...uniqueVans].map((id) => vanById.get(id)?.vanNumber ?? id).join(", ");
+        splits.push(`${slotKey} → vans [${vanNames}]`);
+      }
+    }
     if (splits.length === 0) {
-      pass(`Invoice consistency: same (invoiceNo, vehicleIndex) = same van`);
+      pass(`Invoice consistency: same (invoiceNo, vehicleIndex, vanType) = same van across dates`);
     } else {
-      for (const [slot, vanSet] of splits) {
-        const vanNames = [...vanSet].map((id) => vanById.get(id)?.vanNumber ?? id).join(", ");
-        fail(`Split invoice: ${slot} assigned to multiple vans [${vanNames}]`);
+      for (const s of splits) {
+        fail(`Split invoice: ${s}`);
       }
     }
   }
@@ -288,6 +306,139 @@ async function main() {
     } else {
       for (const b of unassignedInHouse) {
         fail(`Unassigned but still in-house: id=${b.id} ${b.invoiceNo} ${b.travelDate}`);
+      }
+    }
+  }
+
+  // ── Scenario Tests ────────────────────────────────────────────────────────
+  console.log("\n─── Scenario Tests ──────────────────────────────────");
+  {
+    const allVansForTest = await db.select().from(schema.vans).orderBy(schema.vans.id);
+    const regularVans = allVansForTest.filter(
+      (v) => (v.vehicleType ?? "").toLowerCase() !== "toyota alphard"
+    );
+
+    const clean = async (invoiceNo: string) =>
+      db.delete(schema.bookings).where(eq(schema.bookings.invoiceNo, invoiceNo));
+
+    if (regularVans.length === 0) {
+      console.log("  SKIP  All scenario tests — no regular vans in DB");
+    } else {
+      const v1 = regularVans[0];
+
+      // S1: manualChange=1 is never touched by recheck
+      {
+        const INV = "TEST-S1-MANUAL";
+        await clean(INV);
+        const [ins] = await db.insert(schema.bookings).values({
+          travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+          vanId: v1.id, vehiclePlate: v1.vanNumber, driverName: v1.driverName ?? "",
+          manualChange: 1, inHouseOrOutsourced: "I", tripType: "trip",
+          invoiceNo: INV, vehicleCategory: "Van",
+        }).returning({ id: schema.bookings.id });
+        await recheckAllVans();
+        const [after] = await db.select({ vanId: schema.bookings.vanId }).from(schema.bookings).where(eq(schema.bookings.id, ins.id));
+        if (after?.vanId === v1.id) pass("S1: manualChange=1 — van preserved after recheck");
+        else fail(`S1: manualChange=1 — van changed from ${v1.id} to ${after?.vanId}`);
+        await clean(INV);
+      }
+
+      // S2: Car trips always outsourced, never get a fleet van
+      {
+        const INV = "TEST-S2-CAR";
+        await clean(INV);
+        const [ins] = await db.insert(schema.bookings).values({
+          travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+          manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip",
+          invoiceNo: INV, vehicleCategory: "Car",
+        }).returning({ id: schema.bookings.id });
+        await recheckAllVans();
+        const [after] = await db.select({ vanId: schema.bookings.vanId, flag: schema.bookings.inHouseOrOutsourced }).from(schema.bookings).where(eq(schema.bookings.id, ins.id));
+        if (after?.vanId === null && after?.flag === "O") pass("S2: Car trip correctly outsourced");
+        else fail(`S2: Car trip has vanId=${after?.vanId} flag=${after?.flag} (expected null + "O")`);
+        await clean(INV);
+      }
+
+      // S3: Confirmed outsource (outsourcedCompany set) never reassigned
+      {
+        const INV = "TEST-S3-OUTSOURCE";
+        await clean(INV);
+        const [ins] = await db.insert(schema.bookings).values({
+          travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+          manualChange: 0, inHouseOrOutsourced: "O", outsourcedCompany: "ABC Tours",
+          tripType: "trip", invoiceNo: INV, vehicleCategory: "Van",
+        }).returning({ id: schema.bookings.id });
+        await recheckAllVans();
+        const [after] = await db.select({ vanId: schema.bookings.vanId, co: schema.bookings.outsourcedCompany }).from(schema.bookings).where(eq(schema.bookings.id, ins.id));
+        if (after?.vanId === null && after?.co === "ABC Tours") pass("S3: Confirmed outsource untouched");
+        else fail(`S3: Confirmed outsource was changed (vanId=${after?.vanId}, company=${after?.co})`);
+        await clean(INV);
+      }
+
+      // S4: Priority bump — trip displaces one_way_ride when all vans occupied
+      {
+        const INV_OWR = "TEST-S4-OWR";
+        const INV_TRIP = "TEST-S4-TRIP";
+        await clean(INV_OWR); await clean(INV_TRIP);
+        // Occupy ALL regular vans with one_way_rides
+        await db.insert(schema.bookings).values(
+          regularVans.map((v) => ({
+            travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+            manualChange: 0, inHouseOrOutsourced: "I", tripType: "one_way_ride",
+            invoiceNo: INV_OWR, vehicleCategory: "Van",
+            vanId: v.id, vehiclePlate: v.vanNumber, driverName: v.driverName ?? "",
+          }))
+        );
+        const [tripIns] = await db.insert(schema.bookings).values({
+          travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+          manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip",
+          invoiceNo: INV_TRIP, vehicleCategory: "Van",
+        }).returning({ id: schema.bookings.id });
+        await recheckAllVans();
+        const [tripAfter] = await db.select({ vanId: schema.bookings.vanId }).from(schema.bookings).where(eq(schema.bookings.id, tripIns.id));
+        if (tripAfter?.vanId != null) pass("S4: Priority bump — trip displaced one_way_ride and got a van");
+        else fail("S4: Priority bump failed — trip still has no van");
+        // Verify no double-bookings on test date
+        const dayBookings = await db.select({ vanId: schema.bookings.vanId }).from(schema.bookings).where(and(eq(schema.bookings.travelDate, "2099-12-31"), isNotNull(schema.bookings.vanId)));
+        const slotCount = new Map<number, number>();
+        for (const b of dayBookings) slotCount.set(b.vanId!, (slotCount.get(b.vanId!) ?? 0) + 1);
+        if ([...slotCount.values()].every((n) => n <= 1)) pass("S4: No double-bookings after priority bump");
+        else fail("S4: Double-booking detected after priority bump");
+        await clean(INV_OWR); await clean(INV_TRIP);
+      }
+
+      // S5: Rescue — auto-outsourced booking (no company) gets a van when one is free
+      {
+        const INV = "TEST-S5-RESCUE";
+        await clean(INV);
+        const [ins] = await db.insert(schema.bookings).values({
+          travelDate: "2099-12-31", fromLocation: "KL", toLocation: "Penang",
+          manualChange: 0, inHouseOrOutsourced: "O", outsourcedCompany: "",
+          tripType: "trip", invoiceNo: INV, vehicleCategory: "Van",
+        }).returning({ id: schema.bookings.id });
+        await recheckAllVans();
+        const [after] = await db.select({ vanId: schema.bookings.vanId, flag: schema.bookings.inHouseOrOutsourced }).from(schema.bookings).where(eq(schema.bookings.id, ins.id));
+        if (after?.vanId != null && after?.flag === "I") pass(`S5: Rescue — incorrectly-outsourced booking got van ${after.vanId}`);
+        else fail(`S5: Rescue failed — still outsourced (vanId=${after?.vanId}, flag=${after?.flag})`);
+        await clean(INV);
+      }
+
+      // S6: Multi-day invoice uses the same van across all 3 legs
+      {
+        const INV = "TEST-S6-MULTIDAY";
+        await clean(INV);
+        await db.insert(schema.bookings).values([
+          { travelDate: "2099-12-29", fromLocation: "KL", toLocation: "Penang", manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip", invoiceNo: INV, vehicleIndex: 1, vehicleCategory: "Van" },
+          { travelDate: "2099-12-30", fromLocation: "Penang", toLocation: "KL", manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip", invoiceNo: INV, vehicleIndex: 1, vehicleCategory: "Van" },
+          { travelDate: "2099-12-31", fromLocation: "KL", toLocation: "JB", manualChange: 0, inHouseOrOutsourced: "I", tripType: "trip", invoiceNo: INV, vehicleIndex: 1, vehicleCategory: "Van" },
+        ]);
+        await recheckAllVans();
+        const legs = await db.select({ vanId: schema.bookings.vanId }).from(schema.bookings).where(and(eq(schema.bookings.invoiceNo, INV), isNotNull(schema.bookings.vanId)));
+        const vanSet = new Set(legs.map((l) => l.vanId));
+        if (vanSet.size === 1) pass("S6: Multi-day invoice — all 3 legs on same van");
+        else if (vanSet.size === 0) fail("S6: Multi-day invoice — no legs assigned");
+        else fail(`S6: Multi-day invoice — legs split across ${vanSet.size} vans`);
+        await clean(INV);
       }
     }
   }

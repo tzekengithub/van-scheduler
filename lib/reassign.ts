@@ -52,6 +52,13 @@ export async function runReassign(
 
   // ── Fetch target bookings (Car trips are always outsourced — skip them) ──────
   const notCarTrip = or(isNull(bookings.vehicleCategory), ne(bookings.vehicleCategory, "Car"));
+  // Exclude confirmed outsources (inHouseOrOutsourced='O' with company filled in)
+  // — those are deliberate user decisions and must never be auto-assigned.
+  const notConfirmedOutsource = or(
+    ne(bookings.inHouseOrOutsourced, "O"),
+    isNull(bookings.outsourcedCompany),
+    eq(bookings.outsourcedCompany, ""),
+  );
   const raw =
     bookingIds && bookingIds.length > 0
       ? await db
@@ -61,7 +68,7 @@ export async function runReassign(
       : await db
           .select()
           .from(bookings)
-          .where(and(isNull(bookings.vanId), eq(bookings.manualChange, 0), notCarTrip));
+          .where(and(isNull(bookings.vanId), eq(bookings.manualChange, 0), notCarTrip, notConfirmedOutsource));
 
   // Sort: date ASC, then priority (trip first within each date), then invoice/vehicleIndex
   const targetBookings = [...raw].sort((a, b) => {
@@ -450,7 +457,7 @@ export async function runReassign(
             vanId: bumpedVanId,
             fromLocation: b.fromLocation ?? "",
             toLocation: b.toLocation ?? "",
-            is15PaxTrip: 1,
+            is15PaxTrip: b.is15PaxTrip ?? 0,
           });
 
           log(

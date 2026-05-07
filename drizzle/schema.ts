@@ -19,7 +19,7 @@ export const bookings = pgTable("bookings", {
   toLocation: text("to_location").notNull(),
   isRoundTrip: integer("is_round_trip").notNull().default(0),
   details: text("details"),
-  vanId: integer("van_id").references(() => vans.id),
+  vanId: integer("van_id").references(() => vans.id, { onDelete: "set null" }),
   manualChange: integer("manual_change").notNull().default(0),
   // Invoice fields
   invoiceNo: text("invoice_no").default(""),
@@ -53,6 +53,8 @@ export const bookings = pgTable("bookings", {
   index("idx_bookings_travel_date").on(table.travelDate),
   index("idx_bookings_van_date").on(table.vanId, table.travelDate),
   index("idx_bookings_invoice_no").on(table.invoiceNo),
+  index("idx_bookings_invoice_slot_date").on(table.invoiceNo, table.vehicleIndex, table.travelDate),
+  index("idx_bookings_manual_van").on(table.manualChange, table.vanId),
 ]);
 
 export type Van = typeof vans.$inferSelect;

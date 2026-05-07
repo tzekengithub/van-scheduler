@@ -882,38 +882,55 @@ async function enforceInvoiceVanConsistency(log: (msg: string) => void): Promise
 
     const dates = rows.map((r) => r.travelDate);
 
-// Detect same-day duplicates within this group: two bookings on the same date
-    // means the invoice genuinely needs 2 vans that day (multi-vehicle same-day).
-    // We cannot put them on the same van, so skip consolidation for this group.
-    const dateSet = new Set(dates);
-    if (dateSet.size < dates.length) {
+    // Detect same-day duplicates: dates with multiple bookings under the same
+    // (invoiceNo, vehicleIndex) need separate vans that day and cannot be
+    // consolidated. Exclude those dates and consolidate the remaining dates.
+    const dateCounts = new Map<string, number>();
+    for (const d of dates) dateCounts.set(d, (dateCounts.get(d) ?? 0) + 1);
+    const duplicateDates = new Set(
+      [...dateCounts.entries()].filter(([, n]) => n > 1).map(([d]) => d)
+    );
+
+    const consolidationRows = duplicateDates.size > 0
+      ? rows.filter((r) => !duplicateDates.has(r.travelDate))
+      : rows;
+
+    if (duplicateDates.size > 0) {
       log(
-        `[enforceInvoice] ${slotKey}: SKIP — group has ${dates.length - dateSet.size} same-day duplicate(s) (multi-vehicle same-day booking, cannot consolidate)`
+        `[enforceInvoice] ${slotKey}: ${duplicateDates.size} same-day duplicate date(s) (${[...duplicateDates].join(",")}) excluded — consolidating ${consolidationRows.length} remaining row(s)`
       );
-      continue;
+      if (consolidationRows.length <= 1) {
+        log(`[enforceInvoice] ${slotKey}: SKIP — no consolidatable rows remain`);
+        continue;
+      }
+      const filteredVanSet = new Set(consolidationRows.map((r) => r.vanId!));
+      if (filteredVanSet.size <= 1) {
+        log(`[enforceInvoice] ${slotKey}: non-duplicate dates already consistent ✓`);
+        continue;
+      }
     }
 
     // Detect mixed Alphard/non-Alphard legs within the same invoice slot.
     // A single van cannot serve both types. Instead of skipping the whole group,
     // split into two sub-groups (Alphard legs / regular legs) and consolidate each
     // independently. This preserves invoice continuity within each vehicle type.
-    const alphardCount = rows.filter((r) => (r.isAlphardTrip ?? 0) === 1).length;
-    const isMixedAlphard = alphardCount > 0 && alphardCount < rows.length;
+    const alphardCount = consolidationRows.filter((r) => (r.isAlphardTrip ?? 0) === 1).length;
+    const isMixedAlphard = alphardCount > 0 && alphardCount < consolidationRows.length;
 
     const subGroups: Array<{ label: string; subRows: typeof rows }> = isMixedAlphard
       ? [
-          { label: `${slotKey}[regular]`, subRows: rows.filter((r) => (r.isAlphardTrip ?? 0) === 0) },
-          { label: `${slotKey}[alphard]`, subRows: rows.filter((r) => (r.isAlphardTrip ?? 0) === 1) },
+          { label: `${slotKey}[regular]`, subRows: consolidationRows.filter((r) => (r.isAlphardTrip ?? 0) === 0) },
+          { label: `${slotKey}[alphard]`, subRows: consolidationRows.filter((r) => (r.isAlphardTrip ?? 0) === 1) },
         ]
-      : [{ label: slotKey, subRows: rows }];
+      : [{ label: slotKey, subRows: consolidationRows }];
 
     if (isMixedAlphard) {
       log(
-        `[enforceInvoice] ${slotKey}: mixed Alphard group — splitting into ${rows.length - alphardCount} regular + ${alphardCount} Alphard sub-group(s) for separate consolidation`
+        `[enforceInvoice] ${slotKey}: mixed Alphard group — splitting into ${consolidationRows.length - alphardCount} regular + ${alphardCount} Alphard sub-group(s) for separate consolidation`
       );
     } else {
       log(
-        `[enforceInvoice] ${slotKey}: ${rows.length} bookings split across vans [${[...vanSet].join(",")}] on dates [${dates.join(",")}]`
+        `[enforceInvoice] ${slotKey}: ${consolidationRows.length} row(s) to consolidate across vans [${[...vanSet].join(",")}]`
       );
     }
 

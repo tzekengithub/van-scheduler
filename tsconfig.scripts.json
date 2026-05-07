@@ -4,7 +4,8 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "esModuleInterop": true,
-    "outDir": ".ts-scripts"
+    "outDir": ".ts-scripts",
+    "baseUrl": "."
   },
   "include": ["scripts/**/*.ts", "lib/**/*.ts"]
 }
