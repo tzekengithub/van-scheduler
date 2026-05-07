@@ -73,68 +73,111 @@ export async function recheckAllVans(logger?: (msg: string) => void): Promise<vo
     return;
   }
 
-  // ── Step 2: Batch-reset — clear van + restore to in-house ───────────────────
-  log("Step 2/7 — resetting van assignments (clearing vanId, plate, driver)…");
-  await db
-    .update(bookings)
-    .set({
-      vanId: null,
-      vehiclePlate: null,
-      driverName: null,
-      driverContact: null,
-      inHouseOrOutsourced: "I",
+  // ── Snapshot all auto-managed bookings before the destructive reset ──────────
+  // neon-http has no interactive transactions, so we implement rollback manually:
+  // if any step after the reset throws, we restore these snapshot values.
+  const snapshot = await db
+    .select({
+      id: bookings.id,
+      vanId: bookings.vanId,
+      vehiclePlate: bookings.vehiclePlate,
+      driverName: bookings.driverName,
+      driverContact: bookings.driverContact,
+      inHouseOrOutsourced: bookings.inHouseOrOutsourced,
+      outsourcedCompany: bookings.outsourcedCompany,
+      outsourceReason: bookings.outsourceReason,
     })
-    .where(inArray(bookings.id, toResetIds));
-  log(`  cleared ${toResetIds.length} booking(s)`);
-
-  // ── Step 3: Reassign all cleared bookings ────────────────────────────────────
-  log("Step 3/7 — running van reassignment (priority: trip > one_way_ride)…");
-  const { assigned, conflicts } = await runReassign(undefined, log);
-  log(`  reassignment done — assigned=${assigned} conflicts=${conflicts}`);
-
-  // ── Step 4: Enforce same-invoice-same-van ────────────────────────────────────
-  log("Step 4/7 — enforcing same invoice = same van per (invoiceNo, vehicleIndex)…");
-  await enforceInvoiceVanConsistency(log);
-
-  // ── Step 5: Same-day same-invoice-slot conflicts → assign any free van ───────
-  log("Step 5/7 — assigning free vans to same-invoice/vehicleIndex/date conflicts…");
-  await assignFreeVanToSameDayConflicts(log);
-
-  // ── Step 6: HARD GUARANTEE — eliminate every double-booking ─────────────────
-  log("Step 6/7 — scanning for double-bookings (same van, same date)…");
-  await eliminateDoubleBookings(log);
-
-  // ── Step 6b: Rescue bookings incorrectly left unassigned ─────────────────────
-  // Handles cases where enforceInvoiceVanConsistency couldn't consolidate a
-  // SG/TH trip because a non-SG/TH booking occupied the only capable van.
-  // The rescue pass has SG/TH override bump logic to displace lower-priority occupants.
-  log("Step 6b/7 — rescuing any unassigned bookings that have a free or bumpable van…");
-  await rescueIncorrectOutsources(log);
-
-  // ── Step 7: Any still-unassigned → mark as outsourced ───────────────────────
-  log("Step 7/7 — marking any still-unassigned bookings as outsourced…");
-  const stillUnassigned = await db
-    .select({ id: bookings.id })
     .from(bookings)
-    .where(
-      and(
-        isNull(bookings.vanId),
-        eq(bookings.manualChange, 0),
-        eq(bookings.inHouseOrOutsourced, "I"),
-      )
-    );
+    .where(eq(bookings.manualChange, 0));
 
-  if (stillUnassigned.length > 0) {
+  try {
+    // ── Step 2: Batch-reset — clear van + restore to in-house ─────────────────
+    log("Step 2/7 — resetting van assignments (clearing vanId, plate, driver)…");
     await db
       .update(bookings)
-      .set({ inHouseOrOutsourced: "O", outsourceReason: "No van available after schedule check" })
-      .where(inArray(bookings.id, stillUnassigned.map((b) => b.id)));
-    log(`  marked ${stillUnassigned.length} booking(s) as outsourced (no van available)`);
-  } else {
-    log("  all bookings have a van assigned ✓");
-  }
+      .set({
+        vanId: null,
+        vehiclePlate: null,
+        driverName: null,
+        driverContact: null,
+        inHouseOrOutsourced: "I",
+      })
+      .where(inArray(bookings.id, toResetIds));
+    log(`  cleared ${toResetIds.length} booking(s)`);
 
-  log("━━━ RECHECK COMPLETE ━━━");
+    // ── Step 3: Reassign all cleared bookings ──────────────────────────────────
+    log("Step 3/7 — running van reassignment (priority: trip > one_way_ride)…");
+    const { assigned, conflicts } = await runReassign(undefined, log);
+    log(`  reassignment done — assigned=${assigned} conflicts=${conflicts}`);
+
+    // ── Step 4: Enforce same-invoice-same-van ──────────────────────────────────
+    log("Step 4/7 — enforcing same invoice = same van per (invoiceNo, vehicleIndex)…");
+    await enforceInvoiceVanConsistency(log);
+
+    // ── Step 5: Same-day same-invoice-slot conflicts → assign any free van ─────
+    log("Step 5/7 — assigning free vans to same-invoice/vehicleIndex/date conflicts…");
+    await assignFreeVanToSameDayConflicts(log);
+
+    // ── Step 6: HARD GUARANTEE — eliminate every double-booking ───────────────
+    log("Step 6/7 — scanning for double-bookings (same van, same date)…");
+    await eliminateDoubleBookings(log);
+
+    // ── Step 6b: Rescue bookings incorrectly left unassigned ──────────────────
+    log("Step 6b/7 — rescuing any unassigned bookings that have a free or bumpable van…");
+    await rescueIncorrectOutsources(log);
+
+    // ── Step 7: Any still-unassigned → mark as outsourced ─────────────────────
+    log("Step 7/7 — marking any still-unassigned bookings as outsourced…");
+    const stillUnassigned = await db
+      .select({ id: bookings.id })
+      .from(bookings)
+      .where(
+        and(
+          isNull(bookings.vanId),
+          eq(bookings.manualChange, 0),
+          eq(bookings.inHouseOrOutsourced, "I"),
+        )
+      );
+
+    if (stillUnassigned.length > 0) {
+      await db
+        .update(bookings)
+        .set({ inHouseOrOutsourced: "O", outsourceReason: "No van available after schedule check" })
+        .where(inArray(bookings.id, stillUnassigned.map((b) => b.id)));
+      log(`  marked ${stillUnassigned.length} booking(s) as outsourced (no van available)`);
+    } else {
+      log("  all bookings have a van assigned ✓");
+    }
+
+    log("━━━ RECHECK COMPLETE ━━━");
+  } catch (err) {
+    // Restore pre-recheck state so a partial failure doesn't leave the schedule corrupt
+    log(`[recheckAllVans] ERROR — rolling back ${snapshot.length} booking(s) to pre-recheck state…`);
+    try {
+      const ROLLBACK_CHUNK = 100;
+      for (let i = 0; i < snapshot.length; i += ROLLBACK_CHUNK) {
+        await Promise.all(
+          snapshot.slice(i, i + ROLLBACK_CHUNK).map((row) =>
+            db.update(bookings)
+              .set({
+                vanId: row.vanId,
+                vehiclePlate: row.vehiclePlate,
+                driverName: row.driverName,
+                driverContact: row.driverContact,
+                inHouseOrOutsourced: row.inHouseOrOutsourced,
+                outsourcedCompany: row.outsourcedCompany,
+                outsourceReason: row.outsourceReason,
+              })
+              .where(eq(bookings.id, row.id))
+          )
+        );
+      }
+      log("[recheckAllVans] Rollback complete — schedule restored to pre-recheck state");
+    } catch (rollbackErr) {
+      log(`[recheckAllVans] ROLLBACK FAILED: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)} — DB may be in partial state`);
+    }
+    throw err;
+  }
 }
 
 /**
