@@ -88,6 +88,13 @@ interface EditPanelState {
   vanLabel: string;
 }
 
+interface EditToastInfo {
+  changes: Array<{ field: string; from: string; to: string }>;
+  vanChanged: boolean;
+  prevVan: string | null;
+  newVan: string | null;
+}
+
 function isOutsourced(b: BookingRow): boolean {
   const v = b.inHouseOrOutsourced;
   return v === "outsourced" || v === "O";
@@ -129,6 +136,7 @@ export default function VanSchedulePage() {
   const [editPanel, setEditPanel] = useState<EditPanelState | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [editSaving, setEditSaving] = useState(false);
+  const [editToast, setEditToast] = useState<EditToastInfo | null>(null);
 
   // Action table state
   const [selectedVan, setSelectedVan] = useState<Record<number, string>>({});
@@ -142,25 +150,34 @@ export default function VanSchedulePage() {
   const [dragSourceDay, setDragSourceDay] = useState<number | null>(null);
   const [dragOverCell, setDragOverCell] = useState<{ plate: string; day: number } | null>(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (silent = false): Promise<BookingRow[] | null> => {
+    if (!silent) setLoading(true);
+    let newBookings: BookingRow[] | null = null;
     try {
       const monthName = MONTH_NAMES[viewMonth];
       const [bRes, vRes] = await Promise.all([
         fetch(`/api/bookings?month=${encodeURIComponent(monthName)}&year=${viewYear}`),
         fetch("/api/vans"),
       ]);
-      if (bRes.ok) setBookings(await bRes.json());
+      if (bRes.ok) { const d: BookingRow[] = await bRes.json(); newBookings = d; setBookings(d); }
       if (vRes.ok) setVans(await vRes.json());
       setSelectedVan({});
       setOutsourcingInput({});
       setActionDone({});
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
+    return newBookings;
   }, [viewMonth, viewYear]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Auto-dismiss edit toast
+  useEffect(() => {
+    if (!editToast) return;
+    const t = setTimeout(() => setEditToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [editToast]);
 
 
   function printSchedule() {
@@ -314,6 +331,36 @@ export default function VanSchedulePage() {
   async function handleEditSave() {
     if (!editPanel || !editForm) return;
     setEditSaving(true);
+
+    const orig = editPanel.booking;
+    const prevVanPlate = orig.vehiclePlate;
+
+    function fmtTrip(v: string | null) {
+      if (v === "one_way_ride") return "One-Way";
+      if (v === "round_trip") return "Round Trip";
+      if (v === "day_trip") return "Day Trip";
+      return "Trip";
+    }
+
+    const toastChanges: Array<{ field: string; from: string; to: string }> = [
+      { field: "Invoice #",      from: orig.invoiceNo ?? "",         to: editForm.invoiceNo },
+      { field: "Travel Date",    from: orig.travelDate ?? "",         to: editForm.travelDate },
+      { field: "From",           from: orig.fromLocation ?? "",       to: editForm.fromLocation },
+      { field: "To",             from: orig.toLocation ?? "",         to: editForm.toLocation },
+      { field: "Trip Type",      from: fmtTrip(orig.tripType),        to: fmtTrip(editForm.tripType) },
+      { field: "Details",        from: orig.details ?? "",            to: editForm.details },
+      { field: "Client",         from: orig.clientDetails ?? "",      to: editForm.clientDetails },
+      { field: "Pax",            from: String(orig.passengerCount ?? ""), to: editForm.passengerCount },
+      { field: "Amount",         from: orig.amount ?? "",             to: editForm.amount },
+      { field: "Paid",           from: (orig.paidStatus ?? "U") === "P" ? "Paid" : "Unpaid", to: editForm.paidStatus === "P" ? "Paid" : "Unpaid" },
+      { field: "Van Plate",      from: orig.vehiclePlate ?? "",       to: editForm.vehiclePlate },
+      { field: "Driver",         from: orig.driverName ?? "",         to: editForm.driverName },
+      { field: "I/O",            from: (orig.inHouseOrOutsourced === "O" || orig.inHouseOrOutsourced === "outsourced") ? "Outsourced" : "In-house", to: editForm.inHouseOrOutsourced === "O" ? "Outsourced" : "In-house" },
+      { field: "Outsourced Co.", from: orig.outsourcedCompany ?? "",  to: editForm.outsourcedCompany },
+      { field: "Tour Guide",     from: orig.tourGuide ?? "",          to: editForm.tourGuide },
+      { field: "Lock",           from: (orig.manualChange ?? 0) === 1 ? "Locked" : "Auto", to: editForm.manualChange ? "Locked" : "Auto" },
+    ].filter((ch) => ch.from.trim() !== ch.to.trim() && (ch.from || ch.to));
+
     try {
       const travelDateParts: { day?: string; month?: string; year?: string } = {};
       if (editForm.travelDate) {
@@ -355,7 +402,15 @@ export default function VanSchedulePage() {
       if (res.ok) {
         setEditPanel(null);
         setEditForm(null);
-        await fetchData();
+        const newBookings = await fetchData(true);
+        const updatedBooking = newBookings?.find((b) => b.id === orig.id);
+        const newVanPlate = updatedBooking?.vehiclePlate ?? null;
+        setEditToast({
+          changes: toastChanges,
+          vanChanged: prevVanPlate !== newVanPlate,
+          prevVan: prevVanPlate,
+          newVan: newVanPlate,
+        });
       } else {
         const data = await res.json().catch(() => ({}));
         alert(data.error ?? "Save failed");
@@ -539,7 +594,7 @@ export default function VanSchedulePage() {
         )
       );
       ids.forEach((id) => setActionDone((prev) => ({ ...prev, [id]: true })));
-      await fetchData();
+      await fetchData(true);
     } finally {
       ids.forEach((id) => setActionLoading((prev) => ({ ...prev, [id]: false })));
     }
@@ -567,7 +622,7 @@ export default function VanSchedulePage() {
       });
       if (res.ok) {
         setActionDone((prev) => ({ ...prev, [bookingId]: true }));
-        await fetchData();
+        await fetchData(true);
       }
     } finally {
       setActionLoading((prev) => ({ ...prev, [bookingId]: false }));
@@ -590,7 +645,7 @@ export default function VanSchedulePage() {
       });
       if (res.ok) {
         setActionDone((prev) => ({ ...prev, [bookingId]: true }));
-        await fetchData();
+        await fetchData(true);
       }
     } finally {
       setActionLoading((prev) => ({ ...prev, [bookingId]: false }));
@@ -647,7 +702,7 @@ export default function VanSchedulePage() {
       const failed = results.find((r) => !r.ok);
       if (failed) alert("Move failed");
     });
-    await fetchData();
+    await fetchData(true);
   }
 
   return (
@@ -1620,6 +1675,37 @@ export default function VanSchedulePage() {
           </>
         )}
       </main>
+
+      {/* Edit saved toast */}
+      {editToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-white border border-zinc-200 rounded-2xl shadow-2xl p-4" style={{ maxWidth: 340, width: "calc(100% - 48px)" }}>
+          <div className="flex justify-between items-start mb-2">
+            <span className="font-bold text-green-600 text-sm">✓ Edit Saved</span>
+            <button onClick={() => setEditToast(null)} className="text-zinc-400 hover:text-zinc-600 text-xl leading-none ml-2">×</button>
+          </div>
+          {editToast.changes.length > 0 && (
+            <div className="space-y-1 text-xs mb-3">
+              {editToast.changes.map((ch, i) => (
+                <div key={i} className="flex flex-wrap gap-x-1 items-baseline">
+                  <span className="text-zinc-500 font-medium shrink-0">{ch.field}:</span>
+                  <span className="text-zinc-400 line-through shrink-0">{ch.from}</span>
+                  <span className="text-zinc-400 shrink-0">→</span>
+                  <span className="text-zinc-800 font-semibold">{ch.to}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {(editToast.vanChanged || editToast.changes.length === 0) && (
+            <div className="pt-2 border-t border-zinc-100 text-xs">
+              {editToast.vanChanged ? (
+                <span className="text-blue-600 font-medium">Van: {editToast.prevVan ?? "none"} → {editToast.newVan ?? "none"}</span>
+              ) : (
+                <span className="text-zinc-400">No fields changed</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
