@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
-import { eq, and, isNull, isNotNull, inArray, asc, ne, or } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, inArray, notInArray, asc, ne, or } from "drizzle-orm";
 import { detectTripRequirements, isVanCapable } from "@/lib/van-assignment";
 
 /**
@@ -86,6 +86,13 @@ export async function runReassign(
 
   // Pre-load all currently assigned bookings — used for both bump candidates and
   // in-memory scheduling. Fetched once; never re-queried per booking.
+  // Exclude target booking IDs: they're being re-assigned so their current
+  // van slots must be vacated, not treated as pre-occupied.
+  const existingAssignedWhere =
+    bookingIds && bookingIds.length > 0
+      ? and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0), notInArray(bookings.id, bookingIds))
+      : and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0));
+
   const existingAssigned = await db
     .select({
       id: bookings.id,
@@ -100,7 +107,7 @@ export async function runReassign(
       isAlphardTrip: bookings.isAlphardTrip,
     })
     .from(bookings)
-    .where(and(isNotNull(bookings.vanId), eq(bookings.manualChange, 0)));
+    .where(existingAssignedWhere);
 
   type BumpEntry = { id: number; vanId: number; fromLocation: string; toLocation: string; is15PaxTrip: number };
   const bumpIndex = new Map<string, Array<BumpEntry>>();
