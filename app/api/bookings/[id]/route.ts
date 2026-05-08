@@ -26,6 +26,7 @@ const BookingPatchSchema = z.object({
   tripType: z.enum(["one_way_ride", "round_trip", "day_trip", "trip", "tpri"]).optional(),
   vehicleCategory: z.enum(["Van", "Alphard", "Car"]).optional(),
   isAlphardTrip: z.union([z.literal(0), z.literal(1)]).optional(),
+  is15PaxTrip: z.union([z.literal(0), z.literal(1)]).optional(),
   tourGuide: z.string().max(100).optional(),
   vehicleIndex: z.number().int().min(1).optional(),
   numberOfVehicles: z.number().int().min(1).optional(),

@@ -54,6 +54,7 @@ interface BookingRow {
   year: string | null;
   tripType: TripType | null;
   isAlphardTrip: number | null;
+  is15PaxTrip: number | null;
   tourGuide: string | null;
   vehicleIndex: number | null;
   numberOfVehicles: number | null;
@@ -642,11 +643,13 @@ const EDIT_FIELD_LABELS: Record<string, string> = {
   overtime: "Overtime", tourGuide: "Tour Guide", vehiclePlate: "Van Plate",
   driverName: "Driver", driverContact: "Driver Contact",
   outsourcedCompany: "Outsourced Co.", details: "Remarks",
+  is15PaxTrip: "15-Pax",
 };
 
 function formatEditFieldValue(field: string, val: unknown): string {
   if (field === "tripType") return tripTypeLabel(val as TripType | null);
   if (field === "paidStatus") return val === "P" ? "Paid" : val === "U" ? "Unpaid" : String(val ?? "—");
+  if (field === "is15PaxTrip") return val === 1 ? "15-Pax" : "Standard";
   return String(val ?? "") || "—";
 }
 
@@ -900,7 +903,7 @@ export default function DailyJobsPage() {
     }
 
     const needsReassign = "fromLocation" in edits || "toLocation" in edits ||
-      "tripType" in edits || "vehicleCategory" in edits || "isAlphardTrip" in edits;
+      "tripType" in edits || "vehicleCategory" in edits || "isAlphardTrip" in edits || "is15PaxTrip" in edits;
 
     const key = `${row.id}-confirm`;
     setCellStates((prev) => ({ ...prev, [key]: "saving" }));
@@ -1148,6 +1151,25 @@ export default function DailyJobsPage() {
                       );
                     })()}
                     <span className="text-zinc-500 text-[10px]">{tripTypeLabel(row.tripType)}</span>
+                    {(() => {
+                      const pending15 = pendingEdits[row.id]?.is15PaxTrip as number | undefined;
+                      const effective15 = pending15 !== undefined ? pending15 : (row.is15PaxTrip ?? 0);
+                      const isDirty15 = pending15 !== undefined && pending15 !== (row.is15PaxTrip ?? 0);
+                      return (
+                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold mt-0.5 ${isDirty15 ? "border-amber-400" : "border-zinc-200"}`}>
+                          {([0, 1] as const).map((val) => (
+                            <button key={val} type="button"
+                              onClick={() => { if (effective15 !== val) setPending(row.id, "is15PaxTrip", val); }}
+                              className={`px-2 py-1 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
+                                effective15 === val
+                                  ? val === 1 ? "bg-orange-500 text-white" : "bg-white text-zinc-500"
+                                  : isDirty15 ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
+                              }`}
+                            >{val === 1 ? "15-Pax" : "Std"}</button>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </td>
                 {/* Van Plate */}

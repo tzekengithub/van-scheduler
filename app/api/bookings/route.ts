@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
         numberOfVehicles: bookings.numberOfVehicles,
         vehicleCategory: bookings.vehicleCategory,
         isAlphardTrip: bookings.isAlphardTrip,
+        is15PaxTrip: bookings.is15PaxTrip,
       })
       .from(bookings)
       .leftJoin(vans, eq(bookings.vanId, vans.id))

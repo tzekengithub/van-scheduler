@@ -49,6 +49,7 @@ interface BookingRow {
   tourGuide: string | null;
   vehicleCategory: string | null;
   isAlphardTrip: number | null;
+  is15PaxTrip: number | null;
 }
 
 interface EditForm {
@@ -69,6 +70,7 @@ interface EditForm {
   driverContact: string;
   vehicleCategory: string;
   isAlphardTrip: number;
+  is15PaxTrip: number;
   manualChange: boolean;
   inHouseOrOutsourced: string;
   outsourcedCompany: string;
@@ -324,6 +326,7 @@ export default function VanSchedulePage() {
       driverContact: booking.driverContact ?? "",
       vehicleCategory: booking.vehicleCategory ?? "Van",
       isAlphardTrip: booking.isAlphardTrip ?? 0,
+      is15PaxTrip: booking.is15PaxTrip ?? 0,
       manualChange: (booking.manualChange ?? 0) === 1,
       inHouseOrOutsourced: booking.inHouseOrOutsourced ?? "I",
       outsourcedCompany: booking.outsourcedCompany ?? "",
@@ -360,6 +363,7 @@ export default function VanSchedulePage() {
       { field: "Amount",         from: orig.amount ?? "",             to: editForm.amount },
       { field: "Paid",           from: (orig.paidStatus ?? "U") === "P" ? "Paid" : "Unpaid", to: editForm.paidStatus === "P" ? "Paid" : "Unpaid" },
       { field: "Vehicle Type",   from: orig.vehicleCategory ?? "Van", to: editForm.vehicleCategory },
+      { field: "15-Pax",         from: (orig.is15PaxTrip ?? 0) === 1 ? "15-Pax" : "Standard", to: editForm.is15PaxTrip === 1 ? "15-Pax" : "Standard" },
       { field: "Van Plate",      from: orig.vehiclePlate ?? "",       to: editForm.vehiclePlate },
       { field: "Driver",         from: orig.driverName ?? "",         to: editForm.driverName },
       { field: "I/O",            from: (orig.inHouseOrOutsourced === "O" || orig.inHouseOrOutsourced === "outsourced") ? "Outsourced" : "In-house", to: editForm.inHouseOrOutsourced === "O" ? "Outsourced" : "In-house" },
@@ -399,6 +403,7 @@ export default function VanSchedulePage() {
           driverContact: editForm.driverContact,
           vehicleCategory: editForm.vehicleCategory,
           isAlphardTrip: editForm.isAlphardTrip,
+          is15PaxTrip: editForm.is15PaxTrip,
           manualChange: editForm.manualChange ? 1 : 0,
           inHouseOrOutsourced: editForm.inHouseOrOutsourced,
           outsourcedCompany: editForm.outsourcedCompany,
@@ -415,6 +420,7 @@ export default function VanSchedulePage() {
         const needsReassign = !editForm.manualChange && (
           (orig.vehicleCategory ?? "Van") !== editForm.vehicleCategory ||
           (orig.isAlphardTrip ?? 0) !== editForm.isAlphardTrip ||
+          (orig.is15PaxTrip ?? 0) !== editForm.is15PaxTrip ||
           orig.tripType !== editForm.tripType ||
           orig.travelDate !== editForm.travelDate
         );
@@ -1005,6 +1011,22 @@ export default function VanSchedulePage() {
                       >{vt}</button>
                     );
                   })}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">15-Pax Requirement</label>
+                <div className="inline-flex rounded border overflow-hidden text-xs font-semibold border-zinc-200">
+                  {([0, 1] as const).map((val) => (
+                    <button key={val} type="button"
+                      onClick={() => setEditForm((f) => f && { ...f, is15PaxTrip: val })}
+                      className={`px-3 py-1.5 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
+                        editForm.is15PaxTrip === val
+                          ? val === 1 ? "bg-orange-500 text-white" : "bg-white text-zinc-600"
+                          : "bg-white text-zinc-400 hover:text-zinc-700"
+                      }`}
+                    >{val === 1 ? "15-Pax" : "Standard"}</button>
+                  ))}
                 </div>
               </div>
 
