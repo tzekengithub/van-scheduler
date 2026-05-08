@@ -833,6 +833,9 @@ export default function DailyJobsPage() {
     if ("toLocation" in edits && (edits.toLocation as string) !== "" && (row.toLocation ?? "") === "" && row.tripType === "day_trip") {
       updates.tripType = "trip";
     }
+    if (("fromLocation" in edits || "toLocation" in edits) && !("details" in edits)) {
+      updates.details = to ? `${from} -> ${to}` : from;
+    }
     if ("clientDetails" in updates) {
       const newName = String(updates.clientDetails ?? "").trim();
       const existingLines = (row.clientDetails ?? "").split("\n").map((l) => l.trim()).filter(Boolean);

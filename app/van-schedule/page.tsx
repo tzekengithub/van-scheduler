@@ -730,13 +730,15 @@ export default function VanSchedulePage() {
                     const newFrom = e.target.value;
                     setEditForm((f) => {
                       if (!f) return f;
-                      const oldRoute = [f.fromLocation, f.toLocation].filter(Boolean).join(" - ");
-                      const detailsIsRoute = f.details.trim().toLowerCase() === oldRoute.trim().toLowerCase()
-                        || (!f.toLocation && f.details.trim().toLowerCase() === f.fromLocation.trim().toLowerCase());
+                      const d = f.details.trim().toLowerCase();
+                      const detailsIsRoute =
+                        d === `${f.fromLocation} -> ${f.toLocation}`.trim().toLowerCase() ||
+                        d === `${f.fromLocation} - ${f.toLocation}`.trim().toLowerCase() ||
+                        (!f.toLocation && d === f.fromLocation.trim().toLowerCase());
                       return {
                         ...f,
                         fromLocation: newFrom,
-                        details: detailsIsRoute ? [newFrom, f.toLocation].filter(Boolean).join(" - ") : f.details,
+                        details: detailsIsRoute ? (f.toLocation ? `${newFrom} -> ${f.toLocation}` : newFrom) : f.details,
                       };
                     });
                   }}
@@ -752,13 +754,15 @@ export default function VanSchedulePage() {
                     const newTo = e.target.value;
                     setEditForm((f) => {
                       if (!f) return f;
-                      const oldRoute = [f.fromLocation, f.toLocation].filter(Boolean).join(" - ");
-                      const detailsIsRoute = f.details.trim().toLowerCase() === oldRoute.trim().toLowerCase()
-                        || (!f.toLocation && f.details.trim().toLowerCase() === f.fromLocation.trim().toLowerCase());
+                      const d = f.details.trim().toLowerCase();
+                      const detailsIsRoute =
+                        d === `${f.fromLocation} -> ${f.toLocation}`.trim().toLowerCase() ||
+                        d === `${f.fromLocation} - ${f.toLocation}`.trim().toLowerCase() ||
+                        (!f.toLocation && d === f.fromLocation.trim().toLowerCase());
                       return {
                         ...f,
                         toLocation: newTo,
-                        details: detailsIsRoute ? [f.fromLocation, newTo].filter(Boolean).join(" - ") : f.details,
+                        details: detailsIsRoute ? (newTo ? `${f.fromLocation} -> ${newTo}` : f.fromLocation) : f.details,
                       };
                     });
                   }}
