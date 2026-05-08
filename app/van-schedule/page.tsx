@@ -93,6 +93,7 @@ interface EditPanelState {
 
 interface EditToastInfo {
   changes: Array<{ field: string; from: string; to: string }>;
+  rescheduled: boolean;
   vanChanged: boolean;
   prevVan: string | null;
   newVan: string | null;
@@ -410,11 +411,38 @@ export default function VanSchedulePage() {
       if (res.ok) {
         setEditPanel(null);
         setEditForm(null);
-        const newBookings = await fetchData(true);
-        const updatedBooking = newBookings?.find((b) => b.id === orig.id);
+
+        const needsReassign = !editForm.manualChange && (
+          (orig.vehicleCategory ?? "Van") !== editForm.vehicleCategory ||
+          (orig.isAlphardTrip ?? 0) !== editForm.isAlphardTrip ||
+          orig.tripType !== editForm.tripType ||
+          orig.travelDate !== editForm.travelDate
+        );
+
+        let finalBookings = await fetchData(true);
+
+        if (needsReassign) {
+          let siblingIds: number[] = [];
+          if (orig.invoiceNo) {
+            const sibRes = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(orig.invoiceNo)}`);
+            if (sibRes.ok) {
+              const siblings: BookingRow[] = await sibRes.json();
+              siblingIds = siblings.map((s) => s.id).filter((sid) => sid !== orig.id);
+            }
+          }
+          await fetch(`/api/bookings/${orig.id}/reassign`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ siblingIds }),
+          });
+          finalBookings = await fetchData(true);
+        }
+
+        const updatedBooking = finalBookings?.find((b) => b.id === orig.id);
         const newVanPlate = updatedBooking?.vehiclePlate ?? null;
         setEditToast({
           changes: toastChanges,
+          rescheduled: needsReassign,
           vanChanged: prevVanPlate !== newVanPlate,
           prevVan: prevVanPlate,
           newVan: newVanPlate,
@@ -1737,15 +1765,17 @@ export default function VanSchedulePage() {
               ))}
             </div>
           )}
-          {(editToast.vanChanged || editToast.changes.length === 0) && (
-            <div className="pt-2 border-t border-zinc-100 text-xs">
-              {editToast.vanChanged ? (
-                <span className="text-blue-600 font-medium">Van: {editToast.prevVan ?? "none"} → {editToast.newVan ?? "none"}</span>
+          <div className="pt-2 border-t border-zinc-100 text-xs">
+            {editToast.rescheduled ? (
+              editToast.vanChanged ? (
+                <span className="text-blue-600 font-medium">🔄 Reassigned: {editToast.prevVan ?? "no van"} → {editToast.newVan ?? "no van"}</span>
               ) : (
-                <span className="text-zinc-400">No fields changed</span>
-              )}
-            </div>
-          )}
+                <span className="text-zinc-500">🔄 Reassigned — kept {editToast.newVan ?? "same van"}</span>
+              )
+            ) : (
+              <span className="text-zinc-400">No reassignment triggered</span>
+            )}
+          </div>
         </div>
       )}
     </div>
