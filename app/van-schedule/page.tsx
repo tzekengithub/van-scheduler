@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 const MONTH_NAMES = [
@@ -132,10 +133,22 @@ function cellBg(bks: BookingRow[], isNoVan: boolean, isPast = false): string {
   return "bg-blue-100 border-blue-300 text-blue-900";
 }
 
-export default function VanSchedulePage() {
+function VanScheduleContent() {
   const today = new Date();
-  const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const initMonth = (() => {
+    const m = parseInt(searchParams.get("month") ?? "", 10);
+    return m >= 0 && m <= 11 ? m : today.getMonth();
+  })();
+  const initYear = (() => {
+    const y = parseInt(searchParams.get("year") ?? "", 10);
+    return y >= 2000 && y <= 2100 ? y : today.getFullYear();
+  })();
+
+  const [viewMonth, setViewMonth] = useState(initMonth);
+  const [viewYear, setViewYear] = useState(initYear);
   const [vans, setVans] = useState<Van[]>([]);
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,6 +190,21 @@ export default function VanSchedulePage() {
   }, [viewMonth, viewYear]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Sync month/year to URL params so F5 restores the same view
+  useEffect(() => {
+    const params = new URLSearchParams();
+    params.set("month", String(viewMonth));
+    params.set("year", String(viewYear));
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [viewMonth, viewYear, router]);
+
+  // Auto-poll every 30s — silent refresh so the grid stays up to date
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    pollRef.current = setInterval(() => { fetchData(true); }, 30_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [fetchData]);
 
   // Auto-dismiss edit toast
   useEffect(() => {
@@ -1789,5 +1817,13 @@ export default function VanSchedulePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function VanSchedulePage() {
+  return (
+    <Suspense>
+      <VanScheduleContent />
+    </Suspense>
   );
 }
