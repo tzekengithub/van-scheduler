@@ -48,6 +48,7 @@ interface BookingRow {
   introducer: string | null;
   tourGuide: string | null;
   vehicleCategory: string | null;
+  isAlphardTrip: number | null;
 }
 
 interface EditForm {
@@ -66,6 +67,8 @@ interface EditForm {
   vehiclePlate: string;
   driverName: string;
   driverContact: string;
+  vehicleCategory: string;
+  isAlphardTrip: number;
   manualChange: boolean;
   inHouseOrOutsourced: string;
   outsourcedCompany: string;
@@ -318,6 +321,8 @@ export default function VanSchedulePage() {
       vehiclePlate: booking.vehiclePlate ?? "",
       driverName: booking.driverName ?? "",
       driverContact: booking.driverContact ?? "",
+      vehicleCategory: booking.vehicleCategory ?? "Van",
+      isAlphardTrip: booking.isAlphardTrip ?? 0,
       manualChange: (booking.manualChange ?? 0) === 1,
       inHouseOrOutsourced: booking.inHouseOrOutsourced ?? "I",
       outsourcedCompany: booking.outsourcedCompany ?? "",
@@ -353,6 +358,7 @@ export default function VanSchedulePage() {
       { field: "Pax",            from: String(orig.passengerCount ?? ""), to: editForm.passengerCount },
       { field: "Amount",         from: orig.amount ?? "",             to: editForm.amount },
       { field: "Paid",           from: (orig.paidStatus ?? "U") === "P" ? "Paid" : "Unpaid", to: editForm.paidStatus === "P" ? "Paid" : "Unpaid" },
+      { field: "Vehicle Type",   from: orig.vehicleCategory ?? "Van", to: editForm.vehicleCategory },
       { field: "Van Plate",      from: orig.vehiclePlate ?? "",       to: editForm.vehiclePlate },
       { field: "Driver",         from: orig.driverName ?? "",         to: editForm.driverName },
       { field: "I/O",            from: (orig.inHouseOrOutsourced === "O" || orig.inHouseOrOutsourced === "outsourced") ? "Outsourced" : "In-house", to: editForm.inHouseOrOutsourced === "O" ? "Outsourced" : "In-house" },
@@ -390,6 +396,8 @@ export default function VanSchedulePage() {
           vehiclePlate: editForm.vehiclePlate,
           driverName: editForm.driverName,
           driverContact: editForm.driverContact,
+          vehicleCategory: editForm.vehicleCategory,
+          isAlphardTrip: editForm.isAlphardTrip,
           manualChange: editForm.manualChange ? 1 : 0,
           inHouseOrOutsourced: editForm.inHouseOrOutsourced,
           outsourcedCompany: editForm.outsourcedCompany,
@@ -826,16 +834,25 @@ export default function VanSchedulePage() {
 
               <div className="space-y-1">
                 <label className="block text-zinc-500 font-medium">Trip Type</label>
-                <select
-                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
-                  value={editForm.tripType}
-                  onChange={(e) => setEditForm((f) => f && { ...f, tripType: e.target.value })}
-                >
-                  <option value="trip">🟠 Trip</option>
-                  <option value="one_way_ride">🔵 One Way</option>
-                  <option value="round_trip">🟢 Round Trip</option>
-                  <option value="day_trip">🟡 Day Trip</option>
-                </select>
+                <div className="flex flex-wrap gap-1">
+                  {(["trip", "one_way_ride", "round_trip", "day_trip"] as const).map((t) => {
+                    const labels = { trip: "Trip", one_way_ride: "1-Way", round_trip: "Round", day_trip: "Day" };
+                    const active = editForm.tripType === t;
+                    return (
+                      <button key={t} type="button"
+                        onClick={() => setEditForm((f) => f && { ...f, tripType: t })}
+                        className={`px-2 py-1 rounded text-[11px] font-semibold border transition-colors ${
+                          active
+                            ? t === "one_way_ride" ? "bg-blue-500 text-white border-blue-500"
+                            : t === "round_trip"   ? "bg-green-500 text-white border-green-500"
+                            : t === "day_trip"     ? "bg-yellow-500 text-white border-yellow-500"
+                            :                        "bg-orange-500 text-white border-orange-500"
+                            : "bg-white text-zinc-400 border-zinc-200 hover:border-zinc-400 hover:text-zinc-700"
+                        }`}
+                      >{labels[t]}</button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="space-y-1 col-span-3">
@@ -897,14 +914,16 @@ export default function VanSchedulePage() {
 
               <div className="space-y-1">
                 <label className="block text-zinc-500 font-medium">Payment Status</label>
-                <select
-                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
-                  value={editForm.paidStatus}
-                  onChange={(e) => setEditForm((f) => f && { ...f, paidStatus: e.target.value })}
-                >
-                  <option value="U">❌ Unpaid</option>
-                  <option value="P">✅ Paid</option>
-                </select>
+                <div className="inline-flex rounded border overflow-hidden text-xs font-semibold border-zinc-300">
+                  <button type="button"
+                    onClick={() => setEditForm((f) => f && { ...f, paidStatus: "U" })}
+                    className={`px-3 py-1.5 leading-none transition-colors ${editForm.paidStatus === "U" ? "bg-red-500 text-white" : "bg-white text-zinc-500 hover:bg-zinc-100"}`}
+                  >❌ Unpaid</button>
+                  <button type="button"
+                    onClick={() => setEditForm((f) => f && { ...f, paidStatus: "P" })}
+                    className={`px-3 py-1.5 leading-none border-l border-zinc-300 transition-colors ${editForm.paidStatus === "P" ? "bg-green-500 text-white" : "bg-white text-zinc-500 hover:bg-zinc-100"}`}
+                  >✅ Paid</button>
+                </div>
               </div>
 
               {/* ── Vehicle & Driver ── */}
@@ -938,6 +957,27 @@ export default function VanSchedulePage() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-zinc-500 font-medium">Vehicle Type</label>
+                <div className="inline-flex rounded border overflow-hidden text-xs font-semibold border-zinc-200">
+                  {(["Van", "Alphard", "Car"] as const).map((vt) => {
+                    const currentType = editForm.isAlphardTrip === 1 || editForm.vehicleCategory === "Alphard" ? "Alphard" : editForm.vehicleCategory === "Car" ? "Car" : "Van";
+                    return (
+                      <button key={vt} type="button"
+                        onClick={() => setEditForm((f) => f && { ...f, vehicleCategory: vt, isAlphardTrip: vt === "Alphard" ? 1 : 0 })}
+                        className={`px-3 py-1.5 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
+                          currentType === vt
+                            ? vt === "Alphard" ? "bg-purple-600 text-white"
+                            : vt === "Car"     ? "bg-zinc-600 text-white"
+                            :                    "bg-blue-600 text-white"
+                            : "bg-white text-zinc-400 hover:text-zinc-700"
+                        }`}
+                      >{vt}</button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -978,14 +1018,16 @@ export default function VanSchedulePage() {
 
               <div className="space-y-1">
                 <label className="block text-zinc-500 font-medium">In-house / Outsourced</label>
-                <select
-                  className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
-                  value={editForm.inHouseOrOutsourced}
-                  onChange={(e) => setEditForm((f) => f && { ...f, inHouseOrOutsourced: e.target.value })}
-                >
-                  <option value="I">🏠 In-house</option>
-                  <option value="O">🔄 Outsourced</option>
-                </select>
+                <div className="inline-flex rounded border overflow-hidden text-xs font-semibold border-zinc-300">
+                  <button type="button"
+                    onClick={() => setEditForm((f) => f && { ...f, inHouseOrOutsourced: "I" })}
+                    className={`px-3 py-1.5 leading-none transition-colors ${editForm.inHouseOrOutsourced === "I" ? "bg-blue-600 text-white" : "bg-white text-zinc-500 hover:bg-zinc-100"}`}
+                  >🏠 In-house</button>
+                  <button type="button"
+                    onClick={() => setEditForm((f) => f && { ...f, inHouseOrOutsourced: "O" })}
+                    className={`px-3 py-1.5 leading-none border-l border-zinc-300 transition-colors ${editForm.inHouseOrOutsourced === "O" ? "bg-orange-500 text-white" : "bg-white text-zinc-500 hover:bg-zinc-100"}`}
+                  >🔄 Outsourced</button>
+                </div>
               </div>
 
               <div className="space-y-1">
