@@ -846,6 +846,17 @@ async function rescueIncorrectOutsources(log: (msg: string) => void): Promise<vo
 
 
 /**
+ * Public wrapper — run only the invoice-consistency step without a full recheck.
+ * Called by the single-booking reassign route after runReassign when sibling IDs
+ * are present, so multi-day invoices with mixed vehicle requirements (e.g. one
+ * 15-pax leg among regular legs) end up on the same van.
+ */
+export async function runInvoiceConsistency(logger?: (msg: string) => void): Promise<void> {
+  const log = (msg: string) => { console.log(msg); logger?.(msg); };
+  await enforceInvoiceVanConsistency(log);
+}
+
+/**
  * Sweep all auto-managed bookings and ensure that every (invoiceNo, vehicleIndex)
  * group uses the SAME van across all its travel dates.
  *

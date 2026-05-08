@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { bookings, vans } from "@/drizzle/schema";
 import { eq } from "drizzle-orm";
 import { runReassign } from "@/lib/reassign";
+import { runInvoiceConsistency } from "@/lib/recheck";
 
 export const runtime = "nodejs";
 
@@ -39,6 +40,12 @@ export async function POST(
     } catch { /* no body or not JSON — fine */ }
 
     await runReassign(ids);
+
+    // When sibling IDs are involved, enforce invoice continuity so all legs of the
+    // same invoice end up on the same van (e.g. one 15-pax leg among regular legs).
+    if (ids.length > 1) {
+      await runInvoiceConsistency();
+    }
 
     // Return the updated row with the same JOIN shape as GET /api/bookings
     const [updated] = await db
