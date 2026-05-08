@@ -726,7 +726,20 @@ export default function VanSchedulePage() {
                 <input
                   className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
                   value={editForm.fromLocation}
-                  onChange={(e) => setEditForm((f) => f && { ...f, fromLocation: e.target.value })}
+                  onChange={(e) => {
+                    const newFrom = e.target.value;
+                    setEditForm((f) => {
+                      if (!f) return f;
+                      const oldRoute = [f.fromLocation, f.toLocation].filter(Boolean).join(" - ");
+                      const detailsIsRoute = f.details.trim().toLowerCase() === oldRoute.trim().toLowerCase()
+                        || (!f.toLocation && f.details.trim().toLowerCase() === f.fromLocation.trim().toLowerCase());
+                      return {
+                        ...f,
+                        fromLocation: newFrom,
+                        details: detailsIsRoute ? [newFrom, f.toLocation].filter(Boolean).join(" - ") : f.details,
+                      };
+                    });
+                  }}
                 />
               </div>
 
@@ -735,7 +748,20 @@ export default function VanSchedulePage() {
                 <input
                   className="w-full border border-zinc-300 rounded-md px-2 py-1.5 text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 text-xs"
                   value={editForm.toLocation}
-                  onChange={(e) => setEditForm((f) => f && { ...f, toLocation: e.target.value })}
+                  onChange={(e) => {
+                    const newTo = e.target.value;
+                    setEditForm((f) => {
+                      if (!f) return f;
+                      const oldRoute = [f.fromLocation, f.toLocation].filter(Boolean).join(" - ");
+                      const detailsIsRoute = f.details.trim().toLowerCase() === oldRoute.trim().toLowerCase()
+                        || (!f.toLocation && f.details.trim().toLowerCase() === f.fromLocation.trim().toLowerCase());
+                      return {
+                        ...f,
+                        toLocation: newTo,
+                        details: detailsIsRoute ? [f.fromLocation, newTo].filter(Boolean).join(" - ") : f.details,
+                      };
+                    });
+                  }}
                 />
               </div>
 
