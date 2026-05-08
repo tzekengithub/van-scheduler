@@ -686,44 +686,43 @@ export default function AllJobsPage() {
                 <td className="px-3 py-2 min-w-[140px]">
                   <div className="flex flex-col gap-1">
                     {(() => {
-                      const vehicleTypes = ["Van", "Alphard", "Car"] as const;
-                      type VehicleType = typeof vehicleTypes[number];
                       const pendingCat = pendingEdits[row.id]?.vehicleCategory as string | undefined;
                       const pendingAlph = pendingEdits[row.id]?.isAlphardTrip as number | undefined;
                       const pending15 = pendingEdits[row.id]?.is15PaxTrip as number | undefined;
                       const effectiveCat = pendingCat ?? row.vehicleCategory;
                       const effectiveAlph = pendingAlph ?? row.isAlphardTrip;
                       const effective15 = pending15 !== undefined ? pending15 : (row.is15PaxTrip ?? 0);
-                      const currentType: VehicleType =
-                        effectiveAlph === 1 || effectiveCat === "Alphard" ? "Alphard" :
-                        effectiveCat === "Car" ? "Car" : "Van";
-                      const isDirtyType = pendingCat !== undefined && pendingCat !== (row.vehicleCategory ?? "Van");
-                      const isDirty15 = pending15 !== undefined && pending15 !== (row.is15PaxTrip ?? 0);
-                      const combinedDirty = isDirtyType || isDirty15;
+                      const sel = effectiveAlph === 1 || effectiveCat === "Alphard" ? "Alphard"
+                        : effectiveCat === "Car" ? "Car"
+                        : effective15 === 1 ? "15-Pax"
+                        : "Van";
+                      const origSel = (row.isAlphardTrip === 1 || row.vehicleCategory === "Alphard") ? "Alphard"
+                        : row.vehicleCategory === "Car" ? "Car"
+                        : (row.is15PaxTrip ?? 0) === 1 ? "15-Pax"
+                        : "Van";
+                      const isDirty = sel !== origSel;
+                      type Opt = { label: string; cat: string; alph: number; pax15: number; active: string };
+                      const opts: Opt[] = [
+                        { label: "Van",    cat: "Van",    alph: 0, pax15: 0, active: "bg-blue-600 text-white"   },
+                        { label: "Alphard",cat: "Alphard",alph: 1, pax15: 0, active: "bg-purple-600 text-white" },
+                        { label: "Car",    cat: "Car",    alph: 0, pax15: 0, active: "bg-zinc-600 text-white"    },
+                        { label: "15-Pax", cat: "Van",    alph: 0, pax15: 1, active: "bg-orange-500 text-white"  },
+                      ];
                       return (
-                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold ${combinedDirty ? "border-amber-400" : "border-zinc-200"}`}>
-                          {vehicleTypes.map((vt) => (
-                            <button
-                              key={vt}
-                              type="button"
+                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold ${isDirty ? "border-amber-400" : "border-zinc-200"}`}>
+                          {opts.map((opt) => (
+                            <button key={opt.label} type="button"
                               onClick={() => {
-                                if (currentType === vt) return;
-                                setPending(row.id, "vehicleCategory", vt);
-                                setPending(row.id, "isAlphardTrip", vt === "Alphard" ? 1 : 0);
+                                if (sel === opt.label) return;
+                                setPending(row.id, "vehicleCategory", opt.cat);
+                                setPending(row.id, "isAlphardTrip", opt.alph);
+                                setPending(row.id, "is15PaxTrip", opt.pax15);
                               }}
                               className={`px-2 py-1 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
-                                currentType === vt
-                                  ? vt === "Alphard" ? "bg-purple-600 text-white" : vt === "Car" ? "bg-zinc-600 text-white" : "bg-blue-600 text-white"
-                                  : combinedDirty ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
+                                sel === opt.label ? opt.active : isDirty ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
                               }`}
-                            >{vt}</button>
+                            >{opt.label}</button>
                           ))}
-                          <button type="button"
-                            onClick={() => setPending(row.id, "is15PaxTrip", effective15 === 1 ? 0 : 1)}
-                            className={`px-2 py-1 leading-none transition-colors border-l border-zinc-200 ${
-                              effective15 === 1 ? "bg-orange-500 text-white" : combinedDirty ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
-                            }`}
-                          >15-Pax</button>
                         </div>
                       );
                     })()}

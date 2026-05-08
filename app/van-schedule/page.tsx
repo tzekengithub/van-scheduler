@@ -995,29 +995,27 @@ export default function VanSchedulePage() {
 
               <div className="space-y-1">
                 <label className="block text-zinc-500 font-medium">Vehicle Type</label>
-                <div className="inline-flex rounded border overflow-hidden text-xs font-semibold border-zinc-200">
-                  {(["Van", "Alphard", "Car"] as const).map((vt) => {
-                    const currentType = editForm.isAlphardTrip === 1 || editForm.vehicleCategory === "Alphard" ? "Alphard" : editForm.vehicleCategory === "Car" ? "Car" : "Van";
-                    return (
-                      <button key={vt} type="button"
-                        onClick={() => setEditForm((f) => f && { ...f, vehicleCategory: vt, isAlphardTrip: vt === "Alphard" ? 1 : 0 })}
-                        className={`px-3 py-1.5 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
-                          currentType === vt
-                            ? vt === "Alphard" ? "bg-purple-600 text-white"
-                            : vt === "Car"     ? "bg-zinc-600 text-white"
-                            :                    "bg-blue-600 text-white"
-                            : "bg-white text-zinc-400 hover:text-zinc-700"
-                        }`}
-                      >{vt}</button>
-                    );
-                  })}
-                  <button type="button"
-                    onClick={() => setEditForm((f) => f && { ...f, is15PaxTrip: f.is15PaxTrip === 1 ? 0 : 1 })}
-                    className={`px-3 py-1.5 leading-none transition-colors border-l border-zinc-200 ${
-                      editForm.is15PaxTrip === 1 ? "bg-orange-500 text-white" : "bg-white text-zinc-400 hover:text-zinc-700"
-                    }`}
-                  >15-Pax</button>
-                </div>
+                {(() => {
+                  const sel = editForm.isAlphardTrip === 1 || editForm.vehicleCategory === "Alphard" ? "Alphard"
+                    : editForm.vehicleCategory === "Car" ? "Car"
+                    : editForm.is15PaxTrip === 1 ? "15-Pax"
+                    : "Van";
+                  const opts = [
+                    { label: "Van",     onClick: () => setEditForm((f) => f && { ...f, vehicleCategory: "Van",    isAlphardTrip: 0, is15PaxTrip: 0 }), active: "bg-blue-600 text-white"   },
+                    { label: "Alphard", onClick: () => setEditForm((f) => f && { ...f, vehicleCategory: "Alphard", isAlphardTrip: 1, is15PaxTrip: 0 }), active: "bg-purple-600 text-white" },
+                    { label: "Car",     onClick: () => setEditForm((f) => f && { ...f, vehicleCategory: "Car",    isAlphardTrip: 0, is15PaxTrip: 0 }), active: "bg-zinc-600 text-white"    },
+                    { label: "15-Pax",  onClick: () => setEditForm((f) => f && { ...f, vehicleCategory: "Van",    isAlphardTrip: 0, is15PaxTrip: 1 }), active: "bg-orange-500 text-white"  },
+                  ] as const;
+                  return (
+                    <div className="inline-flex rounded border overflow-hidden text-xs font-semibold border-zinc-200">
+                      {opts.map((opt) => (
+                        <button key={opt.label} type="button" onClick={opt.onClick}
+                          className={`px-3 py-1.5 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${sel === opt.label ? opt.active : "bg-white text-zinc-400 hover:text-zinc-700"}`}
+                        >{opt.label}</button>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="space-y-1">
