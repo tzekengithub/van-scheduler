@@ -17,6 +17,14 @@ const OVERTIME_OPTIONS = Array.from({ length: 21 }, (_, i) =>
 
 type TripType = "one_way_ride" | "round_trip" | "day_trip" | "trip";
 
+interface EditToastInfo {
+  changes: Array<{ field: string; from: string; to: string }>;
+  rescheduled: boolean;
+  vanChanged: boolean;
+  prevVan: string | null;
+  newVan: string | null;
+}
+
 interface BookingRow {
   id: number;
   travelDate: string;
@@ -625,6 +633,23 @@ function generateWhatsAppText(
   return parts.join("\n");
 }
 
+// ── Edit toast helpers ────────────────────────────────────────────────────────
+
+const EDIT_FIELD_LABELS: Record<string, string> = {
+  fromLocation: "From", toLocation: "To", tripType: "Trip Type",
+  vehicleCategory: "Vehicle Type", invoiceNo: "Invoice #", clientDetails: "Client",
+  amount: "Amount", paidStatus: "Paid Status", passengerCount: "Pax",
+  overtime: "Overtime", tourGuide: "Tour Guide", vehiclePlate: "Van Plate",
+  driverName: "Driver", driverContact: "Driver Contact",
+  outsourcedCompany: "Outsourced Co.", details: "Remarks",
+};
+
+function formatEditFieldValue(field: string, val: unknown): string {
+  if (field === "tripType") return tripTypeLabel(val as TripType | null);
+  if (field === "paidStatus") return val === "P" ? "Paid" : val === "U" ? "Unpaid" : String(val ?? "—");
+  return String(val ?? "") || "—";
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function DailyJobsPage() {
@@ -646,6 +671,7 @@ export default function DailyJobsPage() {
   const [whatsappLegs, setWhatsappLegs] = useState<BookingRow[]>([]);
   const [rechecking, setRechecking] = useState(false);
   const [recheckMsg, setRecheckMsg] = useState<string | null>(null);
+  const [editToast, setEditToast] = useState<EditToastInfo | null>(null);
 
   const whatsappBlocks = useMemo(
     () => generateWhatsAppBlocks(whatsappLegs.length ? whatsappLegs : rows, rows),
@@ -696,7 +722,7 @@ export default function DailyJobsPage() {
     } catch { setRecheckMsg("❌ Network error"); }
     finally {
       setRechecking(false);
-      await fetchRows();
+      await fetchRows(true);
     }
   };
 
@@ -710,8 +736,8 @@ export default function DailyJobsPage() {
   }
 
   // ── Data fetching ──────────────────────────────────────────────────────────
-  const fetchRows = useCallback(async () => {
-    setLoading(true);
+  const fetchRows = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetch(
         `/api/bookings?day=${encodeURIComponent(day)}&month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}`
@@ -719,13 +745,22 @@ export default function DailyJobsPage() {
       if (res.ok) {
         const data: BookingRow[] = await res.json();
         setRows(data);
+        return data;
       }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
+    return null;
   }, [day, month, year]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  // Auto-dismiss edit toast
+  useEffect(() => {
+    if (!editToast) return;
+    const t = setTimeout(() => setEditToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [editToast]);
 
 
   // Refresh data and navigate to first inserted date after PDF upload
@@ -768,7 +803,7 @@ export default function DailyJobsPage() {
         setTimeout(() => setCellStates((prev) => {
           const next = { ...prev }; delete next[key]; return next;
         }), 1000);
-        await fetchRows();
+        await fetchRows(true);
       } else if (res.status === 409) {
         const data = await res.json();
         setPatchError(data.error ?? "Double booking conflict — please choose another van.");
@@ -797,7 +832,7 @@ export default function DailyJobsPage() {
         setTimeout(() => setCellStates((prev) => {
           const next = { ...prev }; delete next[key]; return next;
         }), 1000);
-        await fetchRows();
+        await fetchRows(true);
       } else {
         setCellStates((prev) => ({ ...prev, [key]: "error" }));
       }
@@ -816,6 +851,22 @@ export default function DailyJobsPage() {
 
     const from = (edits.fromLocation as string | undefined) ?? row.fromLocation ?? "";
     const to   = (edits.toLocation   as string | undefined) ?? row.toLocation ?? "";
+
+    // Snapshot for toast (before any updates)
+    const prevVanPlate = row.vehiclePlate;
+    const toastChanges = Object.entries(edits)
+      .filter(([field]) => field !== "isAlphardTrip" && field in EDIT_FIELD_LABELS)
+      .map(([field, newVal]) => {
+        const rawOld = field === "clientDetails"
+          ? clientName(row)
+          : (row as unknown as Record<string, unknown>)[field];
+        return {
+          field: EDIT_FIELD_LABELS[field],
+          from: formatEditFieldValue(field, rawOld),
+          to:   formatEditFieldValue(field, newVal),
+        };
+      })
+      .filter(ch => ch.from !== ch.to);
 
     const updates: Record<string, unknown> = { ...edits };
     if ("invoiceNo" in updates) {
@@ -848,6 +899,9 @@ export default function DailyJobsPage() {
       }
     }
 
+    const needsReassign = "fromLocation" in edits || "toLocation" in edits ||
+      "tripType" in edits || "vehicleCategory" in edits || "isAlphardTrip" in edits;
+
     const key = `${row.id}-confirm`;
     setCellStates((prev) => ({ ...prev, [key]: "saving" }));
     try {
@@ -860,9 +914,8 @@ export default function DailyJobsPage() {
         setCellStates((prev) => ({ ...prev, [key]: "saved" }));
         setTimeout(() => setCellStates((prev) => { const n = { ...prev }; delete n[key]; return n; }), 1500);
         setPendingEdits((prev) => { const n = { ...prev }; delete n[row.id]; return n; });
-        await fetchRows();
-        // Trigger reassign after any location or tripType change
-        if ("fromLocation" in edits || "toLocation" in edits || "tripType" in edits || "vehicleCategory" in edits || "isAlphardTrip" in edits) {
+        let newData = await fetchRows(true);
+        if (needsReassign) {
           let siblingIds: number[] = [];
           if (row.invoiceNo) {
             const sibRes = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(row.invoiceNo)}`);
@@ -876,8 +929,17 @@ export default function DailyJobsPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ siblingIds }),
           });
-          await fetchRows();
+          newData = await fetchRows(true);
         }
+        const updatedRow = newData?.find((r) => r.id === row.id);
+        const newVanPlate = updatedRow?.vehiclePlate ?? null;
+        setEditToast({
+          changes: toastChanges,
+          rescheduled: needsReassign,
+          vanChanged: prevVanPlate !== newVanPlate,
+          prevVan: prevVanPlate,
+          newVan: newVanPlate,
+        });
       } else if (res.status === 409) {
         const data = await res.json();
         setPatchError(data.error ?? "Double booking conflict.");
@@ -1140,7 +1202,7 @@ export default function DailyJobsPage() {
                         }, "inHouseOrOutsourced");
                         const res = await fetch(`/api/bookings/${row.id}/reassign`, { method: "POST" });
                         if (res.ok) {
-                          await fetchRows();
+                          await fetchRows(true);
                         }
                       }
                     };
@@ -1561,6 +1623,39 @@ export default function DailyJobsPage() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit saved toast */}
+        {editToast && (
+          <div className="fixed bottom-6 right-6 z-50 bg-white border border-zinc-200 rounded-2xl shadow-2xl p-4 no-print" style={{ maxWidth: 340, width: "calc(100% - 48px)" }}>
+            <div className="flex justify-between items-start mb-2">
+              <span className="font-bold text-green-600 text-sm">✓ Edit Saved</span>
+              <button onClick={() => setEditToast(null)} className="text-zinc-400 hover:text-zinc-600 text-xl leading-none ml-2">×</button>
+            </div>
+            {editToast.changes.length > 0 && (
+              <div className="space-y-1 text-xs mb-3">
+                {editToast.changes.map((ch, i) => (
+                  <div key={i} className="flex flex-wrap gap-x-1 items-baseline">
+                    <span className="text-zinc-500 font-medium shrink-0">{ch.field}:</span>
+                    <span className="text-zinc-400 line-through shrink-0">{ch.from}</span>
+                    <span className="text-zinc-400 shrink-0">→</span>
+                    <span className="text-zinc-800 font-semibold">{ch.to}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="pt-2 border-t border-zinc-100 text-xs">
+              {editToast.rescheduled ? (
+                editToast.vanChanged ? (
+                  <span className="text-blue-600 font-medium">🔄 Reassigned: {editToast.prevVan ?? "no van"} → {editToast.newVan ?? "no van"}</span>
+                ) : (
+                  <span className="text-zinc-500">🔄 Reassigned — kept {editToast.newVan ?? "same van"}</span>
+                )
+              ) : (
+                <span className="text-zinc-400">No reassignment triggered</span>
+              )}
             </div>
           </div>
         )}
