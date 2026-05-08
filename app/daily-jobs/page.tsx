@@ -862,7 +862,7 @@ export default function DailyJobsPage() {
         setPendingEdits((prev) => { const n = { ...prev }; delete n[row.id]; return n; });
         await fetchRows();
         // Trigger reassign after any location or tripType change
-        if ("fromLocation" in edits || "toLocation" in edits || "tripType" in edits) {
+        if ("fromLocation" in edits || "toLocation" in edits || "tripType" in edits || "vehicleCategory" in edits || "isAlphardTrip" in edits) {
           let siblingIds: number[] = [];
           if (row.invoiceNo) {
             const sibRes = await fetch(`/api/bookings?invoiceNo=${encodeURIComponent(row.invoiceNo)}`);
@@ -1056,39 +1056,29 @@ export default function DailyJobsPage() {
                     {(() => {
                       const vehicleTypes = ["Van", "Alphard", "Car"] as const;
                       type VehicleType = typeof vehicleTypes[number];
+                      const pendingCat = pendingEdits[row.id]?.vehicleCategory as string | undefined;
+                      const pendingAlph = pendingEdits[row.id]?.isAlphardTrip as number | undefined;
+                      const effectiveCat = pendingCat ?? row.vehicleCategory;
+                      const effectiveAlph = pendingAlph ?? row.isAlphardTrip;
                       const currentType: VehicleType =
-                        row.isAlphardTrip === 1 || row.vehicleCategory === "Alphard" ? "Alphard" :
-                        row.vehicleCategory === "Car" ? "Car" : "Van";
-                      const saving = cellStates[`${row.id}-vehicleCategory`] === "saving";
-                      const saved = cellStates[`${row.id}-vehicleCategory`] === "saved";
+                        effectiveAlph === 1 || effectiveCat === "Alphard" ? "Alphard" :
+                        effectiveCat === "Car" ? "Car" : "Van";
+                      const isDirtyType = pendingCat !== undefined && pendingCat !== (row.vehicleCategory ?? "Van");
                       return (
-                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold ${saving ? "opacity-50 pointer-events-none" : ""} ${saved ? "border-green-400" : "border-zinc-200"}`}>
+                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold ${isDirtyType ? "border-amber-400" : "border-zinc-200"}`}>
                           {vehicleTypes.map((vt) => (
                             <button
                               key={vt}
                               type="button"
-                              onClick={async () => {
+                              onClick={() => {
                                 if (currentType === vt) return;
-                                const key = `${row.id}-vehicleCategory`;
-                                setCellStates((prev) => ({ ...prev, [key]: "saving" }));
-                                const res = await fetch(`/api/bookings/${row.id}`, {
-                                  method: "PATCH",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ vehicleCategory: vt, isAlphardTrip: vt === "Alphard" ? 1 : 0 }),
-                                });
-                                if (res.ok) {
-                                  setCellStates((prev) => ({ ...prev, [key]: "saved" }));
-                                  setTimeout(() => setCellStates((prev) => { const n = { ...prev }; delete n[key]; return n; }), 1000);
-                                  await fetch(`/api/bookings/${row.id}/reassign`, { method: "POST" });
-                                  await fetchRows();
-                                } else {
-                                  setCellStates((prev) => ({ ...prev, [key]: "error" }));
-                                }
+                                setPending(row.id, "vehicleCategory", vt);
+                                setPending(row.id, "isAlphardTrip", vt === "Alphard" ? 1 : 0);
                               }}
                               className={`px-2 py-1 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
                                 currentType === vt
                                   ? vt === "Alphard" ? "bg-purple-600 text-white" : vt === "Car" ? "bg-zinc-600 text-white" : "bg-blue-600 text-white"
-                                  : "bg-white text-zinc-400 hover:text-zinc-700"
+                                  : isDirtyType ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
                               }`}
                             >{vt}</button>
                           ))}
