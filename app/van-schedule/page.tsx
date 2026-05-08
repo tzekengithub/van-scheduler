@@ -1011,22 +1011,12 @@ export default function VanSchedulePage() {
                       >{vt}</button>
                     );
                   })}
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-zinc-500 font-medium">15-Pax Requirement</label>
-                <div className="inline-flex rounded border overflow-hidden text-xs font-semibold border-zinc-200">
-                  {([0, 1] as const).map((val) => (
-                    <button key={val} type="button"
-                      onClick={() => setEditForm((f) => f && { ...f, is15PaxTrip: val })}
-                      className={`px-3 py-1.5 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
-                        editForm.is15PaxTrip === val
-                          ? val === 1 ? "bg-orange-500 text-white" : "bg-white text-zinc-600"
-                          : "bg-white text-zinc-400 hover:text-zinc-700"
-                      }`}
-                    >{val === 1 ? "15-Pax" : "Standard"}</button>
-                  ))}
+                  <button type="button"
+                    onClick={() => setEditForm((f) => f && { ...f, is15PaxTrip: f.is15PaxTrip === 1 ? 0 : 1 })}
+                    className={`px-3 py-1.5 leading-none transition-colors border-l border-zinc-200 ${
+                      editForm.is15PaxTrip === 1 ? "bg-orange-500 text-white" : "bg-white text-zinc-400 hover:text-zinc-700"
+                    }`}
+                  >15-Pax</button>
                 </div>
               </div>
 

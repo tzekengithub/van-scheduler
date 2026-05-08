@@ -1123,14 +1123,18 @@ export default function DailyJobsPage() {
                       type VehicleType = typeof vehicleTypes[number];
                       const pendingCat = pendingEdits[row.id]?.vehicleCategory as string | undefined;
                       const pendingAlph = pendingEdits[row.id]?.isAlphardTrip as number | undefined;
+                      const pending15 = pendingEdits[row.id]?.is15PaxTrip as number | undefined;
                       const effectiveCat = pendingCat ?? row.vehicleCategory;
                       const effectiveAlph = pendingAlph ?? row.isAlphardTrip;
+                      const effective15 = pending15 !== undefined ? pending15 : (row.is15PaxTrip ?? 0);
                       const currentType: VehicleType =
                         effectiveAlph === 1 || effectiveCat === "Alphard" ? "Alphard" :
                         effectiveCat === "Car" ? "Car" : "Van";
                       const isDirtyType = pendingCat !== undefined && pendingCat !== (row.vehicleCategory ?? "Van");
+                      const isDirty15 = pending15 !== undefined && pending15 !== (row.is15PaxTrip ?? 0);
+                      const combinedDirty = isDirtyType || isDirty15;
                       return (
-                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold ${isDirtyType ? "border-amber-400" : "border-zinc-200"}`}>
+                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold ${combinedDirty ? "border-amber-400" : "border-zinc-200"}`}>
                           {vehicleTypes.map((vt) => (
                             <button
                               key={vt}
@@ -1143,33 +1147,20 @@ export default function DailyJobsPage() {
                               className={`px-2 py-1 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
                                 currentType === vt
                                   ? vt === "Alphard" ? "bg-purple-600 text-white" : vt === "Car" ? "bg-zinc-600 text-white" : "bg-blue-600 text-white"
-                                  : isDirtyType ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
+                                  : combinedDirty ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
                               }`}
                             >{vt}</button>
                           ))}
+                          <button type="button"
+                            onClick={() => setPending(row.id, "is15PaxTrip", effective15 === 1 ? 0 : 1)}
+                            className={`px-2 py-1 leading-none transition-colors border-l border-zinc-200 ${
+                              effective15 === 1 ? "bg-orange-500 text-white" : combinedDirty ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
+                            }`}
+                          >15-Pax</button>
                         </div>
                       );
                     })()}
                     <span className="text-zinc-500 text-[10px]">{tripTypeLabel(row.tripType)}</span>
-                    {(() => {
-                      const pending15 = pendingEdits[row.id]?.is15PaxTrip as number | undefined;
-                      const effective15 = pending15 !== undefined ? pending15 : (row.is15PaxTrip ?? 0);
-                      const isDirty15 = pending15 !== undefined && pending15 !== (row.is15PaxTrip ?? 0);
-                      return (
-                        <div className={`inline-flex rounded border overflow-hidden text-[10px] font-semibold mt-0.5 ${isDirty15 ? "border-amber-400" : "border-zinc-200"}`}>
-                          {([0, 1] as const).map((val) => (
-                            <button key={val} type="button"
-                              onClick={() => { if (effective15 !== val) setPending(row.id, "is15PaxTrip", val); }}
-                              className={`px-2 py-1 leading-none transition-colors border-l border-zinc-200 first:border-l-0 ${
-                                effective15 === val
-                                  ? val === 1 ? "bg-orange-500 text-white" : "bg-white text-zinc-500"
-                                  : isDirty15 ? "bg-amber-50 text-zinc-400 hover:text-zinc-700" : "bg-white text-zinc-400 hover:text-zinc-700"
-                              }`}
-                            >{val === 1 ? "15-Pax" : "Std"}</button>
-                          ))}
-                        </div>
-                      );
-                    })()}
                   </div>
                 </td>
                 {/* Van Plate */}
